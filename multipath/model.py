@@ -116,6 +116,7 @@ class MultipathReasonCode:
     DUPLICATE_PATH = "duplicate-path"
     UNKNOWN_PATH = "unknown-path"
     ILLEGAL_STATUS_TRANSITION = "illegal-status-transition"
+    PLAN_AUTHORITY_REQUIRED = "plan-authority-required"
 
     @classmethod
     def values(cls) -> Tuple[str, ...]:
@@ -127,6 +128,7 @@ class MultipathReasonCode:
             cls.DUPLICATE_PATH,
             cls.UNKNOWN_PATH,
             cls.ILLEGAL_STATUS_TRANSITION,
+            cls.PLAN_AUTHORITY_REQUIRED,
         )
 
 

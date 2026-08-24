@@ -736,7 +736,7 @@ python3 tools/multipath_selftest.py
 | `17-replay-idempotent` | exact duplicates idempotent via multipath AND generic append paths |
 | `18-replay-conflict-gap` | conflicting reuse + sequence gaps fail closed, no mutation |
 | `19-forged-path-added-replay` | forged refs rejected (no decision → `reconnect-validation-required`; mismatch → `event-binding-mismatch`); faithful replay validated + applied |
-| `20-manufactured-events-generic-path` | generic append rejects plan events (`illegal-transition`); the public plan-event append API is REMOVED (capability-guarded private seam); capability-less/wrong-capability calls fail closed; the legitimate authority path works |
+| `20-manufactured-events-generic-path` | generic append rejects plan events (`illegal-transition`); no public/registration plan-append API exists on the generic substrate; the multipath commit path fails closed without a constructed authority; the legitimate authority path works |
 | `21-no-authority-mutation` | resources/topology/policy/lifecycle/authoritative-route byte-identical across all ops |
 | `22-no-engine-invocation` | AST scan: no engine/topology/resource identifiers or imports in multipath/ |
 | `23-no-clock-random-network` | AST scan: no wall-clock/random/uuid/network |
@@ -755,5 +755,5 @@ python3 tools/multipath_selftest.py
 | `36-fuzz-never-crashes` | 60 seeded fuzz trials: only fail-closed envelopes, never crashes |
 | `37-interleaved-lifecycle-and-plan-ops` | one contiguous sequence; fold correct across interleaving (invariant 11) |
 | `38-plan-derivation-pure` | pure fold; empty plan deterministic; unknown session → None |
-| `39-arbitrary-plan-events-rejected` | REGRESSION (PR #13 blocker): all 5 plan-event types × 4 append paths (generic / no capability / wrong capability / None) fail closed with no mutation; single semantic authority enforced (second MultipathStore rejected; same-authority re-registration idempotent) |
-| `40-authority-registration-gate` | REGRESSION (PR #13 correction 2): arbitrary objects / strings / functions / stores / forged same-named classes / subclasses all rejected at registration with no capability issued; claim-first fails with the seam closed; the legitimate handshake then succeeds; a second authority cannot take over |
+| `39-arbitrary-plan-events-rejected` | REGRESSION (PR #13 correction 1): all 5 plan-event types × (generic append + no-authority commit path) fail closed with no mutation |
+| `40-authority-registration-gate` | REGRESSION (PR #13 correction 3): sessions/ has NO multipath dependency (AST layering proof); no registration/authority API exists on the substrate; no capability attribute on MultipathStore instances (`vars()` carries none); the claim-first attack has no callable surface and the commit path fails closed without authority; the legitimate handshake works; a second authority is rejected by the multipath layer |

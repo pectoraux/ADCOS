@@ -71,20 +71,6 @@ RECONNECT_EVENT_TYPE = "reconnected"
 _WRAPPED_AS_INVALID_INPUT = frozenset({"invalid-input", "invalid-node"})
 
 
-class _PlanCapability:
-    """Opaque capability issued by :class:`SessionStore` to its single
-    registered semantic plan authority (the WORK-013 ``MultipathStore``).
-
-    Identity is verified with ``is``: only the store creates instances,
-    only :meth:`SessionStore._register_plan_authority` hands one out,
-    and exactly one authority may own a store's plan-event seam. This
-    makes the internal append primitive mechanically unusable by
-    arbitrary callers (Architect review of PR #13: a public
-    "pre-validated" append is an authority bypass)."""
-
-    __slots__ = ()
-
-
 def _envelope_error(error: SessionError) -> SessionResult:
     """Map a SessionError raised during a store operation to the
     deterministic failure envelope (specific reason codes pass
@@ -104,11 +90,6 @@ class SessionStore:
         self._sessions: Dict[str, Session] = {}
         self._events: Dict[str, List[SessionEvent]] = {}
         self._lock = threading.RLock()
-        # The single registered semantic plan authority (WORK-013) and
-        # the opaque capability it holds. None until a MultipathStore
-        # registers itself.
-        self._plan_authority: object = None
-        self._plan_capability: Optional[_PlanCapability] = None
 
     # -- queries --------------------------------------------------------
 
@@ -821,88 +802,26 @@ class SessionStore:
 
     # -- state-preserving plan events (WORK-013 extension point) -------------
 
-    # -- plan-authority seam (WORK-013; capability-guarded) --------------
+    # -- extension-event seam (generic internal substrate) ----------------
 
-    def _register_plan_authority(self, authority: object) -> "_PlanCapability":
-        """Register THE semantic plan authority for this store -- the
-        CONSTRUCTOR-TIME HANDSHAKE of the ``MultipathStore``
-        constructor.
-
-        MECHANICAL OWNERSHIP PROOF (Architect review of PR #13,
-        correction cycle 2): the caller must BE the actual multipath
-        implementation -- verified as an EXACT instance of the genuine
-        ``multipath.MultipathStore`` class (resolved from the real
-        package via a deferred import, so class identity is checked
-        against the authentic class object, never a name convention).
-        Arbitrary objects, forged same-named classes, functions, and
-        even SUBCLASSES of the implementation are rejected: capability
-        issuance cannot be claimed first by anyone who is not the
-        multipath implementation itself, so the sole-authority
-        invariant holds at the issuance path, not merely at the append
-        primitive.
-
-        Exactly one authority may own a store's plan-event seam: the
-        first registration issues the opaque capability; re-registration
-        by the SAME authority is idempotent (returns the same
-        capability); a DIFFERENT authority is rejected. The capability
-        is required (and verified by identity) by
-        :meth:`_append_state_preserving_event` -- the internal commit
-        primitive is therefore not usable by arbitrary callers."""
-        # Deferred import: multipath imports this module at load time,
-        # so the import must happen at call time (no module cycle). The
-        # class object identity check below is the ownership proof.
-        from multipath.store import MultipathStore as _MultipathStore
-
-        if type(authority) is not _MultipathStore:
-            raise SessionError(
-                "plan-authority",
-                "the semantic plan authority must be the actual multipath "
-                "implementation (an exact multipath.MultipathStore "
-                "instance); arbitrary objects, forged classes, and "
-                "subclasses cannot claim the authority -- capability "
-                "issuance is a constructor-time handshake, not a "
-                "callable convention (Architect review of PR #13, "
-                "correction cycle 2)",
-            )
-        with self._lock:
-            if self._plan_authority is None:
-                self._plan_authority = authority
-                capability = _PlanCapability()
-                self._plan_capability = capability
-                return capability
-            if self._plan_authority is not authority:
-                raise SessionError(
-                    "plan-authority",
-                    "this session store already has a registered semantic "
-                    "plan authority; exactly one authority may own the "
-                    "plan-event seam",
-                )
-            existing: _PlanCapability = self._plan_capability  # type: ignore[assignment]
-            return existing
-
-    def _append_state_preserving_event(
-        self, capability: object, event: SessionEvent
-    ) -> SessionResult:
+    def _append_state_preserving_event(self, event: SessionEvent) -> SessionResult:
         """Atomically append a PRE-VALIDATED state-preserving event (the
-        internal WORK-013 plan-event seam).
+        GENERIC internal substrate primitive for extension events).
 
-        ARCHITECTURAL AUTHORITY BOUNDARY (Architect review of PR #13):
-        this primitive is PRIVATE and CAPABILITY-GUARDED. It performs
-        only the atomic session commit; the event's plan SEMANTICS
-        (admission binding verification, plan-state legality) are
-        validated by the SOLE registered semantic authority -- the
-        ``MultipathStore`` -- before it calls here with the capability
-        issued at registration. There is deliberately NO public
-        equivalent: an arbitrary caller cannot mutate session history
-        with a manufactured plan event through any public API, and the
-        generic :meth:`append_event` additionally rejects
-        state-preserving events as ``illegal-transition``.
+        ARCHITECTURE (Architect review of PR #13, correction cycle 3 --
+        layering): WORK-012 provides a GENERIC lifecycle/session
+        substrate. This primitive is deliberately extension-agnostic:
+        it knows NOTHING about any extension (no imports, no
+        registration, no capability issuance, no extension types); it
+        performs ONLY the generic atomic session commit. The SEMANTIC
+        validation of extension events belongs entirely to the owning
+        extension layer, which validates and then invokes this internal
+        primitive. Extensions depend on
+        WORK-012; WORK-012 never depends on any extension.
 
-        Enforced here (defense in depth beyond the capability gate):
+        Enforced here (generic session-layer invariants):
 
-        - ``capability`` IS the capability issued to the registered
-          authority (``plan-authority-required`` otherwise);
-        - the session exists (``unknown-session``);
+        - the event is a :class:`SessionEvent` and its session exists;
         - an exact duplicate of ANY already-accepted event (content-
           derived ``event_id`` match) is idempotent (``replayed``, no
           mutation);
@@ -910,26 +829,13 @@ class SessionStore:
           ``sequence-gap`` otherwise);
         - the session is not terminal (``terminal-state``);
         - the event is state-preserving against the CURRENT session
-          state (``event-state-mismatch``);
-        - the event's ``session_id`` matches the addressed session.
+          state (``event-state-mismatch``) -- extension events never
+          change the lifecycle state or the authoritative route.
 
         On success the event and the updated session head (sequence +
         instant; state and current route unchanged) become visible
         together."""
         with self._lock:
-            if (
-                self._plan_capability is None
-                or not isinstance(capability, _PlanCapability)
-                or capability is not self._plan_capability
-            ):
-                return SessionResult(
-                    ok=False,
-                    code=SessionReasonCode.PLAN_AUTHORITY_REQUIRED,
-                    detail="plan events can only be appended by the "
-                    "registered semantic plan authority (MultipathStore) "
-                    "after full admission validation -- the capability-"
-                    "guarded internal seam rejected this call",
-                )
             if not isinstance(event, SessionEvent):
                 return SessionResult(
                     ok=False,

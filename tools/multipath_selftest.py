@@ -868,25 +868,37 @@ def case_20_manufactured_events_generic_path(results: List[Result]) -> None:
         problems.append("generic append mutated the store")
     if ms.get_plan(sid).entries:
         problems.append("manufactured path entered the plan")
-    # The public plan-event append API no longer EXISTS on the store.
+    # The public plan-event append API no longer EXISTS on the store,
+    # and the session substrate has NO registration/authority API at
+    # all (it is fully generic and knows nothing about extensions).
     if hasattr(ss, "append_plan_event"):
         problems.append("public append_plan_event still exists on SessionStore")
-    # Calling the private seam WITHOUT a capability fails closed.
-    try:
-        r2 = ss._append_state_preserving_event(manufactured)
-        if r2.ok:
-            problems.append("capability-less private call succeeded")
-    except TypeError:
-        pass  # missing required capability argument -- correct
-    # Calling it with a WRONG capability fails closed with the specific
-    # reason and no mutation.
-    class _WrongCapability:
-        pass
-    r3 = ss._append_state_preserving_event(_WrongCapability(), manufactured)
-    if r3.ok or r3.code != SessionReasonCode.PLAN_AUTHORITY_REQUIRED:
-        problems.append("wrong capability: %s/%s" % (r3.ok, r3.code))
-    if ss.to_canonical_bytes() != before:
-        problems.append("capability rejections mutated the store")
+    if hasattr(ss, "_register_plan_authority"):
+        problems.append("registration API still exists on SessionStore")
+    # The multipath commit path (module-private) fails closed when no
+    # authority has been constructed for the store (a dedicated store
+    # WITHOUT a MultipathStore).
+    import multipath.store as _mp_store
+    r_bare = _route((_AB,), instant="2026-06-01T12:30:00Z")
+    ss_bare = SessionStore()
+    res_bare = ss_bare.create(r_bare, _policy_decision(), source_node_id=_NODE_A,
+                              destination_node_id=_NODE_B, creation_instant=_NOW)
+    sid_bare = res_bare.session.session_id
+    ss_bare.transition(sid_bare, SessionState.AUTHORIZED, event_instant=_NOW)
+    ss_bare.transition(sid_bare, SessionState.ESTABLISHED, event_instant=_NOW)
+    manufactured_bare = SessionEvent(
+        event_id="", session_id=sid_bare,
+        sequence=ss_bare.get(sid_bare).last_event_sequence + 1,
+        previous_state=SessionState.ESTABLISHED, new_state=SessionState.ESTABLISHED,
+        event_type=MP_EVENT_PATH_ADDED, event_instant=_NOW,
+        metadata=((META_PATH_ID, "sha256:" + "e" * 64),),
+    )
+    before_bare = ss_bare.to_canonical_bytes()
+    r2 = _mp_store._commit_plan_event(ss_bare, manufactured_bare)
+    if r2.ok or r2.code != MultipathReasonCode.PLAN_AUTHORITY_REQUIRED:
+        problems.append("no-authority commit: %s/%s" % (r2.ok, r2.code))
+    if ss_bare.to_canonical_bytes() != before_bare:
+        problems.append("no-authority commit mutated the store")
     # The LEGITIMATE authority path still works (validated add).
     r4 = ms.add_path(sid, r1, event_instant=_NOW)
     if not (r4.ok and r4.plan.get(r1.selected.path_id)):
@@ -894,7 +906,7 @@ def case_20_manufactured_events_generic_path(results: List[Result]) -> None:
     if problems:
         results.append(fail("case_20_manufactured_events_generic_path", "; ".join(problems)))
     else:
-        results.append(ok("case_20_manufactured_events_generic_path", "generic path rejects plan events; public append API removed; capability-less/wrong-capability calls fail closed; legitimate authority path works"))
+        results.append(ok("case_20_manufactured_events_generic_path", "generic path rejects plan events; no public/registration API; no-authority commit fails closed; legitimate authority path works"))
 
 
 # --------------------------------------------------------------------------
@@ -1345,7 +1357,7 @@ def case_33_multipath_vocabulary(results: List[Result]) -> None:
     expected = {
         "path-added", "path-removed", "path-status-changed",
         "plan-state-illegal", "duplicate-path", "unknown-path",
-        "illegal-status-transition",
+        "illegal-status-transition", "plan-authority-required",
     }
     actual = set(MultipathReasonCode.values())
     problems = []
@@ -1361,7 +1373,7 @@ def case_33_multipath_vocabulary(results: List[Result]) -> None:
                    "unknown-session", "terminal-state", "invalid-input",
                    "replayed", "event-appended", "sequence-conflict",
                    "sequence-gap", "event-binding-mismatch",
-                   "reconnect-validation-required", "plan-authority-required"):
+                   "reconnect-validation-required"):
         if shared not in session_codes:
             problems.append("shared code %r missing from session vocabulary" % shared)
     if actual & session_codes:
@@ -1549,11 +1561,14 @@ def case_39_arbitrary_plan_events_rejected(results: List[Result]) -> None:
         MP_EVENT_PATH_FAILED: ((META_PATH_ID, "sha256:" + "e" * 64),),
         MP_EVENT_PATH_REACTIVATED: ((META_PATH_ID, "sha256:" + "e" * 64),),
     }
+    import multipath.store as _mp_store
     problems = []
     checked = 0
     for event_type in event_types:
         r_direct = _route((_AB,), instant="2026-06-01T12:00:%02dZ"
                           % (10 + event_types.index(event_type)))
+        # A session store WITH a multipath authority (for the generic
+        # path) and one WITHOUT any authority (for the commit path).
         ss, ms, sid = _session(route=r_direct)
         before = ss.to_canonical_bytes()
         session = ss.get(sid)
@@ -1570,50 +1585,39 @@ def case_39_arbitrary_plan_events_rejected(results: List[Result]) -> None:
         checked += 1
         if ra.ok or ra.code != SessionReasonCode.ILLEGAL_TRANSITION:
             problems.append("%s generic: %s/%s" % (event_type, ra.ok, ra.code))
-        # (b) private seam, no capability -> rejected.
-        try:
-            rb = ss._append_state_preserving_event(forged)
-            checked += 1
-            if rb.ok:
-                problems.append("%s no-capability: accepted" % event_type)
-        except TypeError:
-            checked += 1  # missing capability argument -- correct
-        # (c) private seam, wrong capability -> plan-authority-required.
-        rc = ss._append_state_preserving_event(object(), forged)
+        # (b) the multipath commit path with NO constructed authority
+        #     for the store -> plan-authority-required, no mutation.
+        ss_none = SessionStore()
+        res_none = ss_none.create(r_direct, _policy_decision(),
+                                  source_node_id=_NODE_A,
+                                  destination_node_id=_NODE_B,
+                                  creation_instant=_NOW)
+        sid_none = res_none.session.session_id
+        ss_none.transition(sid_none, SessionState.AUTHORIZED, event_instant=_NOW)
+        ss_none.transition(sid_none, SessionState.ESTABLISHED, event_instant=_NOW)
+        forged_none = SessionEvent(
+            event_id="", session_id=sid_none, sequence=4,
+            previous_state=SessionState.ESTABLISHED,
+            new_state=SessionState.ESTABLISHED,
+            event_type=event_type, event_instant=_NOW,
+            metadata=attacker_metadata[event_type],
+        )
+        before_none = ss_none.to_canonical_bytes()
+        rb = _mp_store._commit_plan_event(ss_none, forged_none)
         checked += 1
-        if rc.ok or rc.code != SessionReasonCode.PLAN_AUTHORITY_REQUIRED:
-            problems.append("%s wrong-capability: %s/%s"
-                            % (event_type, rc.ok, rc.code))
-        # (d) private seam, None capability -> plan-authority-required.
-        rd = ss._append_state_preserving_event(None, forged)
-        checked += 1
-        if rd.ok or rd.code != SessionReasonCode.PLAN_AUTHORITY_REQUIRED:
-            problems.append("%s None-capability: %s/%s"
-                            % (event_type, rd.ok, rd.code))
+        if rb.ok or rb.code != MultipathReasonCode.PLAN_AUTHORITY_REQUIRED:
+            problems.append("%s no-authority commit: %s/%s"
+                            % (event_type, rb.ok, rb.code))
+        if ss_none.to_canonical_bytes() != before_none:
+            problems.append("%s no-authority commit mutated the store" % event_type)
         if ss.to_canonical_bytes() != before:
-            problems.append("%s mutated the store" % event_type)
+            problems.append("%s generic path mutated the store" % event_type)
         if ms.get_plan(sid).entries:
             problems.append("%s entered the plan" % event_type)
-    # Single semantic authority: a second MultipathStore over the same
-    # SessionStore is rejected at registration.
-    ss2, ms2, sid2 = _session()
-    try:
-        MultipathStore(ss2)
-        problems.append("second authority registration accepted")
-    except Exception:
-        pass
-    # The SAME authority re-registering is idempotent (returns the
-    # same capability).
-    try:
-        cap_again = ss2._register_plan_authority(ms2)
-        if cap_again is not ms2._capability:
-            problems.append("same-authority re-registration issued a different capability")
-    except Exception as error:
-        problems.append("same-authority re-registration failed: %s" % error)
     if problems:
         results.append(fail("case_39_arbitrary_plan_events_rejected", "; ".join(problems[:5])))
     else:
-        results.append(ok("case_39_arbitrary_plan_events_rejected", "all 5 event types x 4 append paths (%d probes) fail closed; single semantic authority enforced" % checked))
+        results.append(ok("case_39_arbitrary_plan_events_rejected", "all 5 event types x (generic + no-authority commit) paths (%d probes) fail closed, no mutation" % checked))
 
 
 # --------------------------------------------------------------------------
@@ -1635,58 +1639,43 @@ def case_39_arbitrary_plan_events_rejected(results: List[Result]) -> None:
 # --------------------------------------------------------------------------
 
 def case_40_authority_registration_gate(results: List[Result]) -> None:
-    """REGRESSION (PR #13 correction 2): the four required properties
-    of the issuance gate -- arbitrary objects cannot register; arbitrary
-    callers cannot obtain a valid capability; a second MultipathStore
-    cannot take over; legitimate registration succeeds."""
+    """REGRESSION (PR #13 correction 3 -- layering + authority
+    ownership): the session substrate is fully GENERIC (no multipath
+    import, no registration/authority API), the plan capability is
+    owned by the multipath layer (module-private registry; never
+    exposed as an instance attribute), the claim-first attack has no
+    callable surface, a second MultipathStore cannot take over, and
+    the legitimate constructor handshake works."""
+    import multipath.store as _mp_store
     problems = []
 
-    def rejects(candidate: object, label: str) -> None:
-        store = SessionStore()
-        try:
-            store._register_plan_authority(candidate)
-            problems.append("%s registered as authority" % label)
-        except Exception as error:
-            if not (isinstance(error, Exception) and getattr(error, "code", "") == "plan-authority"):
-                problems.append("%s rejected with wrong error: %r" % (label, error))
-            # No capability may have been issued by the rejected call.
-            if store._plan_capability is not None:
-                problems.append("%s rejection still issued a capability" % label)
+    # (1) LAYERING: sessions/ contains no multipath import or
+    #     identifier at all (AST proof over every module).
+    for path in sorted((REPO_ROOT / "sessions").glob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom):
+                if (node.module or "").split(".")[0] == "multipath":
+                    problems.append("%s imports %s" % (path.name, node.module))
+            elif isinstance(node, ast.Import):
+                for alias in node.names:
+                    if alias.name.split(".")[0] == "multipath":
+                        problems.append("%s imports %s" % (path.name, alias.name))
+            elif isinstance(node, ast.Name):
+                if node.id in ("MultipathStore", "MultipathPlan", "MultipathStore"):
+                    problems.append("%s references %r" % (path.name, node.id))
 
-    # (1) Arbitrary objects cannot register (and issue nothing).
-    rejects(object(), "plain object")
-    rejects("a string", "string")
-    rejects(lambda: None, "function")
-    rejects(SessionStore(), "a SessionStore")
-    # (2) Forged same-named class: type identity is checked against the
-    #     genuine class object, not the name.
-    Fake = type("MultipathStore", (), {})
-    rejects(Fake(), "forged same-named class")
-    # (3) Subclasses of the implementation are rejected too (a subclass
-    #     could override the validated operations).
-    class _Evil(MultipathStore):
-        pass
-
-    try:
-        _Evil(SessionStore())
-        problems.append("subclass registered as authority")
-    except Exception as error:
-        if getattr(error, "code", "") != "plan-authority":
-            problems.append("subclass rejected with wrong error: %r" % error)
-
-    # (4) "Cannot claim the authority FIRST": a failed arbitrary
-    #     registration leaves the store unowned, the capability
-    #     unobtainable, and the seam closed -- then the LEGITIMATE
-    #     handshake still succeeds.
+    # (2) The session substrate has NO registration/authority API and
+    #     no public plan-append API (nothing to claim first WITH).
     ss = SessionStore()
-    try:
-        ss._register_plan_authority(object())
-        problems.append("arbitrary object claimed authority first")
-    except Exception:
-        pass
-    if ss._plan_capability is not None:
-        problems.append("rejected first-claim still issued a capability")
-    # The seam is closed without a registered authority.
+    for absent in ("append_plan_event", "_register_plan_authority",
+                   "register_plan_authority", "_register_extension"):
+        if hasattr(ss, absent):
+            problems.append("SessionStore still exposes %r" % absent)
+
+    # (3) The capability is not obtainable from an instance: no
+    #     _capability attribute exists, and vars() carries no
+    #     capability-like entry at all.
     r_direct = _route((_AB,))
     policy = _policy_decision()
     res = ss.create(r_direct, policy, source_node_id=_NODE_A,
@@ -1694,22 +1683,44 @@ def case_40_authority_registration_gate(results: List[Result]) -> None:
     sid = res.session.session_id
     ss.transition(sid, SessionState.AUTHORIZED, event_instant=_NOW)
     ss.transition(sid, SessionState.ESTABLISHED, event_instant=_NOW)
+    ms = MultipathStore(ss)
+    if hasattr(ms, "_capability"):
+        problems.append("MultipathStore exposes _capability")
+    for key in vars(ms):
+        if "capab" in key.lower() or "token" in key.lower():
+            problems.append("MultipathStore exposes %r" % key)
+
+    # (4) Claim-first: the module-private registry has no entry until
+    #     the genuine constructor runs, and the commit path fails
+    #     closed without it.
+    ss2 = SessionStore()
+    res2 = ss2.create(r_direct, policy, source_node_id=_NODE_A,
+                      destination_node_id=_NODE_B, creation_instant=_NOW)
+    sid2 = res2.session.session_id
+    ss2.transition(sid2, SessionState.AUTHORIZED, event_instant=_NOW)
+    ss2.transition(sid2, SessionState.ESTABLISHED, event_instant=_NOW)
+    if _mp_store._COMMIT_TOKENS.get(ss2) is not None:
+        problems.append("registry entry before construction")
     forged = SessionEvent(
-        event_id="", session_id=sid, sequence=4,
-        previous_state=SessionState.ESTABLISHED, new_state=SessionState.ESTABLISHED,
+        event_id="", session_id=sid2, sequence=4,
+        previous_state=SessionState.ESTABLISHED,
+        new_state=SessionState.ESTABLISHED,
         event_type=MP_EVENT_PATH_ADDED, event_instant=_NOW,
         metadata=((META_PATH_ID, "sha256:" + "e" * 64),),
     )
-    r_seam = ss._append_state_preserving_event(object(), forged)
-    if r_seam.ok or r_seam.code != SessionReasonCode.PLAN_AUTHORITY_REQUIRED:
-        problems.append("seam open without authority: %s/%s" % (r_seam.ok, r_seam.code))
+    r_seam = _mp_store._commit_plan_event(ss2, forged)
+    if r_seam.ok or r_seam.code != MultipathReasonCode.PLAN_AUTHORITY_REQUIRED:
+        problems.append("commit path open without authority: %s/%s"
+                        % (r_seam.ok, r_seam.code))
     # The legitimate handshake then succeeds and works end-to-end.
-    ms = MultipathStore(ss)
+    ms2 = MultipathStore(ss2)
     route_alt = _route((_AC, _CB), reach=(_NODE_C,), instant="2026-06-01T12:00:01Z")
-    r_add = ms.add_path(sid, route_alt, event_instant=_NOW)
+    r_add = ms2.add_path(sid2, route_alt, event_instant=_NOW)
     if not (r_add.ok and r_add.plan.get(route_alt.selected.path_id)):
         problems.append("legitimate handshake broken: %s/%s" % (r_add.ok, r_add.code))
-    # (5) A second MultipathStore cannot take over.
+
+    # (5) A second MultipathStore cannot take over (enforced by the
+    #     multipath layer, not by the session substrate).
     try:
         MultipathStore(ss)
         problems.append("second authority took over")
@@ -1720,7 +1731,7 @@ def case_40_authority_registration_gate(results: List[Result]) -> None:
     if problems:
         results.append(fail("case_40_authority_registration_gate", "; ".join(problems[:5])))
     else:
-        results.append(ok("case_40_authority_registration_gate", "arbitrary objects/names/subclasses rejected; claim-first fails with the seam closed; legitimate handshake works; second authority rejected"))
+        results.append(ok("case_40_authority_registration_gate", "sessions/ has no multipath dependency (AST); no registration API; no capability attribute on instances; claim-first impossible; legitimate handshake works; second authority rejected"))
 
 
 # --------------------------------------------------------------------------

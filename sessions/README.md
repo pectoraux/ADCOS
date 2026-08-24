@@ -190,33 +190,27 @@ values are rejected. Unknown/extension data survives round-trips via
 the opaque `extensions` tuples (the repository forward-compatibility
 contract).
 
-## Plan-event seam (WORK-013; capability-guarded internal primitive)
+## Extension-event seam (generic internal substrate)
 
-Multipath plan events (path added/removed/degraded/failed/reactivated)
-are appended through a **private, capability-guarded internal seam**:
-`SessionStore._append_state_preserving_event(capability, event)`. The
-capability is issued by `SessionStore._register_plan_authority` to
-exactly ONE semantic authority — the `MultipathStore` constructor —
-and is verified by identity on every call.
+Extension events (e.g. multipath plan operations) are appended through
+a **generic, private, internal substrate primitive**:
+`SessionStore._append_state_preserving_event(event)`.
 
-Capability ISSUANCE is itself a **constructor-time handshake with a
-mechanical ownership proof**: the session layer issues the capability
-only to an EXACT instance of the genuine `multipath.MultipathStore`
-class (resolved from the real package via a deferred import — class
-identity, never a name convention). Arbitrary objects, forged
-same-named classes, functions, and even subclasses of the
-implementation are rejected, so an arbitrary caller cannot claim the
-sole authority first and then own the seam. There is deliberately NO
-public equivalent: the store performs only the atomic session commit
-(state-preserving, sequenced, defense-in-depth checks), while the plan
-SEMANTICS (admission binding verification) belong solely to the
-registered multipath authority. Manufactured plan events cannot enter
-history through any public API (`append_event` additionally rejects
-state-preserving events as `illegal-transition`), and calls to the seam
-without the registered capability fail closed with
-`plan-authority-required`.
+WORK-012 is a GENERIC lifecycle/session substrate: this primitive is
+deliberately extension-agnostic — no extension imports, no
+registration, no capability issuance, no extension types, no knowledge
+that any extension exists. It performs ONLY the generic atomic session
+commit (state-preserving check, sequencing, duplicate idempotency,
+terminal-state check). The SEMANTIC validation of extension events
+belongs entirely to the owning extension layer, which validates and
+then invokes this internal primitive. Extensions depend on WORK-012;
+WORK-012 never depends on any extension (verified mechanically: no
+sessions module imports or references any extension package).
 
-## Store semantics
+Manufactured extension events cannot enter history through any public
+API — `append_event` rejects state-preserving events as
+`illegal-transition`, and there is no public or registration-based
+plan-event append surface at all.## Store semantics
 
 Atomic `create` / `transition` / `append_event` (replay) / `reconnect`
 (binding update) / `suspend` / `terminate`. A failed transition leaves

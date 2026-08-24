@@ -66,25 +66,27 @@ atomically represented there. Every operation fully validates first
 (fail closed, no mutation), builds one state-preserving `SessionEvent`
 (`previous_state == new_state ==` the current session state; the
 session lifecycle state never changes), and commits it atomically
-through the private, capability-guarded session seam — this store is
-the SOLE semantic authority for plan events.
+through this module's private commit path into the generic session
+substrate — this store is the SOLE semantic authority for plan events
+and owns its commit token itself.
 
 Plan events (frozen types): `path-added` (metadata: `path_id`,
 `route_decision_id`, `path_expires_at`), `path-removed`,
 `path-degraded`, `path-failed`, `path-reactivated` (metadata:
 `path_id`). Manufactured plan events **cannot** enter history through
 any public path: the generic session append rejects state-preserving
-events as `illegal-transition`, and the plan-event commit seam is a
-PRIVATE, capability-guarded internal primitive
-(`SessionStore._append_state_preserving_event`) whose capability is
-issued to exactly one registered semantic authority — this store.
-Capability issuance is a **constructor-time handshake with a
-mechanical ownership proof**: the session layer issues the capability
-only to an EXACT instance of the genuine `MultipathStore` class, so
-arbitrary objects, forged same-named classes, and subclasses cannot
-claim the authority first (Architect review of PR #13, corrections 1
-and 2). Calls without the registered capability fail closed with
-`plan-authority-required`.
+events as `illegal-transition`, and the session substrate is fully
+GENERIC — no multipath import, no registration API, no plan-append
+surface (WORK-012 never depends on WORK-013; verified mechanically).
+The plan-event commit path is owned by THIS layer: a module-private
+commit token is created only by the `MultipathStore` constructor (the
+constructor-time handshake) and held in a module-private registry
+keyed by the session store — never stored on an instance, never
+exposed as an attribute. Exactly one `MultipathStore` may own a given
+`SessionStore`'s plan-event seam (enforced here, in the multipath
+layer), and the commit path fails closed with
+`plan-authority-required` unless the owning authority has been
+constructed (Architect review of PR #13, corrections 1-3).
 
 ## Path admission (the cross-path binding security property)
 

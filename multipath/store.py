@@ -18,12 +18,23 @@ truth; the history IS the evidence — invariant 12). Every operation:
 3. builds the state-preserving ``SessionEvent`` (next sequence,
    ``previous_state == new_state ==`` current session state, metadata
    carrying the path references);
-4. commits it atomically through the PRIVATE, capability-guarded
-   internal seam
-   ``SessionStore._append_state_preserving_event`` (the capability is
-   issued only to this store at registration -- MultipathStore is the
-   SOLE semantic authority for plan events; there is no public
-   equivalent).
+4. commits it atomically through the generic internal session
+   substrate primitive ``SessionStore._append_state_preserving_event``
+   via this module's PRIVATE commit path :func:`_commit_plan_event`.
+
+AUTHORITY OWNERSHIP (Architect review of PR #13, correction cycle 3 --
+layering): WORK-012 provides a GENERIC session substrate and must not
+know that multipath exists. This layer therefore OWNS its capability
+itself: a module-private :class:`_PlanCommitToken` is created ONLY by
+the :class:`MultipathStore` constructor (the constructor-time
+handshake) and held in a module-private registry keyed by the session
+store -- it is NEVER stored on a ``MultipathStore`` instance and never
+exposed through any attribute, so no caller can simply read
+``store._capability``. Exactly one ``MultipathStore`` may own a given
+``SessionStore``'s plan-event seam (enforced HERE, in the multipath
+layer, not in sessions). The commit path fails closed with
+``plan-authority-required`` unless the owning authority has been
+constructed for that store.
 
 A failed operation leaves the session, the event history, and the
 derived plan byte-identical. Replay cannot bypass admission validation
@@ -45,12 +56,15 @@ transport, radio, or adapter logic.
 from __future__ import annotations
 
 import threading
+import weakref
 from typing import Any, Dict, Optional, Tuple
 
 from protocol.temporal import TemporalError, parse_instant
 from routing.model import RouteDecision
 from sessions.model import (
+    SessionError,
     SessionReasonCode,
+    SessionResult,
     SessionState,
 )
 from sessions.store import SessionStore
@@ -110,6 +124,60 @@ def _result_from_session_error(error: Any) -> MultipathResult:
     return MultipathResult(ok=False, code=code, detail=error.detail)
 
 
+# --------------------------------------------------------------------------
+# Plan commit authority (owned by THIS layer; Architect review of PR #13,
+# correction cycle 3)
+#
+# The session layer is a generic substrate and never knows about
+# multipath. The capability/factory token needed to discipline the plan
+# commit path is therefore owned HERE: a module-private token, created
+# only by the MultipathStore constructor (the constructor-time
+# handshake) and held in a module-private registry keyed by the session
+# store. It is never stored on a MultipathStore instance and never
+# exposed through any attribute (there is no ``store._capability`` to
+# read); obtaining it requires deep introspection of this module's
+# private state, not an ordinary attribute access.
+# --------------------------------------------------------------------------
+
+class _PlanCommitToken:
+    """Module-private plan commit token (opaque; identity-checked)."""
+
+    __slots__ = ()
+
+
+#: Module-private registry: session store -> its plan commit token.
+#: Populated ONLY by the MultipathStore constructor. The entry lives for
+#: the session store's lifetime: one multipath authority per store, for
+#: good -- a store whose history already contains plan events must never
+#: gain a second, context-free authority over them.
+_COMMIT_TOKENS: "weakref.WeakKeyDictionary[SessionStore, _PlanCommitToken]" = (
+    weakref.WeakKeyDictionary()
+)
+
+
+def _commit_plan_event(
+    session_store: SessionStore, event: Any
+) -> SessionResult:
+    """Module-private plan-event commit path (the multipath layer's
+    authority boundary).
+
+    Verifies that the owning authority has been constructed for this
+    session store (its constructor-time handshake token is present in
+    the module-private registry), then invokes the GENERIC internal
+    session substrate primitive. Without a registered authority the
+    commit fails closed with ``plan-authority-required``."""
+    if _COMMIT_TOKENS.get(session_store) is None:
+        return SessionResult(
+            ok=False,
+            code=MultipathReasonCode.PLAN_AUTHORITY_REQUIRED,
+            detail="plan events can only be committed by the multipath "
+            "authority constructed for this session store (the "
+            "constructor-time handshake token is absent from the "
+            "module-private registry) -- the commit path fails closed",
+        )
+    return session_store._append_state_preserving_event(event)
+
+
 class MultipathStore:
     """Deterministic multipath plan operations over a composed WORK-012
     ``SessionStore``.
@@ -124,13 +192,23 @@ class MultipathStore:
             raise ValueError(
                 "session_store must be a sessions.SessionStore instance"
             )
+        # CONSTRUCTOR-TIME HANDSHAKE (owned by THIS layer): claim the
+        # store's plan-event seam by creating the module-private commit
+        # token. Exactly one MultipathStore may own a given SessionStore
+        # -- enforced here, in the multipath layer, so the session
+        # substrate stays generic. The token is held ONLY in the
+        # module-private registry; it is never stored on this instance
+        # and never exposed as an attribute.
+        if _COMMIT_TOKENS.get(session_store) is not None:
+            raise SessionError(
+                "plan-authority",
+                "this session store already has a multipath authority; "
+                "exactly one MultipathStore may own a given store's "
+                "plan-event seam (enforced by the multipath layer, not "
+                "by the generic session substrate)",
+            )
+        _COMMIT_TOKENS[session_store] = _PlanCommitToken()
         self._sessions = session_store
-        # Register as THE sole semantic plan authority for this session
-        # store and receive the opaque capability required by the
-        # internal append seam (Architect review of PR #13: the commit
-        # primitive must not be a public, generally callable semantic
-        # mutation API).
-        self._capability = session_store._register_plan_authority(self)
         self._lock = threading.RLock()
 
     # -- queries ----------------------------------------------------------
@@ -550,9 +628,7 @@ class MultipathStore:
             # object again -- it was validated on acceptance).
             history = self._sessions.get_events(session_id)
             if any(e.event_id == event.event_id for e in history):
-                append = self._sessions._append_state_preserving_event(
-                    self._capability, event
-                )
+                append = _commit_plan_event(self._sessions, event)
                 return MultipathResult(
                     ok=append.ok,
                     code=append.code,
@@ -628,9 +704,7 @@ class MultipathStore:
                     session=session,
                     plan=self._derive_plan(session_id),
                 )
-            append = self._sessions._append_state_preserving_event(
-                self._capability, event
-            )
+            append = _commit_plan_event(self._sessions, event)
             return MultipathResult(
                 ok=append.ok,
                 code=append.code,
@@ -654,12 +728,12 @@ class MultipathStore:
         extensions: Tuple[dict, ...],
     ) -> MultipathResult:
         """Build the state-preserving event (next sequence under this
-        store's lock) and commit it atomically through the session
-        store's PRIVATE, capability-guarded seam. The plan semantics
-        were validated by the caller (this store -- the sole semantic
+        store's lock) and commit it atomically through this module's
+        private commit path (authority-owned). The plan semantics were
+        validated by the caller (this store -- the sole semantic
         authority); this helper enforces construction-level validation
-        (secrets, leakage, temporal) and passes the session-layer
-        invariants to the seam's defense-in-depth checks."""
+        (secrets, leakage, temporal) and delegates the generic
+        session-layer invariants to the substrate primitive."""
         from sessions.model import SessionError, SessionEvent
 
         try:
@@ -678,9 +752,7 @@ class MultipathStore:
             )
         except SessionError as error:
             return _result_from_session_error(error)
-        append = self._sessions._append_state_preserving_event(
-            self._capability, event
-        )
+        append = _commit_plan_event(self._sessions, event)
         if not append.ok or append.event is None:
             return MultipathResult(
                 ok=False, code=append.code, detail=append.detail,
