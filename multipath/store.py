@@ -18,8 +18,12 @@ truth; the history IS the evidence — invariant 12). Every operation:
 3. builds the state-preserving ``SessionEvent`` (next sequence,
    ``previous_state == new_state ==`` current session state, metadata
    carrying the path references);
-4. commits it atomically through
-   :meth:`sessions.store.SessionStore.append_plan_event`.
+4. commits it atomically through the PRIVATE, capability-guarded
+   internal seam
+   ``SessionStore._append_state_preserving_event`` (the capability is
+   issued only to this store at registration -- MultipathStore is the
+   SOLE semantic authority for plan events; there is no public
+   equivalent).
 
 A failed operation leaves the session, the event history, and the
 derived plan byte-identical. Replay cannot bypass admission validation
@@ -121,6 +125,12 @@ class MultipathStore:
                 "session_store must be a sessions.SessionStore instance"
             )
         self._sessions = session_store
+        # Register as THE sole semantic plan authority for this session
+        # store and receive the opaque capability required by the
+        # internal append seam (Architect review of PR #13: the commit
+        # primitive must not be a public, generally callable semantic
+        # mutation API).
+        self._capability = session_store._register_plan_authority(self)
         self._lock = threading.RLock()
 
     # -- queries ----------------------------------------------------------
@@ -534,13 +544,15 @@ class MultipathStore:
                     session=session,
                     plan=self._derive_plan(session_id),
                 )
-            # Exact duplicate: idempotent no-op (append_plan_event's
-            # duplicate check handles it, but we pre-check so that the
-            # replay of an already-accepted event never requires the
-            # decision object again -- it was validated on acceptance).
+            # Exact duplicate: idempotent no-op (the seam's duplicate
+            # check handles it, but we pre-check so that the replay of
+            # an already-accepted event never requires the decision
+            # object again -- it was validated on acceptance).
             history = self._sessions.get_events(session_id)
             if any(e.event_id == event.event_id for e in history):
-                append = self._sessions.append_plan_event(session_id, event)
+                append = self._sessions._append_state_preserving_event(
+                    self._capability, event
+                )
                 return MultipathResult(
                     ok=append.ok,
                     code=append.code,
@@ -616,7 +628,9 @@ class MultipathStore:
                     session=session,
                     plan=self._derive_plan(session_id),
                 )
-            append = self._sessions.append_plan_event(session_id, event)
+            append = self._sessions._append_state_preserving_event(
+                self._capability, event
+            )
             return MultipathResult(
                 ok=append.ok,
                 code=append.code,
@@ -641,9 +655,11 @@ class MultipathStore:
     ) -> MultipathResult:
         """Build the state-preserving event (next sequence under this
         store's lock) and commit it atomically through the session
-        store. The plan semantics were validated by the caller; this
-        helper enforces construction-level validation (secrets, leakage,
-        temporal) and the session-layer invariants."""
+        store's PRIVATE, capability-guarded seam. The plan semantics
+        were validated by the caller (this store -- the sole semantic
+        authority); this helper enforces construction-level validation
+        (secrets, leakage, temporal) and passes the session-layer
+        invariants to the seam's defense-in-depth checks."""
         from sessions.model import SessionError, SessionEvent
 
         try:
@@ -662,7 +678,9 @@ class MultipathStore:
             )
         except SessionError as error:
             return _result_from_session_error(error)
-        append = self._sessions.append_plan_event(session.session_id, event)
+        append = self._sessions._append_state_preserving_event(
+            self._capability, event
+        )
         if not append.ok or append.event is None:
             return MultipathResult(
                 ok=False, code=append.code, detail=append.detail,

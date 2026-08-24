@@ -65,16 +65,22 @@ WORK-012 event log. The history IS the evidence, and a plan change is
 atomically represented there. Every operation fully validates first
 (fail closed, no mutation), builds one state-preserving `SessionEvent`
 (`previous_state == new_state ==` the current session state; the
-session lifecycle state never changes), and commits it atomically via
-`SessionStore.append_plan_event`.
+session lifecycle state never changes), and commits it atomically
+through the private, capability-guarded session seam — this store is
+the SOLE semantic authority for plan events.
 
 Plan events (frozen types): `path-added` (metadata: `path_id`,
 `route_decision_id`, `path_expires_at`), `path-removed`,
 `path-degraded`, `path-failed`, `path-reactivated` (metadata:
 `path_id`). Manufactured plan events **cannot** enter history through
-the generic session append path (state-preserving events are rejected
-there as `illegal-transition`); `append_plan_event` is the only entry
-point and is only called after multipath validation.
+any public path: the generic session append rejects state-preserving
+events as `illegal-transition`, and the plan-event commit seam is a
+PRIVATE, capability-guarded internal primitive
+(`SessionStore._append_state_preserving_event`) whose capability is
+issued to exactly one registered semantic authority — this store
+(Architect review of PR #13: a public "pre-validated" append would be
+an authority bypass). Calls without the registered capability fail
+closed with `plan-authority-required`.
 
 ## Path admission (the cross-path binding security property)
 

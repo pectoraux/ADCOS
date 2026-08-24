@@ -190,6 +190,23 @@ values are rejected. Unknown/extension data survives round-trips via
 the opaque `extensions` tuples (the repository forward-compatibility
 contract).
 
+## Plan-event seam (WORK-013; capability-guarded internal primitive)
+
+Multipath plan events (path added/removed/degraded/failed/reactivated)
+are appended through a **private, capability-guarded internal seam**:
+`SessionStore._append_state_preserving_event(capability, event)`. The
+capability is issued by `SessionStore._register_plan_authority` to
+exactly ONE semantic authority — the `MultipathStore` constructor —
+and is verified by identity on every call. There is deliberately NO
+public equivalent: the store performs only the atomic session commit
+(state-preserving, sequenced, defense-in-depth checks), while the plan
+SEMANTICS (admission binding verification) belong solely to the
+registered multipath authority. Manufactured plan events cannot enter
+history through any public API (`append_event` additionally rejects
+state-preserving events as `illegal-transition`), and calls to the seam
+without the registered capability fail closed with
+`plan-authority-required`.
+
 ## Store semantics
 
 Atomic `create` / `transition` / `append_event` (replay) / `reconnect`

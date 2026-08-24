@@ -219,6 +219,7 @@ class SessionReasonCode:
     RECONNECT_VALIDATION_REQUIRED = "reconnect-validation-required"
     EVENT_BINDING_MISMATCH = "event-binding-mismatch"
     EVENT_APPENDED = "event-appended"
+    PLAN_AUTHORITY_REQUIRED = "plan-authority-required"
 
     @classmethod
     def values(cls) -> Tuple[str, ...]:
@@ -252,6 +253,7 @@ class SessionReasonCode:
             cls.RECONNECT_VALIDATION_REQUIRED,
             cls.EVENT_BINDING_MISMATCH,
             cls.EVENT_APPENDED,
+            cls.PLAN_AUTHORITY_REQUIRED,
         )
 
 

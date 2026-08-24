@@ -736,7 +736,7 @@ python3 tools/multipath_selftest.py
 | `17-replay-idempotent` | exact duplicates idempotent via multipath AND generic append paths |
 | `18-replay-conflict-gap` | conflicting reuse + sequence gaps fail closed, no mutation |
 | `19-forged-path-added-replay` | forged refs rejected (no decision → `reconnect-validation-required`; mismatch → `event-binding-mismatch`); faithful replay validated + applied |
-| `20-manufactured-events-generic-path` | generic append rejects plan events (`illegal-transition`); `append_plan_event` is the only entry point |
+| `20-manufactured-events-generic-path` | generic append rejects plan events (`illegal-transition`); the public plan-event append API is REMOVED (capability-guarded private seam); capability-less/wrong-capability calls fail closed; the legitimate authority path works |
 | `21-no-authority-mutation` | resources/topology/policy/lifecycle/authoritative-route byte-identical across all ops |
 | `22-no-engine-invocation` | AST scan: no engine/topology/resource identifiers or imports in multipath/ |
 | `23-no-clock-random-network` | AST scan: no wall-clock/random/uuid/network |
@@ -755,3 +755,4 @@ python3 tools/multipath_selftest.py
 | `36-fuzz-never-crashes` | 60 seeded fuzz trials: only fail-closed envelopes, never crashes |
 | `37-interleaved-lifecycle-and-plan-ops` | one contiguous sequence; fold correct across interleaving (invariant 11) |
 | `38-plan-derivation-pure` | pure fold; empty plan deterministic; unknown session → None |
+| `39-arbitrary-plan-events-rejected` | REGRESSION (PR #13 blocker): all 5 plan-event types × 4 append paths (generic / no capability / wrong capability / None) fail closed with no mutation; single semantic authority enforced (second MultipathStore rejected; same-authority re-registration idempotent) |

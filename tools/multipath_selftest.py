@@ -846,7 +846,10 @@ def case_19_forged_path_added_replay(results: List[Result]) -> None:
 def case_20_manufactured_events_generic_path(results: List[Result]) -> None:
     """A manufactured plan event cannot enter history through the
     GENERIC session append path (state-preserving events are rejected
-    there as illegal-transition)."""
+    there as illegal-transition), and there is NO public plan-event
+    append API at all: the plan-event seam is a PRIVATE,
+    capability-guarded internal primitive (Architect review of PR #13
+    -- the old public append_plan_event was an authority bypass)."""
     r1 = _route((_AC, _CB), reach=(_NODE_C,), instant="2026-06-01T12:00:01Z")
     ss, ms, sid = _session()
     session = ss.get(sid)
@@ -865,19 +868,33 @@ def case_20_manufactured_events_generic_path(results: List[Result]) -> None:
         problems.append("generic append mutated the store")
     if ms.get_plan(sid).entries:
         problems.append("manufactured path entered the plan")
-    # The dedicated primitive IS the only entry point (and it works).
-    r2 = ss.append_plan_event(sid, SessionEvent(
-        event_id="", session_id=sid, sequence=session.last_event_sequence + 1,
-        previous_state=SessionState.ESTABLISHED, new_state=SessionState.ESTABLISHED,
-        event_type=MP_EVENT_PATH_REMOVED, event_instant=_NOW,
-        metadata=((META_PATH_ID, "sha256:" + "e" * 64),),
-    ))
-    if not (r2.ok and r2.code == SessionReasonCode.EVENT_APPENDED):
-        problems.append("dedicated primitive failed: %s/%s" % (r2.ok, r2.code))
+    # The public plan-event append API no longer EXISTS on the store.
+    if hasattr(ss, "append_plan_event"):
+        problems.append("public append_plan_event still exists on SessionStore")
+    # Calling the private seam WITHOUT a capability fails closed.
+    try:
+        r2 = ss._append_state_preserving_event(manufactured)
+        if r2.ok:
+            problems.append("capability-less private call succeeded")
+    except TypeError:
+        pass  # missing required capability argument -- correct
+    # Calling it with a WRONG capability fails closed with the specific
+    # reason and no mutation.
+    class _WrongCapability:
+        pass
+    r3 = ss._append_state_preserving_event(_WrongCapability(), manufactured)
+    if r3.ok or r3.code != SessionReasonCode.PLAN_AUTHORITY_REQUIRED:
+        problems.append("wrong capability: %s/%s" % (r3.ok, r3.code))
+    if ss.to_canonical_bytes() != before:
+        problems.append("capability rejections mutated the store")
+    # The LEGITIMATE authority path still works (validated add).
+    r4 = ms.add_path(sid, r1, event_instant=_NOW)
+    if not (r4.ok and r4.plan.get(r1.selected.path_id)):
+        problems.append("legitimate authority add failed: %s/%s" % (r4.ok, r4.code))
     if problems:
         results.append(fail("case_20_manufactured_events_generic_path", "; ".join(problems)))
     else:
-        results.append(ok("case_20_manufactured_events_generic_path", "generic path rejects plan events (illegal-transition); append_plan_event is the only entry"))
+        results.append(ok("case_20_manufactured_events_generic_path", "generic path rejects plan events; public append API removed; capability-less/wrong-capability calls fail closed; legitimate authority path works"))
 
 
 # --------------------------------------------------------------------------
@@ -1344,7 +1361,7 @@ def case_33_multipath_vocabulary(results: List[Result]) -> None:
                    "unknown-session", "terminal-state", "invalid-input",
                    "replayed", "event-appended", "sequence-conflict",
                    "sequence-gap", "event-binding-mismatch",
-                   "reconnect-validation-required"):
+                   "reconnect-validation-required", "plan-authority-required"):
         if shared not in session_codes:
             problems.append("shared code %r missing from session vocabulary" % shared)
     if actual & session_codes:
@@ -1491,6 +1508,115 @@ def case_38_plan_derivation_pure(results: List[Result]) -> None:
 
 
 # --------------------------------------------------------------------------
+# Architect-review regression case (PR #13 correction cycle)
+#
+# Blocker: SessionStore.append_plan_event was a PUBLIC "pre-validated"
+# append primitive -- the store could not distinguish a MultipathStore
+# call (after full admission validation) from an arbitrary caller with
+# a manufactured plan event, so the authoritative session history was
+# mutable without the admission contract (violating invariants 1-3, 6,
+# 11, 12). Fix: the seam is now the PRIVATE, capability-guarded
+# SessionStore._append_state_preserving_event(capability, event); the
+# capability is issued by SessionStore._register_plan_authority to
+# exactly one authority (the MultipathStore constructor), and
+# MultipathStore is the sole semantic authority. Regressions must prove
+# arbitrary plan events of EVERY type cannot mutate session history
+# unless they passed MultipathStore validation.
+# --------------------------------------------------------------------------
+
+def case_39_arbitrary_plan_events_rejected(results: List[Result]) -> None:
+    """REGRESSION (PR #13 blocker): arbitrary plan events of ALL FIVE
+    types (path-added / path-removed / path-degraded / path-failed /
+    path-reactivated) cannot mutate session history unless they passed
+    MultipathStore validation. Every reachable append path is probed:
+    the generic append_event, the private seam without a capability,
+    and the private seam with a wrong capability."""
+    event_types = (
+        MP_EVENT_PATH_ADDED,
+        MP_EVENT_PATH_REMOVED,
+        MP_EVENT_PATH_DEGRADED,
+        MP_EVENT_PATH_FAILED,
+        MP_EVENT_PATH_REACTIVATED,
+    )
+    attacker_metadata = {
+        MP_EVENT_PATH_ADDED: (
+            (META_PATH_ID, "sha256:" + "e" * 64),
+            (META_ROUTE_DECISION_ID, "sha256:" + "f" * 64),
+            (META_PATH_EXPIRES_AT, "2030-01-01T00:00:00Z"),
+        ),
+        MP_EVENT_PATH_REMOVED: ((META_PATH_ID, "sha256:" + "e" * 64),),
+        MP_EVENT_PATH_DEGRADED: ((META_PATH_ID, "sha256:" + "e" * 64),),
+        MP_EVENT_PATH_FAILED: ((META_PATH_ID, "sha256:" + "e" * 64),),
+        MP_EVENT_PATH_REACTIVATED: ((META_PATH_ID, "sha256:" + "e" * 64),),
+    }
+    problems = []
+    checked = 0
+    for event_type in event_types:
+        r_direct = _route((_AB,), instant="2026-06-01T12:00:%02dZ"
+                          % (10 + event_types.index(event_type)))
+        ss, ms, sid = _session(route=r_direct)
+        before = ss.to_canonical_bytes()
+        session = ss.get(sid)
+        forged = SessionEvent(
+            event_id="", session_id=sid,
+            sequence=session.last_event_sequence + 1,
+            previous_state=SessionState.ESTABLISHED,
+            new_state=SessionState.ESTABLISHED,
+            event_type=event_type, event_instant=_NOW,
+            metadata=attacker_metadata[event_type],
+        )
+        # (a) generic append_event -> illegal-transition, no mutation.
+        ra = ss.append_event(sid, forged)
+        checked += 1
+        if ra.ok or ra.code != SessionReasonCode.ILLEGAL_TRANSITION:
+            problems.append("%s generic: %s/%s" % (event_type, ra.ok, ra.code))
+        # (b) private seam, no capability -> rejected.
+        try:
+            rb = ss._append_state_preserving_event(forged)
+            checked += 1
+            if rb.ok:
+                problems.append("%s no-capability: accepted" % event_type)
+        except TypeError:
+            checked += 1  # missing capability argument -- correct
+        # (c) private seam, wrong capability -> plan-authority-required.
+        rc = ss._append_state_preserving_event(object(), forged)
+        checked += 1
+        if rc.ok or rc.code != SessionReasonCode.PLAN_AUTHORITY_REQUIRED:
+            problems.append("%s wrong-capability: %s/%s"
+                            % (event_type, rc.ok, rc.code))
+        # (d) private seam, None capability -> plan-authority-required.
+        rd = ss._append_state_preserving_event(None, forged)
+        checked += 1
+        if rd.ok or rd.code != SessionReasonCode.PLAN_AUTHORITY_REQUIRED:
+            problems.append("%s None-capability: %s/%s"
+                            % (event_type, rd.ok, rd.code))
+        if ss.to_canonical_bytes() != before:
+            problems.append("%s mutated the store" % event_type)
+        if ms.get_plan(sid).entries:
+            problems.append("%s entered the plan" % event_type)
+    # Single semantic authority: a second MultipathStore over the same
+    # SessionStore is rejected at registration.
+    ss2, ms2, sid2 = _session()
+    try:
+        MultipathStore(ss2)
+        problems.append("second authority registration accepted")
+    except Exception:
+        pass
+    # The SAME authority re-registering is idempotent (returns the
+    # same capability).
+    try:
+        cap_again = ss2._register_plan_authority(ms2)
+        if cap_again is not ms2._capability:
+            problems.append("same-authority re-registration issued a different capability")
+    except Exception as error:
+        problems.append("same-authority re-registration failed: %s" % error)
+    if problems:
+        results.append(fail("case_39_arbitrary_plan_events_rejected", "; ".join(problems[:5])))
+    else:
+        results.append(ok("case_39_arbitrary_plan_events_rejected", "all 5 event types x 4 append paths (%d probes) fail closed; single semantic authority enforced" % checked))
+
+
+# --------------------------------------------------------------------------
 # Main
 # --------------------------------------------------------------------------
 
@@ -1534,6 +1660,8 @@ def main() -> int:
     case_36_fuzz_never_crashes(results)
     case_37_interleaved_lifecycle_and_plan_ops(results)
     case_38_plan_derivation_pure(results)
+    # Architect-review regression case (PR #13 correction cycle).
+    case_39_arbitrary_plan_events_rejected(results)
 
     print("ADCOS multipath self-test (WORK-013)")
     print("=" * 72)

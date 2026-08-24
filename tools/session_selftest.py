@@ -1708,11 +1708,11 @@ def case_50_result_code_vocabulary(results: List[Result]) -> None:
         "terminal-state", "not-reconnecting", "sequence-conflict",
         "sequence-gap", "event-tampered", "event-state-mismatch",
         "reconnect-validation-required", "event-binding-mismatch",
-        "event-appended",
+        "event-appended", "plan-authority-required",
     }
     actual = set(SessionReasonCode.values())
     if actual == expected:
-        results.append(ok("case_50_result_code_vocabulary", "29 frozen reason codes (7 success + 22 failure) present and closed"))
+        results.append(ok("case_50_result_code_vocabulary", "30 frozen reason codes (7 success + 23 failure) present and closed"))
     else:
         results.append(fail("case_50_result_code_vocabulary", "drift: %r" % (actual ^ expected)))
 
