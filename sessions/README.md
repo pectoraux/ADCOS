@@ -48,7 +48,7 @@ accepted `RouteDecision`.
 - `SessionEvent` — append-only transition evidence with injected
   instant and strictly monotonic per-session sequence.
 - `SessionResult` — deterministic success/failure envelope with stable
-  reason codes (`SessionReasonCode`, 26 frozen codes; never a generic
+  reason codes (`SessionReasonCode`, 28 frozen codes; never a generic
   false/null).
 - `SessionStore` — deterministic, atomic in-memory lifecycle
   persistence.
@@ -131,6 +131,17 @@ event content.
 
 ## Route binding invariants
 
+A replayed `reconnected` event can ONLY apply its route update through
+the SAME verification: `append_event` requires the caller to supply the
+new `RouteDecision` the event was validated against, re-runs the
+complete reconnect binding verification at the event's instant, and
+checks that the event's recorded references bind to BOTH the session's
+current route (old refs) AND the verified decision (new refs). A
+syntactically valid, content-derived event with attacker-chosen route
+references is rejected (`reconnect-validation-required` /
+`event-binding-mismatch`) — a replay mechanism replays previously
+accepted events; it never manufactures authoritative route updates.
+
 The session layer rejects: route decision id tampering; selected path
 id tampering; a route decision whose selected path no longer matches
 its own content; endpoint mismatch; route expiry before establishment;
@@ -186,6 +197,14 @@ Atomic `create` / `transition` / `append_event` (replay) / `reconnect`
 the full prior session state and event history unchanged; no operation
 partially applies; concurrent transitions serialize deterministically
 per session (identical concurrent requests yield exactly one success).
+The active-state `terminate()` path constructs and validates BOTH
+events (→ TERMINATING, TERMINATING → TERMINATED) and the final snapshot
+BEFORE one atomic commit — a failure during the second event leaves the
+original active session and history byte-identical (fault-injection
+proven). `append_event` is idempotent for an exact duplicate of ANY
+already-accepted event, fail-closed for conflicting sequence reuse and
+gaps, and applies `reconnected` events only through the complete
+reconnect verification described above.
 `snapshot()`/`to_canonical_bytes()` produce deterministic
 insertion-order-independent output.
 

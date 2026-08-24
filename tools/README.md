@@ -635,7 +635,7 @@ python3 tools/routing_selftest.py
 
 ## session_selftest.py — session lifecycle tests (WORK-012)
 
-Deterministic, offline verification of the sessions package against the frozen WORK-012 handoff: the creation contract (route/policy/intent binding verification, endpoint/expiry checks), the frozen 9-state transition table with explicit suspend/terminate operations, atomic lifecycle transitions, strictly monotonic event sequencing with idempotent exact-duplicate replay and fail-closed conflicting reuse, content-derived session/event identity with tamper rejection, reconnect semantics (externally supplied selected route; old/new reference recording; immutable creation binding), termination idempotency, canonical serialization round-trips, and the mechanical prohibition of engine invocation, authority mutation, wall-clock/randomness/network access, secret material, and access-technology leakage. Runs in CI after the routing suite.
+Deterministic, offline verification of the sessions package against the frozen WORK-012 handoff: the creation contract (route/policy/intent binding verification, endpoint/expiry checks), the frozen 9-state transition table with explicit suspend/terminate operations, atomic lifecycle transitions, strictly monotonic event sequencing with idempotent exact-duplicate replay and fail-closed conflicting reuse, content-derived session/event identity with tamper rejection, reconnect semantics (externally supplied selected route; old/new reference recording; immutable creation binding), termination idempotency, canonical serialization round-trips, and the mechanical prohibition of engine invocation, authority mutation, wall-clock/randomness/network access, secret material, and access-technology leakage — plus the PR #12 correction regressions (reconnected-event replay requires the complete reconnect verification; fault-injected terminate atomicity). Runs in CI after the routing suite.
 
 ### Invocation
 
@@ -699,3 +699,6 @@ python3 tools/session_selftest.py
 | `50-result-code-vocabulary` | 26 frozen reason codes (7 success + 19 failure) present and closed |
 | `51-binding-from-mapping-roundtrip` | binding wire form round-trips; absent fields omitted |
 | `52-create-requires-policy-decision` | absent/malformed policy decision rejected at creation |
+| `53-forged-reconnected-event-rejected` | REGRESSION (PR #12 blocker 1): 5 forged-event shapes (no validating decision / mismatched new refs / forged old refs / wrong transition shape / expired route) rejected; `current_route_decision_id`/`current_path_id` byte-identical |
+| `54-terminate-atomicity-fault-injection` | REGRESSION (PR #12 blocker 2): fault-injected second-event failure leaves the active session + history byte-identical; healthy path appends exactly 2 events atomically |
+| `55-mid-history-replay-idempotent` | exact duplicate of ANY already-accepted event replays idempotently; different content at the same sequence still fails closed |

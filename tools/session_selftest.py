@@ -71,6 +71,11 @@ from routing import (  # noqa: E402
     derive_path_id,
 )
 from sessions import (  # noqa: E402
+    META_NEW_PATH_EXPIRES_AT,
+    META_NEW_PATH_ID,
+    META_NEW_ROUTE_DECISION_ID,
+    META_OLD_PATH_ID,
+    META_OLD_ROUTE_DECISION_ID,
     RECONNECT_EVENT_TYPE,
     SUSPEND_SOURCES,
     TRANSITIONS,
@@ -1644,7 +1649,8 @@ def case_48_replayed_reconnect_updates_refs(results: List[Result]) -> None:
     _drive(store_b, sb.session_id, SessionState.ESTABLISHED)
     store_b.transition(sb.session_id, SessionState.RECONNECTING, event_instant=_NOW)
     assert sb.session_id == sa.session_id
-    r = store_b.append_event(sb.session_id, reconnect_event)
+    r = store_b.append_event(sb.session_id, reconnect_event,
+                             new_route_decision=route2)
     problems = []
     if not r.ok:
         problems.append("replay failed: %s/%s" % (r.ok, r.code))
@@ -1701,10 +1707,11 @@ def case_50_result_code_vocabulary(results: List[Result]) -> None:
         "session-exists", "unknown-session", "illegal-transition",
         "terminal-state", "not-reconnecting", "sequence-conflict",
         "sequence-gap", "event-tampered", "event-state-mismatch",
+        "reconnect-validation-required", "event-binding-mismatch",
     }
     actual = set(SessionReasonCode.values())
     if actual == expected:
-        results.append(ok("case_50_result_code_vocabulary", "26 frozen reason codes (7 success + 19 failure) present and closed"))
+        results.append(ok("case_50_result_code_vocabulary", "28 frozen reason codes (7 success + 21 failure) present and closed"))
     else:
         results.append(fail("case_50_result_code_vocabulary", "drift: %r" % (actual ^ expected)))
 
@@ -1746,6 +1753,230 @@ def case_52_create_requires_policy_decision(results: List[Result]) -> None:
         results.append(fail("case_52_create_requires_policy_decision", "; ".join(problems)))
     else:
         results.append(ok("case_52_create_requires_policy_decision", "absent/malformed policy decision rejected at creation"))
+
+
+# --------------------------------------------------------------------------
+# Architect-review regression cases (PR #12 correction cycle)
+#
+# Blocker 1: append_event had a second path that could change the
+# session's active route -- a syntactically valid, content-derived
+# SessionEvent with event_type "reconnected" and attacker-chosen
+# route references was applied WITHOUT verify_route_for_reconnect().
+# Fix: reconnected events can only be appended together with the new
+# RouteDecision they were validated against; the store re-runs the
+# COMPLETE reconnect binding verification and checks the event's
+# recorded refs against BOTH the session's current route (old refs)
+# AND the verified decision (new refs).
+#
+# Blocker 2: terminate() committed the TERMINATING event before
+# constructing the TERMINATED event, so a second-event failure could
+# leave the session stuck in TERMINATING -- the promised atomicity
+# ("event and new session state become visible together or neither
+# does") did not hold for the whole operation. Fix: both events and
+# the final snapshot are constructed and validated BEFORE one atomic
+# commit.
+# --------------------------------------------------------------------------
+
+def case_53_forged_reconnected_event_rejected(results: List[Result]) -> None:
+    """REGRESSION (PR #12 blocker 1): a forged reconnected event cannot
+    alter current_route_decision_id/current_path_id. The forged event
+    is fully valid at the SessionEvent layer (its own correct derived
+    event_id, correct previous_state, legal RECONNECTING ->
+    ESTABLISHED edge, well-formed metadata) -- only its route
+    references are attacker-chosen."""
+    store, s, route1, policy = _reconnect_fixture()  # session at RECONNECTING
+    before = store.to_canonical_bytes()
+    current = store.get(s.session_id)
+    problems = []
+
+    def forged_event(**metadata_overrides):
+        meta = {
+            META_OLD_ROUTE_DECISION_ID: current.current_route_decision_id,
+            META_OLD_PATH_ID: current.current_path_id,
+            META_NEW_ROUTE_DECISION_ID: "sha256:" + "e" * 64,  # attacker-chosen
+            META_NEW_PATH_ID: "sha256:" + "f" * 64,            # attacker-chosen
+            META_NEW_PATH_EXPIRES_AT: "2030-01-01T00:00:00Z",  # attacker-chosen
+        }
+        meta.update(metadata_overrides)
+        return SessionEvent(
+            event_id="", session_id=s.session_id,
+            sequence=current.last_event_sequence + 1,
+            previous_state=SessionState.RECONNECTING,
+            new_state=SessionState.ESTABLISHED,
+            event_type=RECONNECT_EVENT_TYPE,
+            event_instant=_NOW,
+            metadata=tuple(sorted(meta.items())),
+        )
+
+    # (a) Without the validating RouteDecision -> fail closed.
+    r_a = store.append_event(s.session_id, forged_event())
+    if r_a.ok or r_a.code != SessionReasonCode.RECONNECT_VALIDATION_REQUIRED:
+        problems.append("(a) no-decision: %s/%s" % (r_a.ok, r_a.code))
+    # (b) With a genuine decision whose refs do NOT match the forged
+    #     metadata -> event-binding-mismatch.
+    route2 = _route((_AC, _CB), reach=(_NODE_C,), policy=policy)
+    r_b = store.append_event(s.session_id, forged_event(),
+                             new_route_decision=route2)
+    if r_b.ok or r_b.code != SessionReasonCode.EVENT_BINDING_MISMATCH:
+        problems.append("(b) mismatched decision: %s/%s" % (r_b.ok, r_b.code))
+    # (c) New refs match the genuine decision but the OLD refs are
+    #     forged (not the session's current route) -> binding mismatch.
+    r_c = store.append_event(
+        s.session_id,
+        forged_event(
+            **{
+                META_NEW_ROUTE_DECISION_ID: route2.decision_id,
+                META_NEW_PATH_ID: route2.selected.path_id,
+                META_NEW_PATH_EXPIRES_AT: route2.selected.metrics.expires_at,
+                META_OLD_ROUTE_DECISION_ID: "sha256:" + "0" * 64,
+            }
+        ),
+        new_route_decision=route2,
+    )
+    if r_c.ok or r_c.code != SessionReasonCode.EVENT_BINDING_MISMATCH:
+        problems.append("(c) forged old refs: %s/%s" % (r_c.ok, r_c.code))
+    # (d) Wrong transition shape for a reconnected event: the previous
+    #     state matches the session and RECONNECTING -> DEGRADED is a
+    #     legal generic edge, but a reconnect is always
+    #     RECONNECTING -> ESTABLISHED -- the reconnect-specific shape
+    #     check must reject it (not the generic state checks).
+    wrong_shape = SessionEvent(
+        event_id="", session_id=s.session_id,
+        sequence=current.last_event_sequence + 1,
+        previous_state=SessionState.RECONNECTING,
+        new_state=SessionState.DEGRADED,
+        event_type=RECONNECT_EVENT_TYPE, event_instant=_NOW,
+    )
+    r_d = store.append_event(s.session_id, wrong_shape,
+                             new_route_decision=route2)
+    if r_d.ok or r_d.code != SessionReasonCode.EVENT_BINDING_MISMATCH:
+        problems.append("(d) wrong shape: %s/%s" % (r_d.ok, r_d.code))
+    # (e) A route decision that itself fails reconnect verification
+    #     (expired at the event instant) is rejected on this path too.
+    expired_route = _route((_AC, _CB), reach=(_NODE_C,), policy=policy)
+    object.__setattr__(expired_route.selected.metrics, "expires_at",
+                       "2026-06-01T11:00:00Z")
+    import routing.serialization as _rser
+    expired_route = _dc_replace(
+        expired_route,
+        decision_id="sha256:" + hashlib.sha256(
+            _rser.route_decision_canonical_bytes(expired_route)
+        ).hexdigest(),
+    )
+    faithful_to_expired = forged_event(
+        **{
+            META_NEW_ROUTE_DECISION_ID: expired_route.decision_id,
+            META_NEW_PATH_ID: expired_route.selected.path_id,
+            META_NEW_PATH_EXPIRES_AT: expired_route.selected.metrics.expires_at,
+        }
+    )
+    r_e = store.append_event(s.session_id, faithful_to_expired,
+                             new_route_decision=expired_route)
+    if r_e.ok or r_e.code != SessionReasonCode.ROUTE_EXPIRED:
+        problems.append("(e) expired route: %s/%s" % (r_e.ok, r_e.code))
+    # (f) The store is byte-identical; the route references never moved.
+    if store.to_canonical_bytes() != before:
+        problems.append("(f) store mutated by rejected forged events")
+    final = store.get(s.session_id)
+    if final.current_route_decision_id != route1.decision_id:
+        problems.append("(f) current_route_decision_id altered")
+    if final.current_path_id != route1.selected.path_id:
+        problems.append("(f) current_path_id altered")
+    if problems:
+        results.append(fail("case_53_forged_reconnected_event_rejected", "; ".join(problems)))
+    else:
+        results.append(ok("case_53_forged_reconnected_event_rejected", "5 forged-event shapes rejected; route refs byte-identical"))
+
+
+def case_54_terminate_atomicity_fault_injection(results: List[Result]) -> None:
+    """REGRESSION (PR #12 blocker 2): a failure during the SECOND
+    termination event's construction leaves the original active session
+    and event history byte-identical (fault injection via a patched
+    SessionEvent constructor that raises on the TERMINATED event)."""
+    import sessions.store as store_module
+    store, s = _create()
+    _drive(store, s.session_id, SessionState.ESTABLISHED)
+    before_session = store.get(s.session_id).to_dict()
+    before_events = [e.to_dict() for e in store.get_events(s.session_id)]
+    before_bytes = store.to_canonical_bytes()
+
+    real_event_cls = store_module.SessionEvent
+    constructions: List[str] = []
+
+    def flaky_event(*args, **kwargs):
+        new_state = kwargs.get("new_state", "")
+        constructions.append(new_state)
+        if new_state == SessionState.TERMINATED:
+            raise SessionError("event-type",
+                               "injected second-event construction failure")
+        return real_event_cls(*args, **kwargs)
+
+    store_module.SessionEvent = flaky_event
+    try:
+        r = store.terminate(s.session_id, event_instant=_NOW)
+    finally:
+        store_module.SessionEvent = real_event_cls
+
+    problems = []
+    if r.ok:
+        problems.append("fault-injected terminate reported success")
+    if constructions != [SessionState.TERMINATING, SessionState.TERMINATED]:
+        problems.append("unexpected event construction order: %r" % constructions)
+    if store.to_canonical_bytes() != before_bytes:
+        problems.append("store bytes changed despite the injected failure")
+    final = store.get(s.session_id)
+    if final.to_dict() != before_session:
+        problems.append("session snapshot mutated (state %s)" % final.state)
+    if final.state != SessionState.ESTABLISHED:
+        problems.append("session not left in its original active state")
+    after_events = [e.to_dict() for e in store.get_events(s.session_id)]
+    if after_events != before_events:
+        problems.append("event history mutated (%d -> %d events)"
+                        % (len(before_events), len(after_events)))
+    # The healthy path still terminates atomically with both events.
+    r_ok = store.terminate(s.session_id, event_instant=_NOW)
+    if not (r_ok.ok and store.get(s.session_id).state == SessionState.TERMINATED):
+        problems.append("healthy terminate after fault failed: %s" % r_ok.code)
+    elif len(store.get_events(s.session_id)) != len(before_events) + 2:
+        problems.append("healthy terminate did not append exactly 2 events")
+    if problems:
+        results.append(fail("case_54_terminate_atomicity_fault_injection", "; ".join(problems)))
+    else:
+        results.append(ok("case_54_terminate_atomicity_fault_injection", "second-event failure leaves state+history byte-identical; healthy path appends exactly 2 events"))
+
+
+def case_55_mid_history_replay_idempotent(results: List[Result]) -> None:
+    """An exact duplicate of ANY already-accepted event (not only the
+    head) replays idempotently with zero mutation, while the same
+    sequence with different content still fails closed."""
+    store, s = _create()
+    _drive(store, s.session_id, SessionState.ESTABLISHED)
+    store.transition(s.session_id, SessionState.DEGRADED, event_instant=_LATER)
+    events = store.get_events(s.session_id)
+    mid = events[1]  # the AUTHORIZED transition
+    before = store.to_canonical_bytes()
+    r = store.append_event(s.session_id, mid)
+    problems = []
+    if not (r.ok and r.code == SessionReasonCode.REPLAYED):
+        problems.append("mid-history replay: %s/%s" % (r.ok, r.code))
+    if store.to_canonical_bytes() != before:
+        problems.append("mid-history replay mutated the store")
+    # Conflicting reuse of that sequence still fails closed.
+    conflicting = SessionEvent(
+        event_id="", session_id=s.session_id, sequence=mid.sequence,
+        previous_state=mid.previous_state, new_state=mid.new_state,
+        event_type=mid.event_type, event_instant=mid.event_instant,
+        actor_reference="someone-else",
+    )
+    r2 = store.append_event(s.session_id, conflicting)
+    if r2.ok or r2.code != SessionReasonCode.SEQUENCE_CONFLICT:
+        problems.append("conflicting reuse: %s/%s" % (r2.ok, r2.code))
+    if store.to_canonical_bytes() != before:
+        problems.append("conflict mutated the store")
+    if problems:
+        results.append(fail("case_55_mid_history_replay_idempotent", "; ".join(problems)))
+    else:
+        results.append(ok("case_55_mid_history_replay_idempotent", "any-position exact duplicate idempotent; different content still conflicts"))
 
 
 # --------------------------------------------------------------------------
@@ -1806,6 +2037,10 @@ def main() -> int:
     case_50_result_code_vocabulary(results)
     case_51_binding_from_mapping_roundtrip(results)
     case_52_create_requires_policy_decision(results)
+    # Architect-review regression cases (PR #12 correction cycle).
+    case_53_forged_reconnected_event_rejected(results)
+    case_54_terminate_atomicity_fault_injection(results)
+    case_55_mid_history_replay_idempotent(results)
 
     print("ADCOS session lifecycle self-test (WORK-012)")
     print("=" * 72)

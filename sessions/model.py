@@ -216,6 +216,8 @@ class SessionReasonCode:
     SEQUENCE_GAP = "sequence-gap"
     EVENT_TAMPERED = "event-tampered"
     EVENT_STATE_MISMATCH = "event-state-mismatch"
+    RECONNECT_VALIDATION_REQUIRED = "reconnect-validation-required"
+    EVENT_BINDING_MISMATCH = "event-binding-mismatch"
 
     @classmethod
     def values(cls) -> Tuple[str, ...]:
@@ -246,6 +248,8 @@ class SessionReasonCode:
             cls.SEQUENCE_GAP,
             cls.EVENT_TAMPERED,
             cls.EVENT_STATE_MISMATCH,
+            cls.RECONNECT_VALIDATION_REQUIRED,
+            cls.EVENT_BINDING_MISMATCH,
         )
 
 

@@ -38,6 +38,7 @@ import threading
 from dataclasses import replace
 from typing import Dict, List, Optional, Tuple
 
+from policy.model import PolicyDecision
 from protocol.canonicalization import canonical_json_bytes
 from protocol.temporal import TemporalError, parse_instant
 from routing.model import RouteDecision
@@ -514,46 +515,98 @@ class SessionStore:
                     session=session,
                 )
             # Active -> TERMINATING -> TERMINATED as ONE atomic commit
-            # (both events become visible together or neither does).
-            first = self._apply_transition(
-                session,
-                SessionState.TERMINATING,
-                event_type="terminating",
-                event_instant=event_instant,
-                actor_reference=actor_reference,
-                reason_code=reason_code,
-                extensions=extensions,
+            # (Architect review of PR #12, blocker 2): BOTH events and
+            # the final TERMINATED snapshot are constructed and fully
+            # validated BEFORE any state becomes visible. A failure in
+            # the second event's construction/validation therefore
+            # leaves the original active session and its event history
+            # byte-identical -- the promised invariant ("event and new
+            # session state become visible together or neither does")
+            # holds for the WHOLE terminate operation, not merely for
+            # each event individually.
+            sequence_terminating = session.last_event_sequence + 1
+            try:
+                event_terminating = SessionEvent(
+                    event_id="",
+                    session_id=session.session_id,
+                    sequence=sequence_terminating,
+                    previous_state=session.state,
+                    new_state=SessionState.TERMINATING,
+                    event_type="terminating",
+                    event_instant=event_instant,
+                    actor_reference=actor_reference,
+                    reason_code=reason_code,
+                    extensions=tuple(extensions),
+                )
+                intermediate = replace(
+                    session,
+                    state=SessionState.TERMINATING,
+                    last_event_sequence=sequence_terminating,
+                    last_event_instant=event_instant,
+                )
+                event_terminated = SessionEvent(
+                    event_id="",
+                    session_id=session.session_id,
+                    sequence=sequence_terminating + 1,
+                    previous_state=SessionState.TERMINATING,
+                    new_state=SessionState.TERMINATED,
+                    event_type="terminated",
+                    event_instant=event_instant,
+                    actor_reference=actor_reference,
+                    reason_code=reason_code,
+                    extensions=tuple(extensions),
+                )
+                final = replace(
+                    intermediate,
+                    state=SessionState.TERMINATED,
+                    last_event_sequence=sequence_terminating + 1,
+                    last_event_instant=event_instant,
+                )
+            except SessionError as error:
+                return _envelope_error(error)
+            return self._commit_events(
+                final,
+                (event_terminating, event_terminated),
                 result_code=SessionReasonCode.TERMINATED,
-            )
-            if not first.ok or first.session is None:
-                return first
-            return self._apply_transition(
-                first.session,
-                SessionState.TERMINATED,
-                event_type="terminated",
-                event_instant=event_instant,
-                actor_reference=actor_reference,
-                reason_code=reason_code,
-                extensions=extensions,
-                result_code=SessionReasonCode.TERMINATED,
+                result_detail="%s -> TERMINATING -> TERMINATED (events %d and %d "
+                "applied as one atomic commit)"
+                % (session.state, sequence_terminating, sequence_terminating + 1),
             )
 
     # -- append / replay an event ---------------------------------------------
 
-    def append_event(self, session_id: str, event: SessionEvent) -> SessionResult:
+    def append_event(
+        self,
+        session_id: str,
+        event: SessionEvent,
+        *,
+        new_route_decision: Optional[RouteDecision] = None,
+        new_policy_decision: Optional[PolicyDecision] = None,
+    ) -> SessionResult:
         """Append (or idempotently replay) an event.
 
-        - exact duplicate of the current head event -> idempotent
-          ``replayed`` (no mutation);
+        - an exact duplicate of ANY already-accepted event (not only
+          the head) -> idempotent ``replayed`` (no mutation);
         - an existing sequence reused with different content ->
           ``sequence-conflict`` (fail closed);
         - a sequence gap (sequence > last + 1) -> ``sequence-gap``;
         - ``previous_state`` != current state -> ``event-state-mismatch``;
         - an illegal (previous, new) edge -> ``illegal-transition``
           (event replay cannot bypass the frozen state machine);
-        - a ``reconnected`` event updates the current route reference
-          from its metadata (faithful replay of a reconnect binding
-          update).
+        - a ``reconnected`` event can ONLY apply its route update
+          through the SAME validation as an explicit reconnect
+          (Architect review of PR #12, blocker 1): the caller MUST
+          supply the new ``RouteDecision`` (``new_route_decision``),
+          the store re-runs the complete reconnect binding
+          verification (endpoints, decision content-binding,
+          ``selected``, path content-binding, policy binding, intent
+          binding, non-expiry at the event's instant), and the event's
+          recorded route references must match BOTH the session's
+          current route (old refs) AND the verified decision (new
+          refs). A syntactically valid, content-derived event with
+          attacker-chosen route references is therefore rejected
+          (``reconnect-validation-required`` without the decision;
+          ``event-binding-mismatch`` when the references do not bind).
 
         The event's own content binding is verified by construction
         (a tampered ``event_id`` cannot exist as a SessionEvent)."""
@@ -576,16 +629,21 @@ class SessionStore:
                 )
             history = self._events.get(session_id, [])
             last = history[-1] if history else None
+            # Exact duplicate of ANY already-accepted event: idempotent
+            # replay (no mutation). event_id is content-derived, so an
+            # id match means byte-identical content -- the event was
+            # already validated when it was accepted.
+            if any(e.event_id == event.event_id for e in history):
+                return SessionResult(
+                    ok=True,
+                    code=SessionReasonCode.REPLAYED,
+                    detail="exact duplicate of already-accepted event "
+                    "sequence %d -- idempotent replay (no mutation)"
+                    % event.sequence,
+                    session=session,
+                    event=event,
+                )
             if last is not None:
-                if event.event_id == last.event_id:
-                    return SessionResult(
-                        ok=True,
-                        code=SessionReasonCode.REPLAYED,
-                        detail="exact duplicate of event sequence %d -- "
-                        "idempotent replay (no mutation)" % event.sequence,
-                        session=session,
-                        event=event,
-                    )
                 if event.sequence <= last.sequence:
                     return SessionResult(
                         ok=False,
@@ -630,27 +688,91 @@ class SessionStore:
                     "state machine" % (event.previous_state, event.new_state),
                     session=session,
                 )
-            # Faithful replay of a reconnect binding update.
+            # Reconnected events are the ONLY events that change the
+            # current route reference, and they can ONLY be applied
+            # through the SAME verification as an explicit reconnect
+            # (Architect review of PR #12, blocker 1): route changes
+            # happen only through an explicitly validated reconnect --
+            # a replay mechanism must replay a previously accepted
+            # event, never manufacture a new authoritative route update.
             route_update: Optional[Tuple[str, str, str]] = None
             if event.event_type == RECONNECT_EVENT_TYPE:
-                meta = dict(event.metadata)
-                for key in (
-                    META_NEW_ROUTE_DECISION_ID,
-                    META_NEW_PATH_ID,
-                    META_NEW_PATH_EXPIRES_AT,
+                if new_route_decision is None:
+                    return SessionResult(
+                        ok=False,
+                        code=SessionReasonCode.RECONNECT_VALIDATION_REQUIRED,
+                        detail="a reconnected event can only be appended "
+                        "together with the new RouteDecision it was "
+                        "validated against -- applying a route update "
+                        "without the complete reconnect binding "
+                        "verification is forbidden",
+                        session=session,
+                    )
+                if (
+                    event.previous_state != SessionState.RECONNECTING
+                    or event.new_state != SessionState.ESTABLISHED
                 ):
-                    if key not in meta:
-                        return SessionResult(
-                            ok=False,
-                            code=SessionReasonCode.INVALID_INPUT,
-                            detail="reconnected event lacks required metadata "
-                            "key %r (old/new route references)" % key,
-                            session=session,
+                    return SessionResult(
+                        ok=False,
+                        code=SessionReasonCode.EVENT_BINDING_MISMATCH,
+                        detail="a reconnected event must record the "
+                        "RECONNECTING -> ESTABLISHED reconnect transition "
+                        "(got %s -> %s)" % (event.previous_state, event.new_state),
+                        session=session,
+                    )
+                try:
+                    verified_route_id, verified_path_id, verified_expires = (
+                        verify_route_for_reconnect(
+                            session.binding,
+                            new_route_decision,
+                            reconnect_instant=event.event_instant,
+                            new_policy_decision=new_policy_decision,
                         )
-                route_update = (
-                    meta[META_NEW_ROUTE_DECISION_ID],
-                    meta[META_NEW_PATH_ID],
-                    meta[META_NEW_PATH_EXPIRES_AT],
+                    )
+                except SessionError as error:
+                    return _envelope_error(error)
+                meta = dict(event.metadata)
+                binding_problems = []
+                if meta.get(META_OLD_ROUTE_DECISION_ID) != session.current_route_decision_id:
+                    binding_problems.append(
+                        "old route decision id does not match the session's "
+                        "current route"
+                    )
+                if meta.get(META_OLD_PATH_ID) != session.current_path_id:
+                    binding_problems.append(
+                        "old path id does not match the session's current route"
+                    )
+                if meta.get(META_NEW_ROUTE_DECISION_ID) != verified_route_id:
+                    binding_problems.append(
+                        "new route decision id does not match the supplied "
+                        "validated decision"
+                    )
+                if meta.get(META_NEW_PATH_ID) != verified_path_id:
+                    binding_problems.append(
+                        "new path id does not match the supplied validated decision"
+                    )
+                if meta.get(META_NEW_PATH_EXPIRES_AT) != verified_expires:
+                    binding_problems.append(
+                        "new path expiry does not match the supplied "
+                        "validated decision"
+                    )
+                if binding_problems:
+                    return SessionResult(
+                        ok=False,
+                        code=SessionReasonCode.EVENT_BINDING_MISMATCH,
+                        detail="reconnected event route references are not "
+                        "bound to this session's state and the validated "
+                        "decision: " + "; ".join(binding_problems),
+                        session=session,
+                    )
+                route_update = (verified_route_id, verified_path_id, verified_expires)
+            elif new_route_decision is not None:
+                return SessionResult(
+                    ok=False,
+                    code=SessionReasonCode.INVALID_INPUT,
+                    detail="new_route_decision is only accepted for "
+                    "reconnected events",
+                    session=session,
                 )
             if route_update is not None:
                 new_route_id, new_path_id, new_path_expires_at = route_update
@@ -759,18 +881,36 @@ class SessionStore:
         result_code: str,
         result_detail: str,
     ) -> SessionResult:
-        """Atomic commit: session snapshot + event become visible
-        together. (The session snapshot passed in already reflects the
-        event, including any route update.)"""
+        """Atomic commit of a single event (delegates to
+        :meth:`_commit_events`)."""
+        return self._commit_events(
+            session, (event,), result_code=result_code, result_detail=result_detail
+        )
+
+    def _commit_events(
+        self,
+        session: Session,
+        events: Tuple[SessionEvent, ...],
+        *,
+        result_code: str,
+        result_detail: str,
+    ) -> SessionResult:
+        """Atomic commit: the session snapshot and ALL events become
+        visible together or neither does. (The snapshot passed in
+        already reflects every event, including any route update.)
+        Used for single-event operations AND for the two-event
+        terminate() path, whose both events commit as one operation."""
+        if not events:
+            raise SessionError("invalid-input", "an atomic commit needs at least one event")
         self._sessions[session.session_id] = session
         history = self._events.setdefault(session.session_id, [])
-        history.append(event)
+        history.extend(events)
         return SessionResult(
             ok=True,
             code=result_code,
             detail=result_detail,
             session=session,
-            event=event,
+            event=events[-1],
         )
 
 
