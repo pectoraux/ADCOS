@@ -52,8 +52,12 @@ from .transport import (
     DiscoveryTransport,
     InMemoryEndpoint,
     InMemoryTransportBus,
+    LocalInterfaceUdpTransport,
     LoopbackUdpTransport,
     TransportError,
+    is_local_ipv4,
+    is_loopback_ipv4,
+    is_private_ipv4,
 )
 from .validation import DiscoveryStatus, FreshnessError, evaluate_status
 
@@ -70,6 +74,7 @@ __all__ = [
     "InMemoryBootstrapSource",
     "InMemoryEndpoint",
     "InMemoryTransportBus",
+    "LocalInterfaceUdpTransport",
     "LoopbackUdpTransport",
     "MergeResult",
     "MergeRejectedError",
@@ -77,6 +82,9 @@ __all__ = [
     "SourceType",
     "TransportError",
     "evaluate_status",
+    "is_local_ipv4",
+    "is_loopback_ipv4",
+    "is_private_ipv4",
     "observation_from_bytes",
     "observation_from_mapping",
     "observation_signature_input",

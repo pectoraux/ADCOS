@@ -4,7 +4,8 @@
 Deterministic, offline verification of the discovery package against the
 frozen WORK-006 requirements (spec/prompts/WORK-006.md): the 20 required
 test cases plus serialization round-trips, WORK-003 envelope integration,
-adversarial provenance checks, and seeded fuzz.
+adversarial provenance checks, seeded fuzz, and the configurable
+local-interface transport.
 
 The central boundary is exercised throughout:
 
@@ -14,8 +15,14 @@ The central boundary is exercised throughout:
 
 All key material is TEST-ONLY; all clocks are injected; all PRNGs are
 seeded so runs are byte-identical. No external network access is
-permitted or required for the suite — the local-discovery transport test
-uses a real loopback UDP socket (127.0.0.1) only.
+permitted or required for the suite — the local-discovery transport
+tests use real UDP sockets bound to loopback addresses (127.0.0.0/8)
+only. The configurable ``LocalInterfaceUdpTransport`` is exercised
+between two genuinely independent loopback IP endpoints
+(127.0.0.2 and 127.0.0.3) to prove two ADCOS nodes on the same local IP
+network can exchange a discovery observation — the same transport a
+Raspberry Pi / laptop / router would bind to a private LAN address in
+production.
 """
 
 from __future__ import annotations
@@ -38,12 +45,16 @@ from discovery import (  # noqa: E402
     DiscoveryStore,
     InMemoryBootstrapSource,
     InMemoryTransportBus,
+    LocalInterfaceUdpTransport,
     LoopbackUdpTransport,
     MergeResult,
     SerializationError,
     SourceType,
     TransportError,
     evaluate_status,
+    is_local_ipv4,
+    is_loopback_ipv4,
+    is_private_ipv4,
     observation_from_bytes,
     observation_from_mapping,
     observation_signature_input,
@@ -179,6 +190,18 @@ def _find_free_loopback_port() -> int:
         s.close()
 
 
+def _find_free_local_port(bind_address: str) -> int:
+    """Find a free UDP port bound to a specific local address
+    (deterministic allocation; used for the independent-endpoint test on
+    distinct loopback IPs 127.0.0.2 / 127.0.0.3)."""
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        s.bind((bind_address, 0))
+        return s.getsockname()[1]  # type: ignore[no-any-return]
+    finally:
+        s.close()
+
+
 # ---------------------------------------------------------------------------
 # Required tests 1-2: local peer discovery over loopback; no Internet
 # ---------------------------------------------------------------------------
@@ -262,6 +285,183 @@ def case_no_upstream_internet_required(results: List[Tuple[str, bool, str]]) -> 
         ok and refused,
         "non-private bind address refused (no Internet binding)"
         if ok and refused else "FAILED: bind-refusal=%r" % refused,
+    ))
+
+
+def case_two_independent_endpoints_exchange_locally(results: List[Tuple[str, bool, str]]) -> None:
+    """2a: two INDEPENDENT local IP endpoints exchange a discovery
+    observation over the local IP network.
+
+    The loopback test above (case_local_loopback_discovery) uses two
+    sockets bound to the SAME address (127.0.0.1) on different ports —
+    it proves the transport works, but does not prove two ADCOS nodes on
+    DIFFERENT local IP addresses can find one another. This test binds
+    node A to 127.0.0.2 and node B to 127.0.0.3 — two genuinely
+    independent loopback IP endpoints on the local IP network — and
+    proves BIDIRECTIONAL signed discovery observation exchange:
+
+        A (127.0.0.2) announces B's observation -> B (127.0.0.3) receives
+        B (127.0.0.3) announces A's observation -> A (127.0.0.2) receives
+
+    The ``LocalInterfaceUdpTransport`` used here is the SAME transport a
+    Raspberry Pi / laptop / router would bind to a private LAN address
+    (192.168.x / 10.x / 172.16-31.x) in production; only the bind
+    address differs. The discovery contract above the transport is
+    unchanged. No Internet access; no external network dependency.
+    """
+    service, store, provider, ident_a, ref_a = make_identity()
+    ident_b, ref_b = make_node(b"TEST-ONLY-indep-endpoint-node-B", service, provider)
+    addr_a = "127.0.0.2"
+    addr_b = "127.0.0.3"
+    port_a = _find_free_local_port(addr_a)
+    port_b = _find_free_local_port(addr_b)
+    tx_a = LocalInterfaceUdpTransport(port=port_a, bind_address=addr_a)
+    tx_b = LocalInterfaceUdpTransport(port=port_b, bind_address=addr_b)
+    try:
+        # Confirm the two transports bound to genuinely different IPs.
+        la = tx_a.local_address()
+        lb = tx_b.local_address()
+        ok_addr = la[0] == addr_a and lb[0] == addr_b and la[0] != lb[0]
+        local_store_a = DiscoveryStore()
+        local_store_b = DiscoveryStore()
+        svc_a = DiscoveryService(
+            sender_node_id=ident_a.node_id.text, store=store, provider=provider,
+            credential=ref_a, transport=tx_a, local_store=local_store_a,
+        )
+        svc_b = DiscoveryService(
+            sender_node_id=ident_b.node_id.text, store=store, provider=provider,
+            credential=ref_b, transport=tx_b, local_store=local_store_b,
+        )
+        # A announces an observation about B to B's address.
+        obs_a = base_observation(
+            sender_node_id=ident_a.node_id.text,
+            observed_node_id=ident_b.node_id.text,
+            observed_endpoints=({"transport": "udp", "address": "%s:%d" % (addr_b, port_b)},),
+            source_context={"interface": "local-private", "bind": addr_a},
+        )
+        svc_a.announce(obs_a, to=(addr_b, port_b))
+        # B announces an observation about A to A's address.
+        obs_b = base_observation(
+            sender_node_id=ident_b.node_id.text,
+            observed_node_id=ident_a.node_id.text,
+            sequence=1,
+            observed_endpoints=({"transport": "udp", "address": "%s:%d" % (addr_a, port_a)},),
+            source_context={"interface": "local-private", "bind": addr_b},
+        )
+        svc_b.announce(obs_b, to=(addr_a, port_a))
+        # Both receive and merge.
+        results_b = svc_b.receive(now=FRESH_NOW, timeout_ms=200)
+        results_a = svc_a.receive(now=FRESH_NOW, timeout_ms=200)
+        ok = ok_addr and bool(results_b) and results_b[0].accepted
+        ok = ok and bool(results_a) and results_a[0].accepted
+        # B's store has A's observation of B; A's store has B's observation of A.
+        snap_b = local_store_b.snapshot()
+        snap_a = local_store_a.snapshot()
+        ok = ok and len(snap_b) == 1 and snap_b[0].sender_node_id == ident_a.node_id.text
+        ok = ok and snap_b[0].observed_node_id == ident_b.node_id.text
+        ok = ok and len(snap_a) == 1 and snap_a[0].sender_node_id == ident_b.node_id.text
+        ok = ok and snap_a[0].observed_node_id == ident_a.node_id.text
+        results.append((
+            "two-independent-endpoints-exchange-locally",
+            ok,
+            ("two LocalInterfaceUdpTransports on 127.0.0.2 / 127.0.0.3 "
+             "exchanged a signed discovery observation bidirectionally; "
+             "same transport works on a private LAN address (192.168/10/172.16-31)")
+            if ok else "FAILED",
+        ))
+    finally:
+        tx_a.close()
+        tx_b.close()
+
+
+def case_local_interface_transport_scope(results: List[Tuple[str, bool, str]]) -> None:
+    """2b: the configurable LocalInterfaceUdpTransport accepts loopback
+    AND RFC 1918 private ranges, and refuses every public/Internet
+    address at the scope stage.
+
+    This is the safe-configurable guarantee: an operator may configure
+    any private/LAN bind address (a Pi on 192.168.1.50, a laptop on
+    10.0.0.5, a router on 172.16.0.1) and the transport's scope accepts
+    it; a public address (8.8.8.8, 1.1.1.1) or a non-private 172.x
+    (outside the 172.16.0.0/12 block) is REFUSED at the scope stage —
+    the transport can never be made to bind to the open Internet.
+
+    The scope-logic check uses the address validators directly (so it
+    does not depend on the test host having a LAN interface configured
+    for every private range — a real Pi/laptop/router DOES have such an
+    interface, the sandbox has only loopback). The bind-level check
+    confirms loopback addresses actually bind in the test environment
+    and that public addresses are refused by the constructor (a
+    ``TransportError`` whose ``code`` is ``bind-address`` — the scope
+    refusal — distinct from a later OS ``bind`` failure).
+    """
+    # --- Scope-logic check via the validators ---
+    accepted_by_scope: List[str] = []
+    refused_by_scope: List[str] = []
+    # Loopback (the deterministic-test scope).
+    for addr in ("127.0.0.1", "127.0.0.2", "127.255.255.255"):
+        if is_local_ipv4(addr) and is_loopback_ipv4(addr):
+            accepted_by_scope.append(addr)
+        else:
+            refused_by_scope.append(addr)
+    # RFC 1918 private ranges — the production LAN scope.
+    for addr in ("10.0.0.1", "10.255.255.255",
+                 "172.16.0.1", "172.31.255.255",
+                 "192.168.0.1", "192.168.1.50", "192.168.255.255"):
+        if is_local_ipv4(addr) and is_private_ipv4(addr) and not is_loopback_ipv4(addr):
+            accepted_by_scope.append(addr)
+        else:
+            refused_by_scope.append(addr)
+    # Public addresses MUST be refused by the scope.
+    for addr in ("8.8.8.8", "1.1.1.1", "203.0.113.1",
+                 "172.1.2.3",      # outside 172.16.0.0/12 — public
+                 "172.15.0.1",     # below the private block — public
+                 "172.32.0.1",     # above the private block — public
+                 "224.0.0.1",      # multicast — not private/loopback
+                 "239.0.0.1"):     # administratively-scoped multicast — not private
+        if is_local_ipv4(addr):
+            refused_by_scope.append(addr)  # scope wrongly accepted
+        # else: scope correctly refused
+    scope_ok = bool(accepted_by_scope) and not refused_by_scope
+
+    # --- Bind-level check: loopback binds, public refused at scope stage ---
+    bound: List[str] = []
+    scope_refused: List[str] = []
+    bind_failed_after_scope: List[str] = []
+    for addr in ("127.0.0.1", "127.0.0.2"):
+        tx = LocalInterfaceUdpTransport(bind_address=addr)
+        try:
+            la = tx.local_address()
+            if la[0] == addr:
+                bound.append(addr)
+        finally:
+            tx.close()
+    for addr in ("8.8.8.8", "1.1.1.1", "172.1.2.3", "172.32.0.1", "224.0.0.1"):
+        try:
+            LocalInterfaceUdpTransport(bind_address=addr)
+            # If we get here the scope did NOT refuse a public address —
+            # this is a safety failure, even if the bind later succeeded.
+            scope_refused.append(addr + ":NOT-REFUSED")
+        except TransportError as error:
+            if getattr(error, "code", None) == "bind-address":
+                # Scope refusal — the safety guarantee held.
+                pass
+            else:
+                # Some other bind-stage failure on a non-sandbox address —
+                # not expected for the public addresses in this list.
+                bind_failed_after_scope.append("%s:%s" % (addr, error.code))
+    bind_ok = len(bound) == 2 and not scope_refused and not bind_failed_after_scope
+
+    ok = scope_ok and bind_ok
+    results.append((
+        "local-interface-transport-scope",
+        ok,
+        ("LocalInterfaceUdpTransport scope accepts loopback + RFC1918 private "
+         "(%d addresses); refuses public/Internet incl. 172.x outside /12 "
+         "(%d refused at scope); loopback bind verified in sandbox"
+         % (len(accepted_by_scope), 5))
+        if ok else "FAILED: scope-ok=%r bind-ok=%r scope-refused=%r bind-failed=%r"
+                  % (scope_ok, bind_ok, scope_refused, bind_failed_after_scope),
     ))
 
 
@@ -1052,6 +1252,8 @@ def main() -> int:
     results: List[Tuple[str, bool, str]] = []
     case_local_loopback_discovery(results)
     case_no_upstream_internet_required(results)
+    case_two_independent_endpoints_exchange_locally(results)
+    case_local_interface_transport_scope(results)
     case_authenticated_observation_accepted(results)
     case_forged_sender_identity_rejected(results)
     case_credential_nodeid_mismatch_rejected(results)

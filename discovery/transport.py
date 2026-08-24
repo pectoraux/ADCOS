@@ -1,38 +1,133 @@
 """Discovery transport abstractions (WORK-006).
 
 The discovery contract is TRANSPORT-INDEPENDENT — the transport just
-moves signed observation bytes. Two concrete transports are provided:
+moves signed observation bytes. Three concrete transports are provided:
 
-``LoopbackUdpTransport`` — a real UDP socket bound to ``127.0.0.1``.
-This is the concrete IP-based local discovery substrate required by the
-handoff for Linux/reference testing. It binds ONLY to loopback, makes
-NO outbound Internet connection, and never branches on access
-technology (5G/Wi-Fi/6G/satellite/vendor names are forbidden in core
-discovery logic).
+``LoopbackUdpTransport`` — a real UDP socket bound strictly to a
+loopback address (127.0.0.0/8). This is the deterministic-test
+substrate: it makes NO outbound Internet connection, and its bind scope
+is loopback only, so the name matches the behaviour exactly. Used by the
+deterministic local-discovery tests.
+
+``LocalInterfaceUdpTransport`` — a real UDP socket bound to a
+CONFIGURABLE local interface address. This is the concrete IP-local
+discovery substrate a Raspberry Pi / laptop / router would use on a real
+LAN: it accepts loopback (127.0.0.0/8) OR RFC 1918 private ranges
+(10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16) and REFUSES every other
+address (no Internet binding). The bind address is operator-configured
+— the transport makes no access-technology decision (5G/Wi-Fi/6G/
+satellite/vendor names are forbidden in core discovery logic). The
+discovery contract above this transport is identical to the loopback
+case; future 6G/IMT-2030 access nodes use the same contract, their
+access details are capability/profile data.
 
 ``InMemoryTransportBus`` — an injectable, deterministic, no-socket
 message bus connecting multiple in-memory endpoints. Used by the
 convergence/replay/adversarial tests so results never depend on socket
 timing or OS scheduling.
 
-Both transports move opaque bytes keyed by IP-local addresses. The
-discovery contract above them never sees the transport type — future
-6G/IMT-2030/future access nodes use the same discovery contract; their
-access details are capability/profile data, not transport branches.
+All real-socket transports move opaque bytes keyed by IP-local
+addresses; the discovery contract above them never sees the transport
+type.
 """
 
 from __future__ import annotations
 
 import socket
-import struct
 from collections import deque
-from typing import Deque, Dict, Optional, Tuple
+from typing import Callable, Deque, Dict, Optional, Tuple
 
 Address = Tuple[str, int]
+ScopePredicate = Callable[[str], bool]
 
 
 class TransportError(ValueError):
-    """Raised when a transport operation fails (fail closed)."""
+    """Raised when a transport operation fails (fail closed).
+
+    The first constructor argument is a short machine-readable ``code``
+    (e.g. ``"bind-address"``, ``"bind"``, ``"send"``, ``"recv"``); the
+    second is a human-readable detail. The ``code`` attribute lets
+    callers distinguish a scope-stage refusal (``bind-address``) from a
+    later OS-level bind failure (``bind``) — the safety guarantee that a
+    public address is REFUSED by scope, never by the OS.
+    """
+
+    def __init__(self, code: str, detail: str) -> None:
+        super().__init__("%s: %s" % (code, detail))
+        self.code = code
+        self.detail = detail
+
+
+# ---------------------------------------------------------------------------
+# Address-scope validation — RFC 1918 + RFC 919 loopback only.
+# ---------------------------------------------------------------------------
+
+
+def _parse_ipv4_octets(addr: str) -> Optional[Tuple[int, int, int, int]]:
+    """Parse a dotted-quad IPv4 string into four octets, or None if the
+    shape is wrong (non-numeric, wrong count, out of range)."""
+    if not isinstance(addr, str) or not addr:
+        return None
+    parts = addr.split(".")
+    if len(parts) != 4:
+        return None
+    octets = []
+    for part in parts:
+        # Reject leading zeros, non-digits, and out-of-range octets.
+        if not part.isdigit():
+            return None
+        if len(part) > 1 and part[0] == "0":
+            return None
+        value = int(part)
+        if value < 0 or value > 255:
+            return None
+        octets.append(value)
+    return (octets[0], octets[1], octets[2], octets[3])
+
+
+def is_loopback_ipv4(addr: str) -> bool:
+    """True iff addr is in 127.0.0.0/8 (RFC 919 loopback)."""
+    octets = _parse_ipv4_octets(addr)
+    return octets is not None and octets[0] == 127
+
+
+def is_private_ipv4(addr: str) -> bool:
+    """True iff addr is in an RFC 1918 private range.
+
+    10.0.0.0/8        (10.x.x.x)
+    172.16.0.0/12     (172.16.x.x .. 172.31.x.x) — NOT 172.0-172.15 or
+                      172.32-172.255, which are public
+    192.168.0.0/16    (192.168.x.x)
+    """
+    octets = _parse_ipv4_octets(addr)
+    if octets is None:
+        return False
+    o0, o1, _o2, _o3 = octets
+    if o0 == 10:
+        return True
+    if o0 == 172 and 16 <= o1 <= 31:
+        return True
+    if o0 == 192 and o1 == 168:
+        return True
+    return False
+
+
+def is_local_ipv4(addr: str) -> bool:
+    """True iff addr is loopback OR RFC 1918 private — the only safe
+    bind scopes for the WORK-006 local discovery substrate."""
+    return is_loopback_ipv4(addr) or is_private_ipv4(addr)
+
+
+# Backward-compatible private aliases (the validators were originally
+# underscore-prefixed; the public names are preferred).
+_is_loopback_ipv4 = is_loopback_ipv4
+_is_private_ipv4 = is_private_ipv4
+_is_local_ipv4 = is_local_ipv4
+
+
+# ---------------------------------------------------------------------------
+# Abstract transport
+# ---------------------------------------------------------------------------
 
 
 class DiscoveryTransport:
@@ -52,38 +147,49 @@ class DiscoveryTransport:
         pass
 
 
-class LoopbackUdpTransport(DiscoveryTransport):
-    """A real UDP socket bound to 127.0.0.1 — the concrete IP-local
-    discovery substrate.
+# ---------------------------------------------------------------------------
+# Real UDP transports
+# ---------------------------------------------------------------------------
 
-    Binds ONLY to the loopback interface. Makes NO outbound Internet
-    connection. Suitable for deterministic local discovery tests on
-    Linux/reference platforms. No access-technology branching.
-    """
 
-    def __init__(self, *, port: int = 0, bind_address: str = "127.0.0.1") -> None:
+class _UdpSocketTransport(DiscoveryTransport):
+    """Common real-UDP-socket implementation shared by the loopback and
+    local-interface transports. Bind-scope validation is delegated to a
+    predicate supplied by the subclass; the transport itself never
+    branches on access technology."""
+
+    def __init__(
+        self,
+        *,
+        port: int,
+        bind_address: str,
+        scope_predicate: ScopePredicate,
+        scope_name: str,
+    ) -> None:
         if not isinstance(port, int) or port < 0 or port > 65535:
             raise TransportError("port", "port must be 0..65535")
         if not isinstance(bind_address, str) or not bind_address:
             raise TransportError("bind-address", "bind_address must be a non-empty string")
-        # Refuse non-loopback / non-private bind addresses — the WORK-006
-        # local substrate is IP-local only, no Internet binding.
-        if not (bind_address.startswith("127.") or bind_address == "localhost"
-                or bind_address.startswith("192.168.") or bind_address.startswith("10.")
-                or bind_address.startswith("172.")):
+        # Reject any bind address outside the subclass's declared scope.
+        # This is the fail-closed guarantee that no transport in this
+        # module ever binds to a public/Internet address.
+        if not scope_predicate(bind_address):
             raise TransportError(
                 "bind-address",
-                "bind_address %r must be loopback or private (no Internet binding)"
-                % bind_address,
+                "bind_address %r is not a %s address (no Internet binding)"
+                % (bind_address, scope_name),
             )
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             sock.bind((bind_address, port))
         except OSError as error:
-            raise TransportError("bind", "loopback bind failed: %s" % error) from error
+            raise TransportError(
+                "bind", "%s bind to %s:%d failed: %s" % (scope_name, bind_address, port, error)
+            ) from error
         self._sock = sock
         self._bind_address = bind_address
+        self._scope_name = scope_name
 
     def send(self, data: bytes, *, to: Address) -> None:
         if not isinstance(data, (bytes, bytearray)):
@@ -121,6 +227,63 @@ class LoopbackUdpTransport(DiscoveryTransport):
             self._sock.close()
         except OSError:
             pass
+
+
+class LoopbackUdpTransport(_UdpSocketTransport):
+    """A real UDP socket bound STRICTLY to a loopback address
+    (127.0.0.0/8) — the deterministic-test substrate.
+
+    Binds ONLY to loopback. Makes NO outbound Internet connection.
+    Suitable for deterministic local discovery tests on Linux/reference
+    platforms. No access-technology branching. The class name matches
+    the bind scope exactly: this transport refuses every non-loopback
+    address, including RFC 1918 private ranges (use
+    ``LocalInterfaceUdpTransport`` for those).
+    """
+
+    def __init__(self, *, port: int = 0, bind_address: str = "127.0.0.1") -> None:
+        super().__init__(
+            port=port,
+            bind_address=bind_address,
+            scope_predicate=is_loopback_ipv4,
+            scope_name="loopback",
+        )
+
+
+class LocalInterfaceUdpTransport(_UdpSocketTransport):
+    """A real UDP socket bound to a CONFIGURABLE local interface address
+    — the concrete IP-local discovery substrate for production local
+    discovery on a Raspberry Pi, laptop, router, or other device on a
+    real LAN.
+
+    Accepts bind to loopback (127.0.0.0/8) OR any RFC 1918 private
+    range (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16). REFUSES every
+    other address — no Internet binding. The bind address is
+    operator-configured (e.g. ``192.168.1.50`` on a Pi, ``10.0.0.5`` on
+    a laptop); the transport makes no access-technology decision.
+
+    Pair this transport with a configured peer address (the
+    "configured neighbor seed" pattern explicitly permitted by the
+    WORK-006 handoff) for unicast local discovery between two ADCOS
+    nodes on the same LAN — no multicast, no broadcast, no Internet.
+
+    The discovery contract above this transport is identical to the
+    loopback case: signed observation bytes are moved opaquely, and the
+    contract never branches on transport type or access technology.
+    """
+
+    def __init__(self, *, port: int = 0, bind_address: str = "127.0.0.1") -> None:
+        super().__init__(
+            port=port,
+            bind_address=bind_address,
+            scope_predicate=is_local_ipv4,
+            scope_name="local-private",
+        )
+
+
+# ---------------------------------------------------------------------------
+# In-memory deterministic transport (no socket)
+# ---------------------------------------------------------------------------
 
 
 class InMemoryTransportBus:

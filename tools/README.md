@@ -245,7 +245,7 @@ python3 tools/capability_selftest.py
 
 ## discovery_selftest.py — peer discovery tests (WORK-006)
 
-Deterministic, offline verification of the discovery package against the frozen WORK-006 requirements (spec/prompts/WORK-006.md): the 20 required adversarial/convergence/replay/freshness tests plus serialization/envelope round-trip, freshness matrix, and seeded fuzz. The local-discovery transport test uses a real loopback UDP socket (127.0.0.1) only — no external network access.
+Deterministic, offline verification of the discovery package against the frozen WORK-006 requirements (spec/prompts/WORK-006.md): the 20 required adversarial/convergence/replay/freshness tests plus serialization/envelope round-trip, freshness matrix, seeded fuzz, and the configurable local-interface transport. The local-discovery transport tests use real UDP sockets bound to loopback addresses (127.0.0.0/8) only — no external network access is permitted or required; the configurable `LocalInterfaceUdpTransport` is proven between two genuinely independent loopback IP endpoints (127.0.0.2 / 127.0.0.3) and its scope validated for every RFC 1918 private range.
 
 ```bash
 python3 tools/discovery_selftest.py
@@ -257,6 +257,8 @@ python3 tools/discovery_selftest.py
 |---|---|
 | `local-loopback-discovery-succeeds` | real UDP loopback exchange; A announces B; B receives & merges (1) |
 | `no-upstream-internet-required` | loopback binds 127.0.0.1; no outbound Internet; non-private bind refused (2) |
+| `two-independent-endpoints-exchange-locally` | two `LocalInterfaceUdpTransport` on 127.0.0.2 / 127.0.0.3 bidirectionally exchange a signed discovery observation — the same transport a Pi/laptop/router binds to a private LAN address (2a) |
+| `local-interface-transport-scope` | `LocalInterfaceUdpTransport` accepts loopback + RFC1918 private; refuses public/Internet incl. 172.x outside /12 at the scope stage (2b) |
 | `authenticated-observation-accepted` | valid signature + provenance + ACTIVE credential -> accepted (3) |
 | `forged-sender-identity-rejected` | B's signature on an observation naming A -> verification-failed (4) |
 | `credential-nodeid-mismatch-rejected` | A's valid signature verified with B's credential -> NodeID mismatch -> rejected (5) |
