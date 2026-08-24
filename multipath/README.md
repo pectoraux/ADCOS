@@ -78,22 +78,25 @@ any public path: the generic session append rejects state-preserving
 events as `illegal-transition`, and the session substrate is fully
 GENERIC — no multipath import, no registration API, no plan-append
 surface (WORK-012 never depends on WORK-013; verified mechanically).
-The plan-event commit path is owned by THIS layer: a module-private
-commit token is created only by the `MultipathStore` constructor (the
-constructor-time handshake) and held in a module-private registry
-keyed by the session store — never stored on an instance, never
-exposed as an attribute. Exactly one `MultipathStore` may own a given
-`SessionStore`'s plan-event seam (enforced here, in the multipath
-layer). The commit path **requires the token as an argument and
-verifies it by identity** against the registry entry (Architect
-review of PR #13, corrections 1-4): without the constructed
-authority, without a token, or with any wrong token (`None`, a random
-object, a fresh same-class token, or another store's genuine token),
-the commit fails closed with `plan-authority-required` and mutates
-nothing. Only the genuine token commits — and in production only
-`MultipathStore` operations fetch it (module-private accessor) and
-pass it; a caller that merely imports the module cannot mutate
-session history.
+The plan-event commit path is owned by THIS layer, and the capability
+is the **constructed authority instance itself**: the `MultipathStore`
+constructor registers itself in a module-private registry keyed by
+the session store (the constructor-time handshake), and exactly one
+`MultipathStore` may own a given `SessionStore`'s plan-event seam
+(enforced here, in the multipath layer). The commit path
+`_commit_plan_event(authority, store, event)` **requires that instance
+as its credential and verifies it by identity** (Architect reviews of
+PR #13, corrections 1-5). There is **no token object and no
+token-acquisition API** — correction 5 removed the callable
+`_authority_token(store)` accessor, which handed the real credential
+to any caller who imported the module. Nothing in the module converts
+a session store into a committable credential: without the
+constructed authority, or with any other caller (`None`, a random
+object, the session store itself, a foreign authority, or an attribute
+read off an instance or the module), the commit fails closed with
+`plan-authority-required` and mutates nothing. Only the application's
+own constructed authority commits, and only its validated operations
+present it (they pass `self`).
 
 ## Path admission (the cross-path binding security property)
 
