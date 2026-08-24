@@ -114,7 +114,16 @@ Merge rules (deterministic, order-independent, fail-closed):
    prior same-key conflict also moves to historical and is cleared).
 
 Different reporters making conflicting claims about the same subject are
-naturally both retained (different `(reporter, subject, claim_type)` keys).
+naturally both retained (different `(reporter, subject, claim_type,`**`discriminator`**`)` keys).
+For `advertises` claims the discriminator is the **capability_id**
+(`claim.value`) — so a single node may concurrently advertise multiple distinct
+capabilities and each is an independently current, independently superseded,
+independently conflict-preserved claim (WORK-005/WORK-007 rule: capabilities
+are individually attributable statements, not a single "latest advertisement
+wins" slot). For all other claim types the discriminator is the empty string —
+value is a STATE of the `(reporter, subject, claim_type)` assertion (e.g.
+identity `present`/`removed`, reachability context, link state) and the
+latest sequence supersedes the prior.
 `get_claims_for_subject(subject)` returns all of them with provenance.
 
 `snapshot()` / `to_canonical_bytes()` produce byte-identical output across
@@ -137,6 +146,23 @@ get_link_claims(endpoint_a, endpoint_b, now)
 get_conflicts()
 snapshot() / to_canonical_bytes()
 ```
+
+**Identity-state authority rule** (LOCK-008; the frozen WORK-007 rule that a
+reporter cannot authoritatively establish the subject's identity state):
+`get_identity_state` only honors two evidence paths:
+
+- a self-attributed (`reporter == subject`, `SELF_ADVERTISEMENT`) identity
+  claim — `present` → `KNOWN`, `removed` → `REMOVED`;
+- a `DIRECT_OBSERVATION` identity `present` claim by another reporter →
+  `KNOWN` (the local node directly observed the subject present).
+
+`REMOTE_CLAIM` and `BOOTSTRAP_CLAIM` identity claims are stored as evidence
+(queryable via `get_claims_for_subject` with full `reporter`/`subject`/
+`source_class` provenance) but **cannot drive `IdentityState`** — a remote
+`identity=removed` claim must NOT produce authoritative
+`IdentityState.REMOVED`, and a bootstrap seed must not authoritatively
+establish existence. This is the mechanical provenance-collapse prevention
+for the identity dimension.
 
 Every returned claim retains `reporter`, `subject`, `source_class`,
 `issued_at`, `freshness_until`, `sequence`, `evidence_refs`, and

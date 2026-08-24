@@ -544,7 +544,7 @@ def case_10_conflicting_same_sequence_preserved(results: List[Tuple[str, bool, s
         and len(conflicts[0][1]) == 2
         and {c.claim_id for c in conflicts[0][1]} == {c1.claim_id, c2.claim_id}
         # current head for this key is conflicted (None) -> no authoritative winner
-        and g.get_claim((A, B, ClaimType.GATEWAY)) is None
+        and g.get_claim((A, B, ClaimType.GATEWAY, "")) is None
     )
     results.append((
         "10-conflicting-same-sequence-preserved",
@@ -552,7 +552,7 @@ def case_10_conflicting_same_sequence_preserved(results: List[Tuple[str, bool, s
         "both conflicting claims retained; no arrival-order winner; current "
         "head is conflicted (None)"
         if ok else "FAILED: r1=%s r2=%s conflicts=%d head=%s"
-        % (r1.code, r2.code, len(conflicts), g.get_claim((A, B, ClaimType.GATEWAY))),
+        % (r1.code, r2.code, len(conflicts), g.get_claim((A, B, ClaimType.GATEWAY, ""))),
     ))
 
 
@@ -1288,6 +1288,179 @@ def case_no_5g_vendor_imports(results: List[Tuple[str, bool, str]]) -> None:
     ))
 
 
+def case_29_remote_identity_removed_not_authoritative(
+    results: List[Tuple[str, bool, str]],
+) -> None:
+    """29. A REMOTE_CLAIM or BOOTSTRAP_CLAIM identity=removed claim does NOT
+    drive ``IdentityState.REMOVED``. A reporter cannot authoritatively
+    establish the subject's identity state (LOCK-008). Regression for the
+    WORK-007 cycle-1 blocker where ``get_identity_state()`` fell through from
+    self-claims to *all* non-self identity claims (including REMOTE_CLAIM and
+    BOOTSTRAP_CLAIM) and returned REMOVED from them."""
+    service, store, provider, ident_a, ref_a = make_identity()
+    ident_b, _ = make_node(b"TEST-29-B", service, provider)
+    ident_c, _ = make_node(b"TEST-29-C", service, provider)
+    A, B, C = ident_a.node_id.text, ident_b.node_id.text, ident_c.node_id.text
+    g = TopologyGraph()
+    # A says C was removed (REMOTE_CLAIM) -- must NOT drive IdentityState.REMOVED.
+    r1 = g.merge(_claim(
+        subject=C, reporter=A, claim_type=ClaimType.IDENTITY, value="removed",
+        source_class=SourceClass.REMOTE_CLAIM, sequence=1,
+        provenance="A-says-C-removed-remote",
+    ))
+    # B's bootstrap seed also claims C removed -- also must NOT drive REMOVED.
+    r2 = g.merge(_claim(
+        subject=C, reporter=B, claim_type=ClaimType.IDENTITY, value="removed",
+        source_class=SourceClass.BOOTSTRAP_CLAIM, sequence=1,
+        provenance="B-says-C-removed-bootstrap",
+    ))
+    state = g.get_identity_state(C, now=FRESH_NOW)
+    auth = g.get_authoritative_claims(C, claim_type=ClaimType.IDENTITY, now=FRESH_NOW)
+    claims = [c for c in g.get_claims_for_subject(C, now=FRESH_NOW)
+              if c.claim_type == ClaimType.IDENTITY]
+    remote_claims = [c for c in claims if c.source_class == SourceClass.REMOTE_CLAIM]
+    bootstrap_claims = [c for c in claims if c.source_class == SourceClass.BOOTSTRAP_CLAIM]
+    ok = (
+        r1.accepted and r2.accepted
+        and state == IdentityState.UNKNOWN  # NOT REMOVED -- the blocker fix
+        and auth == ()  # no self-attributed identity claim -> authoritative set empty
+        and len(remote_claims) == 1  # A's claim still stored as evidence (provenance kept)
+        and remote_claims[0].reporter == A
+        and remote_claims[0].subject == C
+        and remote_claims[0].value == "removed"
+        and len(bootstrap_claims) == 1  # B's claim also stored as evidence
+        and bootstrap_claims[0].reporter == B
+        and bootstrap_claims[0].source_class == SourceClass.BOOTSTRAP_CLAIM
+    )
+    # Positive controls: the fix must PRESERVE the two legitimate identity paths.
+    # (a) A self "removed" from C about C STILL drives REMOVED.
+    g2 = TopologyGraph()
+    g2.merge(_claim(
+        subject=C, reporter=C, claim_type=ClaimType.IDENTITY, value="removed",
+        source_class=SourceClass.SELF_ADVERTISEMENT, sequence=3,
+        provenance="C-says-C-removed-self",
+    ))
+    self_removed_state = g2.get_identity_state(C, now=FRESH_NOW)
+    # (b) A DIRECT_OBSERVATION "present" from A about C STILL drives KNOWN.
+    g3 = TopologyGraph()
+    g3.merge(_claim(
+        subject=C, reporter=A, claim_type=ClaimType.IDENTITY, value="present",
+        source_class=SourceClass.DIRECT_OBSERVATION, sequence=1,
+        provenance="A-observed-C-present",
+    ))
+    direct_present_state = g3.get_identity_state(C, now=FRESH_NOW)
+    ok = ok and (
+        self_removed_state == IdentityState.REMOVED
+        and direct_present_state == IdentityState.KNOWN
+    )
+    results.append((
+        "29-remote-identity-removed-not-authoritative",
+        ok,
+        "REMOTE/BOOTSTRAP identity=removed does NOT drive IdentityState.REMOVED "
+        "(stays UNKNOWN); claims retained as evidence; self-removed still REMOVED; "
+        "direct-present still KNOWN"
+        if ok else
+        "FAILED: state=%s auth=%d remote=%d bootstrap=%d self_removed=%s direct_present=%s"
+        % (state, len(auth), len(remote_claims), len(bootstrap_claims),
+           self_removed_state, direct_present_state),
+    ))
+
+
+def case_30_concurrent_distinct_capability_advertisements(
+    results: List[Tuple[str, bool, str]],
+) -> None:
+    """30. A node may concurrently advertise multiple distinct capabilities;
+    each is an independently current, independently superseded, independently
+    queryable claim. Regression for the WORK-007 cycle-1 blocker where
+    ADVERTISES claims were keyed only by (reporter, subject, claim_type) so
+    a node's second capability advertisement superseded its first instead of
+    both remaining current."""
+    service, store, provider, ident_c, ref_c = make_identity(b"TEST-30-C")
+    C = ident_c.node_id.text
+    g = TopologyGraph()
+    # C self-advertises two distinct capabilities concurrently (different
+    # capability_ids, same reporter+subject+claim_type).
+    c1 = _claim(
+        subject=C, reporter=C, claim_type=ClaimType.ADVERTISES,
+        value="capability.core.multipath",
+        source_class=SourceClass.SELF_ADVERTISEMENT, sequence=1,
+        provenance="C-advert-multipath",
+    )
+    c2 = _claim(
+        subject=C, reporter=C, claim_type=ClaimType.ADVERTISES,
+        value="capability.core.gateway",
+        source_class=SourceClass.SELF_ADVERTISEMENT, sequence=2,
+        provenance="C-advert-gateway",
+    )
+    r1 = g.merge(c1)
+    r2 = g.merge(c2)
+    # Both must remain current (distinct keys via the capability_id discriminator).
+    adv_claims = [c for c in g.get_claims_for_subject(C, now=FRESH_NOW)
+                  if c.claim_type == ClaimType.ADVERTISES]
+    auth = g.get_authoritative_claims(C, claim_type=ClaimType.ADVERTISES, now=FRESH_NOW)
+    cap_ids = sorted(str(c.value) for c in adv_claims)
+    ok = (
+        r1.accepted and r2.accepted
+        and r1.code == "accepted"  # first claim accepted fresh
+        and r2.code == "accepted"  # second ALSO accepted (NOT superseding c1)
+        and len(adv_claims) == 2  # BOTH current
+        and cap_ids == ["capability.core.gateway", "capability.core.multipath"]
+        and len(auth) == 2  # BOTH authoritative (self-attributed)
+        and {str(c.value) for c in auth} == {
+            "capability.core.multipath", "capability.core.gateway",
+        }
+        and {c.claim_id for c in adv_claims} == {c1.claim_id, c2.claim_id}
+    )
+    # Per-capability supersession: re-merging cap-A at seq 3 supersedes the
+    # prior cap-A (seq 1) ONLY; cap-B (seq 2) must be UNAFFECTED.
+    c3 = _claim(
+        subject=C, reporter=C, claim_type=ClaimType.ADVERTISES,
+        value="capability.core.multipath",
+        source_class=SourceClass.SELF_ADVERTISEMENT, sequence=3,
+        provenance="C-advert-multipath-v2",
+    )
+    r3 = g.merge(c3)
+    adv_after = [c for c in g.get_claims_for_subject(C, now=FRESH_NOW)
+                 if c.claim_type == ClaimType.ADVERTISES]
+    cap_ids_after = sorted(str(c.value) for c in adv_after)
+    cap_a_claims = [c for c in adv_after if str(c.value) == "capability.core.multipath"]
+    cap_b_claims = [c for c in adv_after if str(c.value) == "capability.core.gateway"]
+    # The superseded cap-A (seq 1) is retained as historical evidence.
+    hist = [
+        c for c in g.get_claims_for_subject(C, now=FRESH_NOW, include_historical=True)
+        if c.claim_type == ClaimType.ADVERTISES
+        and str(c.value) == "capability.core.multipath"
+        and c.sequence == 1
+    ]
+    ok = ok and (
+        r3.code == "accepted"  # supersedes the prior cap-A at this key
+        and len(adv_after) == 2  # still two current claims
+        and cap_ids_after == ["capability.core.gateway", "capability.core.multipath"]
+        and len(cap_a_claims) == 1  # only the newer cap-A (seq 3) is current
+        and cap_a_claims[0].sequence == 3
+        and cap_a_claims[0].claim_id == c3.claim_id
+        and len(cap_b_claims) == 1  # cap-B still current
+        and cap_b_claims[0].sequence == 2  # cap-B UNAFFECTED by the cap-A refresh
+        and cap_b_claims[0].claim_id == c2.claim_id
+        and len(hist) == 1  # old cap-A (seq 1) retained as historical evidence
+        and hist[0].claim_id == c1.claim_id
+    )
+    results.append((
+        "30-concurrent-distinct-capability-advertisements",
+        ok,
+        "C advertises cap-A (seq1) + cap-B (seq2) concurrently; both current & "
+        "authoritative; cap-A refresh (seq3) supersedes only cap-A; cap-B untouched; "
+        "old cap-A retained as historical"
+        if ok else
+        "FAILED: r1=%s r2=%s adv=%d auth=%d cap_ids=%s r3=%s adv_after=%d "
+        "cap_a_seq=%s cap_b_seq=%s hist=%d"
+        % (r1.code, r2.code, len(adv_claims), len(auth), cap_ids, r3.code,
+           len(adv_after),
+           cap_a_claims[0].sequence if cap_a_claims else None,
+           cap_b_claims[0].sequence if cap_b_claims else None, len(hist)),
+    ))
+
+
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
@@ -1323,6 +1496,8 @@ def main() -> int:
     case_26_no_forbidden_fields_or_methods(results)
     case_27_seeded_fuzz_no_crash(results)
     case_28_repeated_runs_byte_identical(results)
+    case_29_remote_identity_removed_not_authoritative(results)
+    case_30_concurrent_distinct_capability_advertisements(results)
     case_envelope_roundtrip(results)
     case_frozen_dimensions_present(results)
     case_no_5g_vendor_imports(results)

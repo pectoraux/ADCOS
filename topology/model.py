@@ -469,20 +469,39 @@ class MergeOutcome:
     claim: Optional[TopologyClaim] = None
 
 
-ClaimKey = Tuple[str, str, str]  # (reporter, subject, claim_type)
+ClaimKey = Tuple[str, str, str, str]
+# (reporter, subject, claim_type, discriminator). The discriminator is the
+# claim's value-derived identity discriminator: for ADVERTISES claims it is the
+# capability_id (so a node may concurrently advertise multiple distinct
+# capabilities, each independently current / superseded / conflict-preserved
+# -- WORK-005/WORK-007 rule: capabilities are individually attributable
+# statements, not a single "latest advertisement wins" slot). For all other
+# claim types the discriminator is the empty string -- value is a STATE of the
+# (reporter, subject, claim_type) assertion (e.g. identity "present"/
+# "removed", reachability context, link state) and the latest sequence
+# supersedes the prior, so value must NOT be part of the key.
 
 
 def _claim_key(claim: TopologyClaim) -> ClaimKey:
-    return (claim.reporter, claim.subject, claim.claim_type)
+    if claim.claim_type == ClaimType.ADVERTISES:
+        discriminator = claim.value if isinstance(claim.value, str) else str(claim.value)
+    else:
+        discriminator = ""
+    return (claim.reporter, claim.subject, claim.claim_type, discriminator)
 
 
 class TopologyGraph:
     """Evidence-aware topology graph with deterministic convergence and
     provenance-collapse prevention.
 
-    Holds at most one *current* claim per ``(reporter, subject, claim_type)``
-    key -- the highest-sequence claim seen. Per-key sequence watermarks reject
-    replays (an old sequence cannot refresh freshness). Same-sequence
+    Holds at most one *current* claim per ``(reporter, subject, claim_type,
+    discriminator)`` key -- the highest-sequence claim seen. For ADVERTISES
+    claims the discriminator is the capability_id (so a node may concurrently
+    advertise multiple distinct capabilities, each independently current,
+    independently superseded, independently conflict-preserved). For all other
+    claim types the discriminator is the empty string (value is a state, latest
+    sequence supersedes the prior). Per-key sequence watermarks reject replays
+    (an old sequence cannot refresh freshness). Same-sequence
     different-content claims are preserved as conflicts rather than resolved
     by arrival order (WORK-007 convergence rule 10). Different reporters
     making conflicting claims are naturally both retained (different keys).
@@ -639,7 +658,10 @@ class TopologyGraph:
 
     def get_conflicts(self) -> Tuple[Tuple[ClaimKey, Tuple[TopologyClaim, ...]], ...]:
         """All unresolved same-sequence conflicts, deterministically sorted.
-        Each entry is ((reporter, subject, claim_type), (claims...))."""
+        Each entry is ((reporter, subject, claim_type, discriminator),
+        (claims...)). The discriminator is the capability_id for ADVERTISES
+        (so concurrent distinct-capability advertisements never conflict)
+        and the empty string for all other claim types."""
         out: List[Tuple[ClaimKey, Tuple[TopologyClaim, ...]]] = []
         for key in sorted(self._conflicts.keys()):
             claims = tuple(sorted(self._conflicts[key], key=lambda c: c.claim_id))
@@ -665,18 +687,30 @@ class TopologyGraph:
     def get_identity_state(self, subject: str, *, now: datetime) -> str:
         """Derive identity state at ``now``.
 
-        A subject's OWN signed identity statement (self-attribution) is the
-        authoritative evidence for its identity lifecycle (evidence quality:
-        self-observation outranks remote for the subject's own existence --
-        this is provenance, not trust policy). If no current self identity
-        claim exists, current-fresh remote/direct identity claims are
-        consulted: a "present" observation establishes KNOWN; a "removed"
-        observation (e.g. a peer observed the subject's credential revoked)
-        establishes REMOVED. Replay of an old sequence is rejected by the
-        per-(reporter, subject, "identity") watermark before this derivation.
+        A subject's OWN signed identity statement (self-attribution,
+        ``source_class == SELF_ADVERTISEMENT`` and ``reporter == subject``)
+        is the authoritative evidence for its identity lifecycle: a self
+        "present" claim establishes ``KNOWN``; a self "removed" claim
+        establishes ``REMOVED``. This is provenance, not trust policy.
+
+        If no current-fresh self identity claim exists, the ONLY non-self
+        evidence class that can drive state is ``DIRECT_OBSERVATION``: a
+        directly-observed "present" claim establishes ``KNOWN`` (the local
+        node exchanged packets with the subject -- the strongest non-self
+        evidence class). ``REMOTE_CLAIM`` and ``BOOTSTRAP_CLAIM`` identity
+        claims are stored as evidence (queryable via
+        ``get_claims_for_subject`` with full reporter/subject/source_class
+        provenance) but CANNOT drive ``IdentityState`` -- a remote "removed"
+        claim must NOT produce authoritative ``IdentityState.REMOVED``, and
+        a bootstrap seed must NOT authoritatively establish existence. This
+        is the frozen WORK-007 rule: a reporter cannot authoritatively
+        establish the subject's identity state (LOCK-008).
+
+        Replay of an old sequence is rejected by the per-(reporter, subject,
+        "identity") watermark before this derivation.
         """
         for key in sorted(self._current.keys()):
-            rep, subj, ct = key
+            rep, subj, ct, _disc = key
             if subj != subject or ct != ClaimType.IDENTITY or rep != subject:
                 continue
             claim = self._current[key]
@@ -689,24 +723,43 @@ class TopologyGraph:
                 return IdentityState.KNOWN
             if value == "removed":
                 return IdentityState.REMOVED
-        saw_present = False
-        saw_removed = False
+        # Second pass: only DIRECT_OBSERVATION identity "present" claims by
+        # other reporters can establish KNOWN (the local node directly
+        # observed the subject present -- the strongest non-self evidence
+        # class). REMOTE_CLAIM and BOOTSTRAP_CLAIM identity claims are stored
+        # as evidence (queryable via get_claims_for_subject, retaining
+        # reporter/subject/source_class provenance) but CANNOT drive
+        # IdentityState -- a remote "removed" claim must not produce
+        # authoritative IdentityState.REMOVED, and a bootstrap seed must not
+        # authoritatively establish existence. (LOCK-008 provenance; WORK-007
+        # rule: identity lifecycle is self-authored or directly observed,
+        # never remotely asserted or bootstrap-seeded.)
+        saw_present_via_direct_observation = False
+        saw_remote_removed = False  # retained only for the assertion below
         for key in sorted(self._current.keys()):
-            rep, subj, ct = key
+            rep, subj, ct, _disc = key
             if subj != subject or ct != ClaimType.IDENTITY or rep == subject:
                 continue
             claim = self._current[key]
             if not _is_fresh(claim, now):
                 continue
             value = _as_identity_value(claim.value)
-            if value == "present":
-                saw_present = True
+            if claim.source_class == SourceClass.DIRECT_OBSERVATION:
+                if value == "present":
+                    saw_present_via_direct_observation = True
             elif value == "removed":
-                saw_removed = True
-        if saw_present:
+                # A non-self "removed" claim (REMOTE_CLAIM or
+                # BOOTSTRAP_CLAIM) is recorded as evidence but explicitly
+                # NOT promoted to IdentityState.REMOVED. We track it only so
+                # downstream audit (get_claims_for_subject) can still surface
+                # the reporter's claim with full provenance.
+                saw_remote_removed = True
+        if saw_present_via_direct_observation:
             return IdentityState.KNOWN
-        if saw_removed:
-            return IdentityState.REMOVED
+        # saw_remote_removed is intentionally NOT returned as REMOVED here.
+        # The remote "removed" claim remains queryable via get_claims_for_subject
+        # (provenance preserved), but cannot drive authoritative state.
+        _ = saw_remote_removed  # provenance-evidence marker, not state driver
         return IdentityState.UNKNOWN
 
     def get_advertisement_state(self, subject: str, *, now: datetime) -> str:
@@ -716,7 +769,7 @@ class TopologyGraph:
         has_any = False
         has_fresh = False
         for key in sorted(self._current.keys()):
-            rep, subj, ct = key
+            rep, subj, ct, _disc = key
             if subj != subject or ct != ClaimType.ADVERTISES:
                 continue
             claim = self._current[key]
@@ -736,7 +789,7 @@ class TopologyGraph:
         tell who observed it (WORK-007 rule 10)."""
         has_fresh_reachable = False
         for key in sorted(self._current.keys()):
-            rep, subj, ct = key
+            rep, subj, ct, _disc = key
             if subj != subject:
                 continue
             if ct not in (ClaimType.REACHABLE, ClaimType.UNREACHABLE):
@@ -790,6 +843,7 @@ class TopologyGraph:
         for key in sorted(self._watermarks.keys()):
             watermarks.append(
                 {"reporter": key[0], "subject": key[1], "claim_type": key[2],
+                 "discriminator": key[3],
                  "watermark": self._watermarks[key]}
             )
         return {
