@@ -449,4 +449,88 @@ python3 tools/intent_selftest.py
 | `41-normalization-thread-safe` | 20 concurrent threads all agree on digest |
 | `42-constraint-id-must-be-unique-string` | empty/None/int/list/dict rejected |
 | `43-intent-id-required` | empty/None/int intent_id rejected |
+| `44-digest-recomputable-from-public-canonical-bytes` | `sha256(canonical_bytes()) == digest`; `content_dict` excludes digest; `to_dict` includes it (Architect PR #9 blocker) |
+| `45-equivalent-unit-duplicates-fail-closed` | `1 Mbps` + `1000 kbps` → `duplicate-semantic` (Architect PR #9 blocker) |
+
+## policy_selftest.py — policy engine tests (WORK-010)
+
+Deterministic, offline verification of the policy package against the frozen WORK-010 requirements (`spec/prompts/WORK-010.md`): the 41 required adversarial verification categories (minimal allow; minimal explicit deny; no-matching privileged rule → default deny; missing authorization fact → fail closed; expired policy → fail closed; not-yet-valid policy → fail closed; exact validity boundary inclusive both ends; equal-priority allow/deny conflict → deterministic deny; equal-specificity equal-priority conflicting rules → fail closed; explicit priority ordering; explicit scope-specificity ordering; deterministic rule-order independence; deterministic policy-set ordering; requester NodeID validation via WORK-004; credential active accepted; revoked credential rejected; expired credential rejected; malformed credential reference rejected; resource-owner access policy; resource-kind restriction; locality allow; locality deny; federation allow; federation deny; privacy requirement allow; privacy requirement deny; emergency override explicitly allowed; emergency override absent → ordinary deny still applies; service-priority conflict resolution; energy reserve allow; energy reserve deny; hard intent constraint remains untouched; soft intent preference remains untouched; remote topology claim cannot become authoritative fact via policy; policy evaluation cannot mutate topology/resource/identity state; policy decision audit records participating rule IDs and policy version; secret material rejected and not echoed in diagnostics; unsupported predicate fails explicitly; implementation-specific access technology predicate rejected; decision bytes/digest deterministic across repeated runs; 60-trial fuzz with zero crashes and zero external-state mutation) plus 28 additional mechanical/adversarial cases (no 5G/vendor SDK imports in policy/; no wall-clock reads in evaluation; no pricing/settlement/trust-scoring/route/adapter implementations; all 5 frozen vocabularies present and closed; privileged classification structural — all 13 ops privileged; serialized PolicyDecision has no forbidden authoritative fields; PolicyStore publish→snapshot→withdraw→snapshot atomic sequencing; older version cannot replace newer version; equal-version/different-content fail closed; list_applicable filters expired/not-yet-valid; serialization round-trip byte-identical; `sha256(canonical_bytes()) == decision_id` public invariant; REQUIRE_REVIEW never silently becomes ALLOW; domain_precedence explicit and insertion-order-independent; partial domain-precedence coverage rejected as ambiguous; duplicate rule_id rejected; malformed temporal rejected; valid_until<valid_from rejected; thread-safety across 20 threads; no network imports; evaluation_instant required (no wall-clock fallback); malformed evaluation_instant → FAIL_CLOSED; rule temporal sub-window (expired rule skipped even when set is valid); subject selector match/mismatch; trust-min-class consumes explicit INPUT assertion not a computed score; capability-required predicate; frozen architecture docs unchanged vs origin/main; prior prompts WORK-001..WORK-009 unchanged vs origin/main). The central boundary exercised throughout is the frozen separation: POLICY DECISION = evaluation of explicit policy rules against explicit facts/claims/context; POLICY DECISION ≠ identity cryptography, credential generation/rotation, topology truth, resource measurement, resource mutation (unless a separate caller executes an authorized operation), intent normalization, path computation/route selection, adapter selection, pricing/settlement/billing, or trust score. Rules are DATA (no executable code / Python expressions / dynamic callbacks); conditions are `(predicate, arguments)` pairs dispatched to pure matchers; conflict resolution is a pure deterministic total-order function (specificity desc → priority desc → domain-precedence asc → rule_id asc); deny-by-default applies to all 13 frozen privileged operations; equal-precedence conflicts fail closed; REQUIRE_REVIEW never silently becomes ALLOW; decision_id is `sha256(canonical_json_bytes(content_dict()))` (content-derived, NOT a NodeID); PolicyStore enforces monotonic version sequencing, equal-version/different-content fail closed, and atomic copy-on-write snapshots. All key material is TEST-ONLY; all clocks are injected; no wall-clock reads; all PRNGs are seeded; no external network access is required.
+
+```bash
+python3 tools/policy_selftest.py
+```
+
+### Case catalog
+
+| Case | Verifies (required-test numbers) |
+|---|---|
+| `01-minimal-allow-decision` | single ALLOW rule → ALLOW; matched rule_id recorded (1) |
+| `02-minimal-explicit-deny` | single DENY rule → DENY; matched rule_id recorded (2) |
+| `03-no-matching-privileged-rule-default-deny` | rule for different operation; privileged op → DEFAULT_DENY (3) |
+| `04-missing-authorization-fact-fail-closed` | credential-active with credential_active=None → missing-fact → DEFAULT_DENY; trace records missing-fact (4) |
+| `05-expired-policy-fail-closed` | valid_until before now → POLICY_EXPIRED (5) |
+| `06-not-yet-valid-policy-fail-closed` | valid_from after now → POLICY_NOT_YET_VALID (6) |
+| `07-exact-validity-boundary` | now==valid_from and now==valid_until both valid (inclusive) (7) |
+| `08-equal-priority-allow-deny-conflict` | equal specificity/priority/domain ALLOW+DENY → DENY (deny beats allow) (8) |
+| `09-equal-specificity-equal-priority-conflict-fail-closed` | two ALLOW rules at equal precedence → CONFLICT → DENY (fail closed) (9) |
+| `10-explicit-priority-ordering` | ALLOW priority 1 beats DENY priority 0; insertion-order-independent (10) |
+| `11-explicit-scope-specificity-ordering` | ALLOW specificity 1 beats DENY specificity 0 (11) |
+| `12-deterministic-rule-order-independence` | 3 rules in 2 orders → byte-identical decision_id (12) |
+| `13-deterministic-policy-set-ordering` | 5 rules in 2 orders → byte-identical decision_id (13) |
+| `14-requester-nodeid-validation` | 5 malformed NodeIDs rejected via WORK-004 parse_node_id (14) |
+| `15-credential-active-accepted` | credential_active=True + credential-active predicate → ALLOW (15) |
+| `16-revoked-credential-rejected` | credential_active=False → predicate not-matched → DEFAULT_DENY (16) |
+| `17-expired-credential-rejected` | WORK-004 EXPIRED maps to credential_active=False → DEFAULT_DENY (17) |
+| `18-malformed-credential-reference-rejected` | int/string/list credential_active rejected at construction (18) |
+| `19-resource-owner-access-policy` | resource-owner predicate matches → ALLOW (19) |
+| `20-resource-kind-restriction` | resource-kind match → ALLOW; mismatch → DEFAULT_DENY (20) |
+| `21-locality-allow` | locality-equals match → ALLOW (21) |
+| `22-locality-deny` | locality-equals mismatch → DEFAULT_DENY (22) |
+| `23-federation-allow` | federation-domain match → ALLOW (23) |
+| `24-federation-deny` | federation-domain mismatch → DEFAULT_DENY (24) |
+| `25-privacy-requirement-allow` | privacy-required match → ALLOW (25) |
+| `26-privacy-requirement-deny` | privacy-required mismatch → DEFAULT_DENY (26) |
+| `27-emergency-override-explicitly-allowed` | emergency=True + explicit emergency-true rule → ALLOW (27) |
+| `28-emergency-override-absent-ordinary-deny-still-applies` | no emergency rule + emergency=True → DEFAULT_DENY (no implicit bypass) (28) |
+| `29-service-priority-conflict-resolution` | higher-priority service rule wins; only matching rule participates (29) |
+| `30-energy-reserve-allow` | energy-reserve-gte 5000>=1000 → ALLOW (30) |
+| `31-energy-reserve-deny` | energy-reserve-gte 500<1000 → DEFAULT_DENY (31) |
+| `32-hard-intent-constraint-untouched` | intent digest consumed by reference; not in decision bytes; context unchanged (32) |
+| `33-soft-intent-preference-untouched` | no route/path/resource/trust/price fields in decision (33) |
+| `34-remote-topology-claim-not-promoted` | topology-evidence-present reference check only; no authoritative-fact fields in decision; context unchanged (34) |
+| `35-policy-evaluation-cannot-mutate-state` | all context tuple fields same object before/after evaluation (35) |
+| `36-audit-records-rule-ids-and-policy-version` | matched_rule_ids + policy_set_id + version + conflict_trace recorded (36) |
+| `37-secret-material-rejected-and-not-echoed` | private_key/password in rule+context extensions rejected; secret value not in diagnostics (37) |
+| `38-unsupported-predicate-fails-explicitly` | unknown predicate rejected at construction; unsupported-argument → DEFAULT_DENY (38) |
+| `39-implementation-specific-access-technology-predicate-rejected` | 6 fields (rule_id/provenance/federation_domain/service_class/resource_kind/locality_label) reject 5g/wifi/lte/satellite tokens (39) |
+| `40-decision-bytes-digest-deterministic-across-runs` | byte-identical; `sha256(canonical_bytes())==decision_id` invariant holds (40) |
+| `41-fuzz-property-inputs-never-crash-or-mutate-external-state` | 60 combinations of effect/domain/operation/priority/specificity; 0 crashes, 0 mutations (41) |
+| `42-no-5g-vendor-imports` | no 5G/LTE/Wi-Fi/vendor SDK imports in policy/ |
+| `43-no-wall-clock-imports` | no time.monotonic/time.time/datetime.now/time.perf_counter reads in evaluation |
+| `44-no-pricing-settlement-trust-route-imports` | no price/settle/trust-score/route/adapter implementations in policy/ |
+| `45-frozen-vocabularies-present` | all 5 frozen vocabularies (Effect/DecisionCode/PolicyDomain/Operation/PredicateKind) present and closed |
+| `46-privileged-classification-structural` | all 13 ops privileged; NON_PRIVILEGED empty; not a naming heuristic |
+| `47-decision-no-forbidden-fields` | serialized decision has no route/path/trust/price/topology-fact/secret fields |
+| `48-policy-store-publish-withdraw-snapshot` | publish v1→v2→withdraw v2; live reverts to v1; v2 queryable+withdrawn |
+| `49-policy-store-version-regression-rejected` | older version cannot replace newer (version-regression) |
+| `50-policy-store-equal-version-different-content-rejected` | equal-version/different-content fail closed; same-content idempotent |
+| `51-policy-store-list-applicable-filters-expired` | only temporally-valid sets returned; expired/future filtered out |
+| `52-serialization-roundtrip` | PolicySet → dict → from_mapping → dict byte-identical |
+| `53-decision-digest-recomputable` | `sha256(canonical_bytes())==decision_id`; content_dict excludes decision_id; to_dict includes it |
+| `54-require-review-never-silently-becomes-allow` | REQUIRE_REVIEW winner → DENY+FAIL_CLOSED (no silent ALLOW) |
+| `55-domain-precedence-explicit` | RESOURCE before IDENTITY; ra wins; insertion-order-independent decision_id |
+| `56-partial-domain-precedence-coverage-rejected` | domain_precedence listing some-but-not-all rule domains rejected as ambiguous |
+| `57-duplicate-rule-id-rejected` | two rules with same rule_id rejected (duplicate-rule-id) |
+| `58-malformed-temporal-rejected` | 5 malformed RFC 3339 UTC instants rejected (valid-from) |
+| `59-valid-until-before-valid-from-rejected` | valid_until<valid_from rejected (valid-before-from) |
+| `60-thread-safe-evaluation` | 20 concurrent threads all agree on decision_id |
+| `61-no-external-network-dependency` | no socket/urllib/requests/http imports in policy/ |
+| `62-evaluation-instant-required` | empty evaluation_instant → FAIL_CLOSED (no wall-clock fallback) |
+| `63-malformed-evaluation-instant-fail-closed` | 3 malformed instants → FAIL_CLOSED |
+| `64-rule-temporal-subwindow` | expired DENY rule skipped; live ALLOW wins even when set is valid |
+| `65-subject-selector` | subject match → ALLOW; mismatch → DEFAULT_DENY |
+| `66-trust-assertion-input-not-score` | trust-min-class consumes explicit INPUT assertion; verified>=verified→ALLOW; attested<verified→DEFAULT_DENY (LOCK-022) |
+| `67-capability-required` | capability-evidence-present match → ALLOW |
+| `68-frozen-doc-unchanged` | all 4 frozen architecture docs byte-identical vs origin/main |
+| `69-prior-prompts-unchanged` | all 9 prior prompts WORK-001..WORK-009 byte-identical vs origin/main |
 

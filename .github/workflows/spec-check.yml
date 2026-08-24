@@ -48,3 +48,6 @@ jobs:
 
       - name: Run intent/QoS normalization tests
         run: python3 tools/intent_selftest.py
+
+      - name: Run policy engine tests
+        run: python3 tools/policy_selftest.py
