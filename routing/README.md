@@ -218,11 +218,22 @@ way.
 
 Evaluation operates on immutable snapshots. An OPTIONAL content-addressed
 result cache (`RoutingEngine(use_cache=True)`) keys entries on
-`sha256` over the context's canonical content (including topology/
-resource snapshot digests). Cache entries are derived data, never
-authoritative state: a hit returns the byte-identical decision a miss
-would compute, and clearing/disabling the cache never changes any
-result. Route selection is never persisted as a topology fact.
+`sha256` over the context's canonical content — including topology/
+resource snapshot digests AND every `expected_*` binding field
+(topology/resource/intent digest expectations and policy set-id/version
+expectations). Cache entries are derived data, never authoritative
+state: a hit returns the byte-identical decision a miss would compute,
+and clearing/disabling the cache never changes any result.
+
+CORRECTNESS BEFORE CACHE (Architect review of PR #11, correction cycle
+2): structural validation, snapshot consistency, policy binding, intent
+binding, and unsupported-constraint rejection all run BEFORE the cache
+lookup. The cache is an optimization over VALID inputs, never a bypass
+of validation — a context whose expected bindings mismatch its actual
+snapshots fails closed (`inconsistent-snapshot` / `conflicting-input`)
+even when a successful decision is already cached under otherwise
+identical routing inputs. Route selection is never persisted as a
+topology fact.
 
 ## Serialization
 

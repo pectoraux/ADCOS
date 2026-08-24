@@ -759,10 +759,19 @@ class RoutingContext:
         """The canonical content dict over which the routing input digest
         is computed: every routing-relevant input, including the canonical
         bytes digests of the topology/resource snapshots, the intent
-        digest, the policy decision id, the link facts, the bounds, and
-        the evaluation instant. Two content-identical contexts produce
-        byte-identical digests (and therefore byte-identical decisions),
-        regardless of object identity or dict insertion order."""
+        digest, the policy decision id, the link facts, the bounds, the
+        evaluation instant, AND EVERY ``expected_*`` BINDING FIELD
+        (topology/resource/intent digest expectations and policy
+        set-id/version expectations).
+
+        Including the ``expected_*`` fields is REQUIRED for cache-key
+        completeness (Architect review of PR #11, correction cycle 2):
+        two contexts that differ ONLY in their snapshot/policy
+        expectations must never share a routing-input digest (and
+        therefore never share a cache entry). Two content-identical
+        contexts produce byte-identical digests (and therefore
+        byte-identical decisions), regardless of object identity or
+        dict insertion order."""
         return {
             "source_node_id": self.source_node_id,
             "destination_node_id": self.destination_node_id,
@@ -786,6 +795,15 @@ class RoutingContext:
             "max_candidates": self.max_candidates,
             "min_confidence_basis_points": self.min_confidence_basis_points,
             "rank_by_confidence": self.rank_by_confidence,
+            # Expected snapshot/policy bindings are part of the content
+            # address (Architect review of PR #11, correction cycle 2):
+            # contexts differing ONLY in expectations must never share
+            # a cache key / routing-input digest.
+            "expected_topology_digest": self.expected_topology_digest,
+            "expected_resource_digest": self.expected_resource_digest,
+            "expected_intent_digest": self.expected_intent_digest,
+            "expected_policy_set_id": self.expected_policy_set_id,
+            "expected_policy_set_version": self.expected_policy_set_version,
         }
 
     def routing_input_digest(self) -> str:

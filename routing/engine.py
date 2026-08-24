@@ -39,7 +39,7 @@ from __future__ import annotations
 import hashlib
 import threading
 from dataclasses import replace
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, NamedTuple, Optional, Tuple
 
 from protocol.temporal import TemporalError, parse_instant
 
@@ -63,15 +63,41 @@ from .validation import (
 )
 
 
+class _Bindings(NamedTuple):
+    """Phase-1 correctness results shared by the cache gate and the
+    computation: the authoritative snapshot digests, the consumed
+    policy decision id, the content-addressed routing input digest
+    (which INCLUDES every ``expected_*`` binding field), and the
+    decision's input-digest summary."""
+
+    topology_digest: str
+    resource_digest: str
+    policy_decision_id: str
+    routing_input_digest: str
+    input_digests: Tuple[Tuple[str, str], ...]
+
+
 class RoutingEngine:
     """Deterministic, thread-safe, stateless-by-default routing engine.
 
     ``use_cache=True`` enables a content-addressed result cache: the key
     is ``sha256`` over the context's canonical content (every
     routing-relevant input, including the topology/resource snapshot
-    digests), and the value is the computed :class:`RouteDecision`. The
-    cache is never authoritative state -- clearing it or disabling it
-    never changes any result (proven by the selftest)."""
+    digests AND every ``expected_*`` binding field), and the value is
+    the computed :class:`RouteDecision`. The cache is never
+    authoritative state -- clearing it or disabling it never changes
+    any result (proven by the selftest).
+
+    CORRECTNESS BEFORE CACHE (Architect review of PR #11, correction
+    cycle 2): structural validation, snapshot consistency, policy
+    binding, intent binding, and unsupported-constraint rejection all
+    run BEFORE any cache consultation, and the cache key includes the
+    ``expected_*`` binding fields. A cached successful decision can
+    therefore NEVER bypass a context whose snapshot/policy expectations
+    mismatch its actual inputs -- such a context fails closed with
+    ``inconsistent-snapshot`` / ``conflicting-input`` regardless of
+    what is cached. The cache is an optimization over VALID inputs,
+    never a bypass of validation."""
 
     def __init__(self, *, use_cache: bool = False) -> None:
         self._use_cache = use_cache
@@ -104,12 +130,26 @@ class RoutingEngine:
     # -- internals ----------------------------------------------------------
 
     def _evaluate_inner(self, context: RoutingContext) -> RouteEvaluationResult:
-        # 0. Content-addressed cache probe (a hit returns EXACTLY the
-        #    decision a miss would have computed -- byte-identical).
-        routing_input_digest = context.routing_input_digest()
+        # 0. CORRECTNESS FIRST (Architect review of PR #11, correction
+        #    cycle 2): structural validation, snapshot consistency,
+        #    policy binding, intent binding, and unsupported-constraint
+        #    rejection all run BEFORE any cache consultation. The cache
+        #    is an optimization over VALID inputs, never a bypass of
+        #    correctness/security validation: a context whose expected
+        #    bindings mismatch its actual snapshots fails closed even
+        #    when a same-key decision is already cached. All checks are
+        #    pure and deterministic, so this ordering cannot change any
+        #    legitimate result.
+        bindings = self._check_bindings(context)
+
+        # 1. Content-addressed cache probe. The key (content_dict)
+        #    includes EVERY routing-relevant input INCLUDING the
+        #    expected_* binding fields, and validation has already
+        #    passed for this context -- so a hit returns EXACTLY the
+        #    decision a miss would have computed (byte-identical).
         if self._use_cache:
             with self._lock:
-                cached = self._cache.get(routing_input_digest)
+                cached = self._cache.get(bindings.routing_input_digest)
             if cached is not None:
                 return RouteEvaluationResult(
                     ok=True,
@@ -117,24 +157,31 @@ class RoutingEngine:
                     detail=cached.detail,
                     decision=cached,
                 )
-        decision = self._compute(context, routing_input_digest)
+
+        # 2. Compute (bindings already validated).
+        decision = self._compute(context, bindings)
         if self._use_cache:
             with self._lock:
-                self._cache[routing_input_digest] = decision
+                self._cache[bindings.routing_input_digest] = decision
         return RouteEvaluationResult(
             ok=True, code=decision.code, detail=decision.detail, decision=decision
         )
 
-    def _compute(
-        self, context: RoutingContext, routing_input_digest: str
-    ) -> RouteDecision:
+    def _check_bindings(self, context: RoutingContext) -> _Bindings:
+        """Phase-1 correctness gate: structural validation, snapshot
+        consistency, policy binding, intent binding, and
+        unsupported-constraint rejection.
+
+        Pure and deterministic; raises :class:`RoutingError` (fail
+        closed -- the ``evaluate`` envelope returns ``ok=False`` with
+        the specific code) on any violation. Runs BEFORE the cache
+        lookup so a cached decision can never bypass validation."""
         topology_digest = hashlib.sha256(
             context.topology.to_canonical_bytes()
         ).hexdigest()
         resource_digest = hashlib.sha256(
             context.resources.to_canonical_bytes()
         ).hexdigest()
-
         # 1. Structural validation (fail closed).
         validate_context(context)
         # 2. Snapshot consistency (explicit expected digests).
@@ -149,13 +196,12 @@ class RoutingEngine:
         check_intent_binding(context)
         # 5. Unsupported REQUIRED constraint shapes.
         check_unsupported_hard_constraints(context)
-
-        now = parse_evaluation_instant(context.evaluation_instant)
         policy_decision_id = (
             context.policy_decision.decision_id
             if context.policy_decision is not None
             else ""
         )
+        routing_input_digest = context.routing_input_digest()
         input_digests: Tuple[Tuple[str, str], ...] = (
             ("topology", topology_digest),
             ("resources", resource_digest),
@@ -163,6 +209,23 @@ class RoutingEngine:
             ("policy-decision", policy_decision_id),
             ("routing-input", routing_input_digest),
         )
+        return _Bindings(
+            topology_digest=topology_digest,
+            resource_digest=resource_digest,
+            policy_decision_id=policy_decision_id,
+            routing_input_digest=routing_input_digest,
+            input_digests=input_digests,
+        )
+
+    def _compute(self, context: RoutingContext, bindings: _Bindings) -> RouteDecision:
+        # Preconditions: phase-1 correctness (validation, snapshot
+        # consistency, policy/intent binding, unsupported-constraint
+        # rejection) already passed in _check_bindings -- which ALSO
+        # means a cache hit and a cache miss share the exact same
+        # validation outcome (the cache cannot skip it).
+        now = parse_evaluation_instant(context.evaluation_instant)
+        input_digests = bindings.input_digests
+        policy_decision_id = bindings.policy_decision_id
 
         # 6. Candidate construction from explicit topology/link state.
         construction: CandidateConstruction = construct_candidates(context)

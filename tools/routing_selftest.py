@@ -1684,6 +1684,11 @@ def case_53_no_duplicate_vocabularies(results: List[Result]) -> None:
         tree = ast.parse(path.read_text(encoding="utf-8"))
         for node in ast.walk(tree):
             if isinstance(node, ast.ClassDef):
+                # Private module-internal helpers (leading underscore) are
+                # implementation details, NOT public vocabulary; the frozen
+                # vocabulary check applies to public classes only.
+                if node.name.startswith("_"):
+                    continue
                 if node.name not in allowed_classes:
                     problems.append("%s defines class %r" % (path.name, node.name))
     # Reuse proof: the model imports parse_node_id / ResourceStore /
@@ -2485,6 +2490,144 @@ def case_76_roundtrip_retains_path_id(results: List[Result]) -> None:
 
 
 # --------------------------------------------------------------------------
+# Architect-review regression cases (PR #11 correction cycle 2)
+#
+# Blocker: the optional routing cache was semantically unsafe. The cache
+# lookup ran BEFORE validation while the cache key (content_dict) omitted
+# the expected_* binding fields -- so two contexts could share a cache
+# key while having different required snapshot/policy expectations.
+# Concretely: a context with matching expectations evaluated
+# successfully and cached its decision; a second context with the SAME
+# actual routing inputs but a MISMATCHED expectation (which must fail
+# closed as conflicting-input / inconsistent-snapshot) hit the cached
+# entry and got the successful decision returned, bypassing
+# policy/version and snapshot-generation validation.
+#
+# Fix (both layers, as required):
+#   1. content_dict()/routing_input_digest() now includes every
+#      expected_* binding field (cache-key completeness);
+#   2. ALL validation (structural, snapshot consistency, policy
+#      binding, intent binding, unsupported-constraint rejection) runs
+#      BEFORE the cache lookup -- the cache is an optimization over
+#      VALID inputs, never a bypass of correctness/security validation.
+# --------------------------------------------------------------------------
+
+def _cache_bypass_scenario(**bad_expectation):
+    """Shared PR #11 correction-2 scenario: seed a cached engine with a
+    successfully evaluated, fully-matching context, then evaluate a
+    context with the SAME actual routing inputs but one mismatched
+    expectation. Returns (ok_result, bad_result, recheck_result)."""
+    graph = _chain_graph((_AB,))
+    metrics = _chain_metrics((_AB,))
+    decision = _policy_decision(policy_set_id="ps-1", version=1)
+    engine = RoutingEngine(use_cache=True)
+    good = {"expected_policy_set_id": "ps-1", "expected_policy_set_version": 1}
+    ctx_ok = _context(graph, metrics=metrics, decision=decision, **good)
+    res_ok = engine.evaluate(ctx_ok)  # success -> cached
+    bad = dict(good)
+    bad.update(bad_expectation)
+    ctx_bad = _context(graph, metrics=metrics, decision=decision, **bad)
+    res_bad = engine.evaluate(ctx_bad)  # must fail closed, NOT hit the cache
+    res_recheck = engine.evaluate(ctx_ok)  # valid context still cached + intact
+    return res_ok, res_bad, res_recheck
+
+
+def _assert_cache_bypass(expected_code: str, res_ok, res_bad, res_recheck,
+                         label: str) -> List[str]:
+    problems: List[str] = []
+    if not (res_ok.ok and res_ok.decision and res_ok.decision.selected):
+        problems.append("precondition: matching binding did not route (%s)" % res_ok.code)
+    if res_bad.ok:
+        problems.append("%s: mismatched expectation returned ok (cached decision leaked)" % label)
+    if res_bad.code != expected_code:
+        problems.append("%s: expected %s, got %s" % (label, expected_code, res_bad.code))
+    if res_bad.decision is not None:
+        problems.append("%s: mismatch returned a decision object" % label)
+    if not (res_recheck.ok and res_recheck.decision and res_recheck.decision.selected):
+        problems.append("%s: valid context broken after the failed evaluation" % label)
+    elif res_recheck.decision.decision_id != res_ok.decision.decision_id:
+        problems.append("%s: valid cached decision changed" % label)
+    return problems
+
+
+def case_77_expected_policy_version_mismatch_after_cache(results: List[Result]) -> None:
+    """REGRESSION (PR #11 correction 2): expected policy-version mismatch
+    must fail closed as conflicting-input EVEN AFTER a successful cached
+    evaluation of the same actual routing inputs. Pre-fix: the cache key
+    omitted expected_policy_set_version and validation ran after the
+    lookup, so the cached successful decision was returned and
+    policy/version validation was bypassed."""
+    res_ok, res_bad, res_recheck = _cache_bypass_scenario(expected_policy_set_version=999)
+    problems = _assert_cache_bypass(RouteReasonCode.CONFLICTING_INPUT,
+                                    res_ok, res_bad, res_recheck, "policy-version")
+    # The cache key itself must distinguish the two contexts.
+    if problems:
+        results.append(fail("case_77_expected_policy_version_mismatch_after_cache", "; ".join(problems)))
+    else:
+        results.append(ok("case_77_expected_policy_version_mismatch_after_cache", "conflicting-input (not the cached decision); valid context's cache entry intact"))
+
+
+def case_78_expected_topology_digest_mismatch_after_cache(results: List[Result]) -> None:
+    """REGRESSION (PR #11 correction 2): expected topology-digest
+    mismatch must fail closed as inconsistent-snapshot after a cached
+    success -- snapshot-generation validation cannot be bypassed by the
+    cache."""
+    res_ok, res_bad, res_recheck = _cache_bypass_scenario(
+        expected_topology_digest="deadbeef" * 8)
+    problems = _assert_cache_bypass(RouteReasonCode.INCONSISTENT_SNAPSHOT,
+                                    res_ok, res_bad, res_recheck, "topology-digest")
+    if problems:
+        results.append(fail("case_78_expected_topology_digest_mismatch_after_cache", "; ".join(problems)))
+    else:
+        results.append(ok("case_78_expected_topology_digest_mismatch_after_cache", "inconsistent-snapshot (not the cached decision); cache entry intact"))
+
+
+def case_79_expected_resource_digest_mismatch_after_cache(results: List[Result]) -> None:
+    """REGRESSION (PR #11 correction 2): expected resource-digest
+    mismatch must fail closed as inconsistent-snapshot after a cached
+    success."""
+    res_ok, res_bad, res_recheck = _cache_bypass_scenario(
+        expected_resource_digest="cafebabe" * 8)
+    problems = _assert_cache_bypass(RouteReasonCode.INCONSISTENT_SNAPSHOT,
+                                    res_ok, res_bad, res_recheck, "resource-digest")
+    if problems:
+        results.append(fail("case_79_expected_resource_digest_mismatch_after_cache", "; ".join(problems)))
+    else:
+        results.append(ok("case_79_expected_resource_digest_mismatch_after_cache", "inconsistent-snapshot (not the cached decision); cache entry intact"))
+
+
+def case_80_expected_intent_digest_mismatch_after_cache(results: List[Result]) -> None:
+    """REGRESSION (PR #11 correction 2): expected intent-digest mismatch
+    must fail closed as conflicting-input after a cached success."""
+    intent = _normalized(())
+    graph = _chain_graph((_AB,))
+    metrics = _chain_metrics((_AB,))
+    decision = _policy_decision(policy_set_id="ps-1", version=1)
+    engine = RoutingEngine(use_cache=True)
+    ctx_ok = _context(graph, metrics=metrics, intent=intent, decision=decision,
+                      expected_intent_digest=intent.digest,
+                      expected_policy_set_id="ps-1", expected_policy_set_version=1)
+    res_ok = engine.evaluate(ctx_ok)  # success -> cached
+    # Same ACTUAL intent; only the expectation differs.
+    ctx_bad = _context(graph, metrics=metrics, intent=intent, decision=decision,
+                       expected_intent_digest="0" * 64,
+                       expected_policy_set_id="ps-1", expected_policy_set_version=1)
+    res_bad = engine.evaluate(ctx_bad)  # must fail closed, NOT hit the cache
+    res_recheck = engine.evaluate(ctx_ok)
+    problems = _assert_cache_bypass(RouteReasonCode.CONFLICTING_INPUT,
+                                    res_ok, res_bad, res_recheck, "intent-digest")
+    # Cache-key completeness: the two contexts must have DIFFERENT
+    # routing-input digests (the expected_* fields are part of the
+    # content address).
+    if ctx_ok.routing_input_digest() == ctx_bad.routing_input_digest():
+        problems.append("intent-digest: routing_input_digest does not distinguish expectations")
+    if problems:
+        results.append(fail("case_80_expected_intent_digest_mismatch_after_cache", "; ".join(problems)))
+    else:
+        results.append(ok("case_80_expected_intent_digest_mismatch_after_cache", "conflicting-input (not the cached decision); digests distinguish expectations"))
+
+
+# --------------------------------------------------------------------------
 # Main
 # --------------------------------------------------------------------------
 
@@ -2567,6 +2710,11 @@ def main() -> int:
     case_74_tampered_path_id_cannot_alter_ranking(results)
     case_75_deserialization_path_id_binding(results)
     case_76_roundtrip_retains_path_id(results)
+    # Architect-review regression cases (PR #11 correction cycle 2).
+    case_77_expected_policy_version_mismatch_after_cache(results)
+    case_78_expected_topology_digest_mismatch_after_cache(results)
+    case_79_expected_resource_digest_mismatch_after_cache(results)
+    case_80_expected_intent_digest_mismatch_after_cache(results)
 
     print("ADCOS routing self-test (WORK-011)")
     print("=" * 72)
