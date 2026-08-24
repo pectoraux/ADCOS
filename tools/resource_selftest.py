@@ -3,11 +3,14 @@
 
 Deterministic, offline verification of the resources package against the
 frozen WORK-008 requirements (spec/prompts/WORK-008.md): the 30 required
-test cases plus the Architect-review regression coverage for both PR #8
-blockers (cases 31-39: reserve->consume transfer semantics and canonical
-resource_id binding), mechanical forbidden-API/imports checks, frozen-
-dimensions presence, serialization round-trips, a seeded fuzz, and a
-byte-identical determinism proof.
+test cases plus the Architect-review regression coverage for PR #8 cycle 1
+(cases 31-39: reserve->consume transfer semantics and canonical
+resource_id binding), the Architect-review regression coverage for PR #8
+cycle 2 (cases 40-43: offer_sequence != version, newer offer on live
+account raises account-offer-advance, stale offer cannot reset ledger,
+newer offer advances non-live account safely), mechanical forbidden-API/
+imports checks, frozen-dimensions presence, serialization round-trips, a
+seeded fuzz, and a byte-identical determinism proof.
 
 The central boundary is exercised throughout:
 
@@ -1158,6 +1161,168 @@ def case_39_parse_resource_id_roundtrip(results: List[Result]) -> None:
 
 
 # ==========================================================================
+# Architect review of PR #8 -- correction cycle 2 regression coverage:
+# offer_sequence (immutable) vs version (mutable accounting counter)
+# ==========================================================================
+
+def case_40_current_offer_not_stale_after_mutations(results: List[Result]) -> None:
+    """Architect review cycle 2: a still-current offer MUST NOT be classified
+    as stale merely because accounting operations bumped account.version past
+    the offer's sequence. ``offer_sequence`` (immutable) and ``version``
+    (mutable accounting counter) are distinct dimensions; init_account_from_offer
+    uses offer_sequence exclusively for offer-freshness decisions."""
+    try:
+        _, _, _, idA, _ = make_identity()
+        owner = str(idA.node_id)
+        r = make_resource(owner=owner, kind=ResourceKind.BANDWIDTH)
+        rs = ResourceStore(); rs.register_resource(r)
+        rs.create_offer(base_offer(resource=r, quantity=Quantity(100, "mbps"), sequence=1))
+        acct = rs.init_account_from_offer(r.resource_id, now=FRESH_NOW)
+        assert acct.offer_sequence == 1, "offer_sequence initialized from offer"
+        assert acct.version == 1, "version starts at 1, not from offer.sequence"
+        # accounting mutations bump version but NOT offer_sequence
+        rs.reserve(r.resource_id, "op1", Quantity(20, "mbps"), now=FRESH_NOW)   # version 2
+        rs.consume(r.resource_id, "op2", Quantity(10, "mbps"), now=FRESH_NOW)    # version 3
+        acct2 = rs.get_account(r.resource_id)
+        assert acct2 is not None
+        assert acct2.offer_sequence == 1, "offer_sequence unchanged by mutations"
+        assert acct2.version == 3, "version bumped to 3"
+        assert acct2.reserved == 10_000_000, "reserved=10M (20 reserved - 10 transferred)"
+        assert acct2.consumed == 10_000_000, "consumed=10M"
+        # init_account_from_offer again on the SAME current offer -- idempotent;
+        # offer_sequence (1) == offer.sequence (1), offer_id matches. Even though
+        # version (3) > offer.sequence (1), the offer is NOT stale.
+        acct3 = rs.init_account_from_offer(r.resource_id, now=FRESH_NOW)
+        assert acct3 is acct2, "init idempotent on current offer"
+        assert acct3.offer_sequence == 1, "offer_sequence still 1"
+        assert acct3.version == 3, "version NOT reset"
+        assert acct3.reserved == 10_000_000, "reserved NOT reset"
+        assert acct3.consumed == 10_000_000, "consumed NOT reset"
+        results.append(("case_40_current_offer_not_stale_after_mutations", True,
+                        "offer_sequence != version; current offer idempotent after mutations"))
+    except Exception as error:
+        results.append(("case_40_current_offer_not_stale_after_mutations", False, repr(error)))
+
+
+def case_41_newer_offer_cannot_reset_live_ledger(results: List[Result]) -> None:
+    """Architect review cycle 2: a newer offer arriving on a LIVE account
+    (reserved > 0 OR consumed > 0) MUST NOT silently reset the ledger.
+    init_account_from_offer raises account-offer-advance; an explicit
+    accounting lifecycle rule is required to migrate (deferred to WORK-010)."""
+    try:
+        _, _, _, idA, _ = make_identity()
+        owner = str(idA.node_id)
+        r = make_resource(owner=owner, kind=ResourceKind.BANDWIDTH)
+        rs = ResourceStore(); rs.register_resource(r)
+        rs.create_offer(base_offer(resource=r, quantity=Quantity(100, "mbps"), sequence=1))
+        rs.init_account_from_offer(r.resource_id, now=FRESH_NOW)  # offer_sequence=1, version=1
+        rs.reserve(r.resource_id, "op1", Quantity(30, "mbps"), now=FRESH_NOW)  # live: reserved=30M, version=2
+        # newer offer appears
+        rs.create_offer(base_offer(resource=r, quantity=Quantity(150, "mbps"), sequence=2))
+        # init_account_from_offer must NOT silently reset the live ledger
+        try:
+            rs.init_account_from_offer(r.resource_id, now=FRESH_NOW)
+            raise AssertionError("newer offer on live account must raise account-offer-advance")
+        except ResourceError as e:
+            assert e.code == "account-offer-advance", e.code
+        # account UNCHANGED -- live ledger preserved
+        acct = rs.get_account(r.resource_id)
+        assert acct is not None
+        assert acct.offer_sequence == 1, "offer_sequence NOT migrated"
+        assert acct.version == 2, "version NOT bumped by rejected init"
+        assert acct.offered == 100_000_000, "offered NOT changed to 150M"
+        assert acct.reserved == 30_000_000, "reserved NOT reset"
+        assert acct.consumed == 0, "consumed NOT reset"
+        results.append(("case_41_newer_offer_cannot_reset_live_ledger", True,
+                        "newer offer raises account-offer-advance; live ledger preserved"))
+    except Exception as error:
+        results.append(("case_41_newer_offer_cannot_reset_live_ledger", False, repr(error)))
+
+
+def case_42_stale_offer_cannot_reset_ledger(results: List[Result]) -> None:
+    """Architect review cycle 2: a stale offer (sequence < account.offer_sequence)
+    MUST be rejected, never silently reset the ledger. Uses offer_sequence
+    (not version) for the freshness decision."""
+    try:
+        _, _, _, idA, _ = make_identity()
+        owner = str(idA.node_id)
+        r = make_resource(owner=owner, kind=ResourceKind.BANDWIDTH)
+        rs = ResourceStore(); rs.register_resource(r)
+        rs.create_offer(base_offer(resource=r, quantity=Quantity(100, "mbps"), sequence=2))
+        rs.init_account_from_offer(r.resource_id, now=FRESH_NOW)  # offer_sequence=2
+        rs.reserve(r.resource_id, "op1", Quantity(20, "mbps"), now=FRESH_NOW)
+        # Simulate a stale current offer relative to the account: directly inject
+        # an account with offer_sequence=5 (as if it had been initialized from a
+        # higher-generation offer that is no longer current). The store's offer
+        # watermark rejects stale inserts, so we construct the account directly.
+        # get_current_offer will still return the seq=2 offer, which is now stale
+        # relative to the account's offer_sequence=5.
+        injected = ResourceAccount(
+            resource_id=r.resource_id,
+            offered=100_000_000,
+            reserved=20_000_000,
+            consumed=0,
+            offer_sequence=5,
+            version=2,
+            offer_id="acct-from-offer-seq-5",
+        )
+        rs._accounts[r.resource_id] = injected
+        try:
+            rs.init_account_from_offer(r.resource_id, now=FRESH_NOW)
+            raise AssertionError("stale offer (seq 2 < account offer_sequence 5) must raise account-stale-offer")
+        except ResourceError as e:
+            assert e.code == "account-stale-offer", e.code
+        # account UNCHANGED -- live ledger preserved
+        acct2 = rs.get_account(r.resource_id)
+        assert acct2 is injected, "account object NOT replaced"
+        assert acct2.offer_sequence == 5, "offer_sequence NOT reset"
+        assert acct2.reserved == 20_000_000, "reserved NOT reset"
+        assert acct2.consumed == 0, "consumed NOT reset"
+        results.append(("case_42_stale_offer_cannot_reset_ledger", True,
+                        "stale offer rejected; live ledger preserved"))
+    except Exception as error:
+        results.append(("case_42_stale_offer_cannot_reset_ledger", False, repr(error)))
+
+
+def case_43_newer_offer_advances_non_live_account(results: List[Result]) -> None:
+    """Architect review cycle 2: a newer offer arriving on a NON-live account
+    (reserved == 0 AND consumed == 0) safely advances offered / offer_sequence
+    / offer_id; version stays at 1 because no accounting operations were
+    applied under the new offer yet. This is the only safe migration path."""
+    try:
+        _, _, _, idA, _ = make_identity()
+        owner = str(idA.node_id)
+        r = make_resource(owner=owner, kind=ResourceKind.BANDWIDTH)
+        rs = ResourceStore(); rs.register_resource(r)
+        rs.create_offer(base_offer(resource=r, quantity=Quantity(100, "mbps"), sequence=1))
+        acct1 = rs.init_account_from_offer(r.resource_id, now=FRESH_NOW)
+        assert acct1.offer_sequence == 1
+        assert acct1.offered == 100_000_000
+        assert acct1.version == 1
+        # newer offer arrives BEFORE any reservation/consumption -- account not live
+        rs.create_offer(base_offer(resource=r, quantity=Quantity(150, "mbps"), sequence=2))
+        acct2 = rs.init_account_from_offer(r.resource_id, now=FRESH_NOW)
+        # offered advanced to the newer offer's quantity; reserved/consumed stay 0
+        assert acct2.offer_sequence == 2, "offer_sequence advanced to 2"
+        assert acct2.offered == 150_000_000, "offered advanced to 150M"
+        assert acct2.reserved == 0, "reserved still 0"
+        assert acct2.consumed == 0, "consumed still 0"
+        assert acct2.version == 1, "version stays at 1 (no ops under new offer)"
+        assert acct2.offer_id != acct1.offer_id, "offer_id advanced to the new offer"
+        # accounting mutations under the new offer bump version (NOT offer_sequence)
+        rs.reserve(r.resource_id, "op1", Quantity(40, "mbps"), now=FRESH_NOW)
+        acct3 = rs.get_account(r.resource_id)
+        assert acct3 is not None
+        assert acct3.offer_sequence == 2, "offer_sequence stays at 2"
+        assert acct3.version == 2, "version bumped to 2"
+        assert acct3.reserved == 40_000_000
+        results.append(("case_43_newer_offer_advances_non_live_account", True,
+                        "non-live account advances offered/offer_sequence; version stays 1"))
+    except Exception as error:
+        results.append(("case_43_newer_offer_advances_non_live_account", False, repr(error)))
+
+
+# ==========================================================================
 # Mechanical checks (mirrors topology_selftest mechanical cases)
 # ==========================================================================
 
@@ -1465,6 +1630,10 @@ def main() -> int:
     case_37_resource_id_scope_tamper_rejected(results)
     case_38_malformed_resource_id_rejected(results)
     case_39_parse_resource_id_roundtrip(results)
+    case_40_current_offer_not_stale_after_mutations(results)
+    case_41_newer_offer_cannot_reset_live_ledger(results)
+    case_42_stale_offer_cannot_reset_ledger(results)
+    case_43_newer_offer_advances_non_live_account(results)
     case_serialization_roundtrip(results)
     case_no_forbidden_fields_or_methods(results)
     case_no_5g_vendor_imports(results)

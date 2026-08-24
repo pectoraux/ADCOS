@@ -1137,6 +1137,19 @@ class ResourceAccount:
         remaining >= 0
         reserved + consumed <= offered
 
+    Two distinct version dimensions are kept separate (Architect review of PR
+    #8, correction cycle 2): ``offer_sequence`` is the immutable originating
+    resource-offer generation the ledger was initialized from (a property of
+    the source ``ResourceOffer``; never mutated by accounting operations);
+    ``version`` is the mutable accounting-mutation counter (incremented by
+    every successful reserve / release_reservation / consume /
+    release_consumption operation). ``init_account_from_offer`` uses
+    ``offer_sequence`` exclusively to decide offer freshness -- a still-current
+    offer is NEVER classified as stale merely because accounting operations
+    bumped ``version`` past it, and a newer offer can NEVER silently reset a
+    live account (reserved > 0 OR consumed > 0) without an explicit accounting
+    lifecycle rule (raise ``account-offer-advance``).
+
     Operations are idempotent by ``op_id`` (a second reservation with the same
     op_id does NOT double-count -- rule 9 / accounting requirement). Stale
     version updates are rejected (``expected_version`` precondition). This is
@@ -1148,7 +1161,8 @@ class ResourceAccount:
     offered: int  # base-unit integer
     reserved: int = 0
     consumed: int = 0
-    version: int = 1
+    offer_sequence: int = 1  # immutable originating offer generation (rule 9 cycle-2)
+    version: int = 1  # mutable accounting-mutation counter (rule 9)
     offer_id: str = ""
     _operations: Dict[str, str] = field(default_factory=dict)  # op_id -> outcome code
 
@@ -1161,6 +1175,14 @@ class ResourceAccount:
             raise ResourceError("account-reserved", "reserved must be an integer")
         if isinstance(self.consumed, bool) or not isinstance(self.consumed, int):
             raise ResourceError("account-consumed", "consumed must be an integer")
+        if isinstance(self.offer_sequence, bool) or not isinstance(self.offer_sequence, int):
+            raise ResourceError("account-offer-sequence", "offer_sequence must be an integer")
+        if self.offer_sequence < 1:
+            raise ResourceError("account-offer-sequence", "offer_sequence must be >= 1")
+        if isinstance(self.version, bool) or not isinstance(self.version, int):
+            raise ResourceError("account-version", "version must be an integer")
+        if self.version < 1:
+            raise ResourceError("account-version", "version must be >= 1")
         self._check_invariants()
 
     def _check_invariants(self) -> None:
@@ -1313,6 +1335,7 @@ class ResourceAccount:
             "reserved": self.reserved,
             "consumed": self.consumed,
             "remaining": self.remaining,
+            "offer_sequence": self.offer_sequence,
             "version": self.version,
             "offer_id": self.offer_id,
         }
@@ -1659,9 +1682,15 @@ class ResourceStore:
     ) -> ResourceAccount:
         """Create (or refresh) the accounting ledger for ``resource_id`` from
         its current-fresh owner offer. The offered quantity is converted to
-        the integer base unit (rule 5). Reserved/consumed are reset only on a
-        newer offer sequence (a stale offer cannot reset accounting -- rule 9
-        stale case 8)."""
+        the integer base unit (rule 5). Reserved/consumed are reset only when
+        the existing account is NOT live (reserved == 0 AND consumed == 0);
+        a live account is NEVER silently reset by a newer offer without an
+        explicit accounting lifecycle rule (Architect review of PR #8,
+        correction cycle 2). Offer freshness is decided exclusively by
+        ``offer_sequence`` (immutable originating offer generation) -- never by
+        the mutable accounting-mutation ``version`` (which bumps on every
+        reserve/consume/release operation and would otherwise classify a
+        still-current offer as stale)."""
         resource = self._require_resource(resource_id)
         offer = self.get_current_offer(resource_id, now=now)
         if offer is None:
@@ -1672,23 +1701,51 @@ class ResourceStore:
             )
         existing = self._accounts.get(resource_id)
         if existing is not None:
-            # A newer offer sequence resets the ledger; an equal/stale
-            # sequence is idempotent (no reset).
-            if offer.sequence < existing.version:
+            # Offer freshness is decided by offer_sequence (immutable) -- NOT by
+            # the accounting-mutation version (which bumps on every reserve/
+            # consume/release). A still-current offer is NEVER stale merely
+            # because accounting operations bumped version past it.
+            if offer.sequence < existing.offer_sequence:
                 raise ResourceError(
                     "account-stale-offer",
-                    "offer sequence %d < account version %d -- stale offer cannot reset accounting"
-                    % (offer.sequence, existing.version),
+                    "offer sequence %d < account offer_sequence %d -- stale offer cannot reset accounting"
+                    % (offer.sequence, existing.offer_sequence),
                 )
-            if offer.sequence == existing.version and existing.offer_id == offer.offer_id:
-                return existing  # idempotent
+            if offer.sequence == existing.offer_sequence:
+                if existing.offer_id == offer.offer_id:
+                    return existing  # idempotent -- same offer, no reset
+                # Same sequence but a different offer_id should not occur under
+                # the per-(resource, provider) monotonic offer watermark; treat
+                # as an offer-identity conflict (fail closed).
+                raise ResourceError(
+                    "account-offer-conflict",
+                    "offer sequence %d matches account offer_sequence but offer_id differs -- offer identity conflict"
+                    % offer.sequence,
+                )
+            # offer.sequence > existing.offer_sequence: a NEWER offer arrived.
+            # A live account (reserved > 0 OR consumed > 0) MUST NOT be
+            # silently reset merely because a newer offer exists. The caller
+            # must close+reinit via an explicit accounting lifecycle rule
+            # (deferred to WORK-010 admission control) -- WORK-008 raise.
+            if existing.reserved > 0 or existing.consumed > 0:
+                raise ResourceError(
+                    "account-offer-advance",
+                    "offer sequence %d > account offer_sequence %d -- a live account (reserved=%d, consumed=%d) cannot be reset by a newer offer without an explicit accounting lifecycle rule"
+                    % (offer.sequence, existing.offer_sequence,
+                       existing.reserved, existing.consumed),
+                )
+            # The account is NOT live (reserved == 0 AND consumed == 0); safe
+            # to advance offered / offer_sequence / offer_id. version resets to
+            # 1 because no accounting operations have been applied under the
+            # new offer yet.
         offered_base = offer.quantity.to_base(resource.kind)
         account = ResourceAccount(
             resource_id=resource_id,
             offered=offered_base,
             reserved=0,
             consumed=0,
-            version=offer.sequence,
+            offer_sequence=offer.sequence,
+            version=1,
             offer_id=offer.offer_id,
         )
         self._accounts[resource_id] = account
