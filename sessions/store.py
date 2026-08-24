@@ -34,9 +34,10 @@ teardown. All instants are injected.
 from __future__ import annotations
 
 import hashlib
+import sys
 import threading
 from dataclasses import replace
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from policy.model import PolicyDecision
 from protocol.canonicalization import canonical_json_bytes
@@ -90,6 +91,13 @@ class SessionStore:
         self._sessions: Dict[str, Session] = {}
         self._events: Dict[str, List[SessionEvent]] = {}
         self._lock = threading.RLock()
+        # The registered extension commit capability code objects
+        # (generic: the substrate never knows which extension). The
+        # commit primitive verifies CALL-FRAME CODE-OBJECT identity
+        # against this set, so the capability cannot be exercised by
+        # holding references -- only by literally executing the
+        # registered capability function.
+        self._extension_commit_codes: set = set()
 
     # -- queries --------------------------------------------------------
 
@@ -804,6 +812,37 @@ class SessionStore:
 
     # -- extension-event seam (generic internal substrate) ----------------
 
+    def _register_extension_commit_capability(self, code_object: Any) -> None:
+        """Register THE extension commit capability code object for this
+        store -- the generic constructor-time handshake (called by an
+        extension constructor; the substrate never knows which one).
+
+        GENERIC + FRAME-GUARDED (Architect review of PR #13, correction
+        cycle 6): exactly one capability may own a store's
+        extension-event seam (first registration wins; later
+        registrations fail closed), and registration is only accepted
+        from within a constructor frame (``co_name == "__init__"`` --
+        defense in depth). The security boundary itself lives at COMMIT
+        time: the primitive verifies CALL-FRAME CODE-OBJECT identity,
+        so even a registered code object cannot be exercised by a
+        caller that is not literally executing it."""
+        if self._extension_commit_codes:
+            raise SessionError(
+                "extension-authority",
+                "this session store already has a registered extension "
+                "commit capability; exactly one capability may own the "
+                "extension-event seam",
+            )
+        frame = sys._getframe(1)
+        if frame.f_code.co_name != "__init__":
+            raise SessionError(
+                "extension-authority",
+                "extension commit capabilities are registered from an "
+                "extension constructor (constructor-time handshake), "
+                "not from arbitrary code",
+            )
+        self._extension_commit_codes.add(code_object)
+
     def _append_state_preserving_event(self, event: SessionEvent) -> SessionResult:
         """Atomically append a PRE-VALIDATED state-preserving event (the
         GENERIC internal substrate primitive for extension events).
@@ -836,6 +875,26 @@ class SessionStore:
         instant; state and current route unchanged) become visible
         together."""
         with self._lock:
+            # AUTHORITY GATE (Architect review of PR #13, correction
+            # cycle 6): the DIRECT CALLER must literally be executing
+            # the registered extension commit capability. Verification
+            # is by CALL-FRAME CODE-OBJECT identity -- it cannot be
+            # satisfied by holding references to the capability, the
+            # authority instance, the registry, or this primitive: a
+            # caller that is not the registered capability code itself
+            # fails closed. Direct calls to this internal primitive
+            # (e.g. ``store._append_state_preserving_event(forged)``)
+            # therefore fail closed with ``extension-authority-required``.
+            frame = sys._getframe(1)
+            if frame.f_code not in self._extension_commit_codes:
+                return SessionResult(
+                    ok=False,
+                    code=SessionReasonCode.EXTENSION_AUTHORITY_REQUIRED,
+                    detail="extension events can only be committed by the "
+                    "registered extension commit capability (call-frame "
+                    "code-identity check failed) -- direct calls to the "
+                    "internal substrate primitive fail closed",
+                )
             if not isinstance(event, SessionEvent):
                 return SessionResult(
                     ok=False,

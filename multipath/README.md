@@ -78,25 +78,39 @@ any public path: the generic session append rejects state-preserving
 events as `illegal-transition`, and the session substrate is fully
 GENERIC — no multipath import, no registration API, no plan-append
 surface (WORK-012 never depends on WORK-013; verified mechanically).
-The plan-event commit path is owned by THIS layer, and the capability
-is the **constructed authority instance itself**: the `MultipathStore`
-constructor registers itself in a module-private registry keyed by
-the session store (the constructor-time handshake), and exactly one
+The plan-event commit path is owned by THIS layer, and the boundary is
+enforced by **call-frame code-object identity at two gates**
+(Architect reviews of PR #13, corrections 1-6):
+
+1. **The session substrate primitive**
+   (`SessionStore._append_state_preserving_event`) accepts events ONLY
+   from the registered extension commit capability: it verifies
+   `sys._getframe(1).f_code` against the code objects registered at
+   the constructor-time handshake. A **direct call** —
+   `store._append_state_preserving_event(forged)` — fails closed with
+   `extension-authority-required`: holding references to the store,
+   the capability, or any registry cannot satisfy a frame check.
+
+2. **This layer's commit capability** (a per-instance closure created
+   in `MultipathStore.__init__`) verifies that ITS direct caller is
+   one of the validated operations (`add_path`, `remove_path`,
+   `change_path_status`, `replay_event`): the operation-code set is a
+   **frozen closure cell** in a class-factory closure — not a module
+   global, not a class or instance attribute. Retrieving the
+   capability (or the authority instance) via deep closure
+   introspection does not help: calling it from attacker code fails
+   the frame check.
+
+The authority registry, the per-instance capabilities, and the
+operation-code set all live in the class-factory closure — **not**
+module globals, class attributes, or instance attributes. There is no
+token object, no accessor, no module-level commit function, and no
+registry a caller can look a credential up in. Exactly one
 `MultipathStore` may own a given `SessionStore`'s plan-event seam
-(enforced here, in the multipath layer). The commit path
-`_commit_plan_event(authority, store, event)` **requires that instance
-as its credential and verifies it by identity** (Architect reviews of
-PR #13, corrections 1-5). There is **no token object and no
-token-acquisition API** — correction 5 removed the callable
-`_authority_token(store)` accessor, which handed the real credential
-to any caller who imported the module. Nothing in the module converts
-a session store into a committable credential: without the
-constructed authority, or with any other caller (`None`, a random
-object, the session store itself, a foreign authority, or an attribute
-read off an instance or the module), the commit fails closed with
-`plan-authority-required` and mutates nothing. Only the application's
-own constructed authority commits, and only its validated operations
-present it (they pass `self`).
+(enforced at construction, in this layer). Only the application's own
+constructed authority can commit, and only its validated operations
+can present the capability — they do so by literally being the
+executing code.
 
 ## Path admission (the cross-path binding security property)
 

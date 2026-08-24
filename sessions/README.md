@@ -210,7 +210,20 @@ sessions module imports or references any extension package).
 Manufactured extension events cannot enter history through any public
 API — `append_event` rejects state-preserving events as
 `illegal-transition`, and there is no public or registration-based
-plan-event append surface at all.## Store semantics
+plan-event append surface at all.
+
+**Call-frame identity gate** (Architect review of PR #13, correction
+cycle 6): the primitive verifies that its DIRECT CALLER is literally
+executing the registered extension commit capability
+(`sys._getframe(1).f_code` against the constructor-time-registered
+code objects). A direct call —
+`store._append_state_preserving_event(forged)` — fails closed with
+`extension-authority-required` even after a legitimate extension
+authority exists: holding references to the store, the capability,
+or the registry cannot satisfy a frame check. Registration
+(`_register_extension_commit_capability`) is a generic
+constructor-time handshake: first registration wins, and it is only
+accepted from within a constructor frame.## Store semantics
 
 Atomic `create` / `transition` / `append_event` (replay) / `reconnect`
 (binding update) / `suspend` / `terminate`. A failed transition leaves

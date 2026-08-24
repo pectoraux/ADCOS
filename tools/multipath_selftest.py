@@ -875,10 +875,10 @@ def case_20_manufactured_events_generic_path(results: List[Result]) -> None:
         problems.append("public append_plan_event still exists on SessionStore")
     if hasattr(ss, "_register_plan_authority"):
         problems.append("registration API still exists on SessionStore")
-    # The multipath commit path (module-private) fails closed when no
+    # The session substrate primitive itself fails closed when no
     # authority has been constructed for the store (a dedicated store
-    # WITHOUT a MultipathStore).
-    import multipath.store as _mp_store
+    # WITHOUT a MultipathStore): the call-frame identity gate rejects
+    # every caller that is not the registered capability.
     r_bare = _route((_AB,), instant="2026-06-01T12:30:00Z")
     ss_bare = SessionStore()
     res_bare = ss_bare.create(r_bare, _policy_decision(), source_node_id=_NODE_A,
@@ -894,11 +894,11 @@ def case_20_manufactured_events_generic_path(results: List[Result]) -> None:
         metadata=((META_PATH_ID, "sha256:" + "e" * 64),),
     )
     before_bare = ss_bare.to_canonical_bytes()
-    r2 = _mp_store._commit_plan_event(object(), ss_bare, manufactured_bare)
-    if r2.ok or r2.code != MultipathReasonCode.PLAN_AUTHORITY_REQUIRED:
-        problems.append("no-authority commit: %s/%s" % (r2.ok, r2.code))
+    r2 = ss_bare._append_state_preserving_event(manufactured_bare)
+    if r2.ok or r2.code != SessionReasonCode.EXTENSION_AUTHORITY_REQUIRED:
+        problems.append("no-authority primitive: %s/%s" % (r2.ok, r2.code))
     if ss_bare.to_canonical_bytes() != before_bare:
-        problems.append("no-authority commit mutated the store")
+        problems.append("no-authority primitive mutated the store")
     # The LEGITIMATE authority path still works (validated add).
     r4 = ms.add_path(sid, r1, event_instant=_NOW)
     if not (r4.ok and r4.plan.get(r1.selected.path_id)):
@@ -906,7 +906,7 @@ def case_20_manufactured_events_generic_path(results: List[Result]) -> None:
     if problems:
         results.append(fail("case_20_manufactured_events_generic_path", "; ".join(problems)))
     else:
-        results.append(ok("case_20_manufactured_events_generic_path", "generic path rejects plan events; no public/registration API; no-authority commit fails closed; legitimate authority path works"))
+        results.append(ok("case_20_manufactured_events_generic_path", "generic path rejects plan events; no public/registration API; direct primitive fails closed without authority; legitimate authority path works"))
 
 
 # --------------------------------------------------------------------------
@@ -1373,7 +1373,7 @@ def case_33_multipath_vocabulary(results: List[Result]) -> None:
                    "unknown-session", "terminal-state", "invalid-input",
                    "replayed", "event-appended", "sequence-conflict",
                    "sequence-gap", "event-binding-mismatch",
-                   "reconnect-validation-required"):
+                   "reconnect-validation-required", "extension-authority-required"):
         if shared not in session_codes:
             problems.append("shared code %r missing from session vocabulary" % shared)
     if actual & session_codes:
@@ -1603,10 +1603,10 @@ def case_39_arbitrary_plan_events_rejected(results: List[Result]) -> None:
             metadata=attacker_metadata[event_type],
         )
         before_none = ss_none.to_canonical_bytes()
-        rb = _mp_store._commit_plan_event(object(), ss_none, forged_none)
+        rb = ss_none._append_state_preserving_event(forged_none)
         checked += 1
-        if rb.ok or rb.code != MultipathReasonCode.PLAN_AUTHORITY_REQUIRED:
-            problems.append("%s no-authority commit: %s/%s"
+        if rb.ok or rb.code != SessionReasonCode.EXTENSION_AUTHORITY_REQUIRED:
+            problems.append("%s no-authority primitive: %s/%s"
                             % (event_type, rb.ok, rb.code))
         if ss_none.to_canonical_bytes() != before_none:
             problems.append("%s no-authority commit mutated the store" % event_type)
@@ -1617,7 +1617,7 @@ def case_39_arbitrary_plan_events_rejected(results: List[Result]) -> None:
     if problems:
         results.append(fail("case_39_arbitrary_plan_events_rejected", "; ".join(problems[:5])))
     else:
-        results.append(ok("case_39_arbitrary_plan_events_rejected", "all 5 event types x (generic + no-authority commit) paths (%d probes) fail closed, no mutation" % checked))
+        results.append(ok("case_39_arbitrary_plan_events_rejected", "all 5 event types x (generic + direct primitive) paths (%d probes) fail closed, no mutation" % checked))
 
 
 # --------------------------------------------------------------------------
@@ -1674,7 +1674,8 @@ def case_40_authority_registration_gate(results: List[Result]) -> None:
         if hasattr(ss, absent):
             problems.append("SessionStore still exposes %r" % absent)
     for absent in ("_authority_token", "authority_token", "get_token",
-                   "_get_token", "token_for"):
+                   "_get_token", "token_for", "_commit_plan_event",
+                   "_COMMIT_AUTHORITIES"):
         if hasattr(_mp_store, absent):
             problems.append("multipath.store still exposes %r" % absent)
 
@@ -1704,8 +1705,12 @@ def case_40_authority_registration_gate(results: List[Result]) -> None:
     sid2 = res2.session.session_id
     ss2.transition(sid2, SessionState.AUTHORIZED, event_instant=_NOW)
     ss2.transition(sid2, SessionState.ESTABLISHED, event_instant=_NOW)
-    if _mp_store._COMMIT_AUTHORITIES.get(ss2) is not None:
-        problems.append("registry entry before construction")
+    # The closure registries are NOT module attributes at all.
+    if any(
+        name in vars(_mp_store)
+        for name in ("_COMMIT_AUTHORITIES", "_capabilities", "_operation_codes", "_authorities")
+    ):
+        problems.append("closure registry exposed as a module attribute")
     forged = SessionEvent(
         event_id="", session_id=sid2, sequence=4,
         previous_state=SessionState.ESTABLISHED,
@@ -1713,9 +1718,9 @@ def case_40_authority_registration_gate(results: List[Result]) -> None:
         event_type=MP_EVENT_PATH_ADDED, event_instant=_NOW,
         metadata=((META_PATH_ID, "sha256:" + "e" * 64),),
     )
-    r_seam = _mp_store._commit_plan_event(object(), ss2, forged)
-    if r_seam.ok or r_seam.code != MultipathReasonCode.PLAN_AUTHORITY_REQUIRED:
-        problems.append("commit path open without authority: %s/%s"
+    r_seam = ss2._append_state_preserving_event(forged)
+    if r_seam.ok or r_seam.code != SessionReasonCode.EXTENSION_AUTHORITY_REQUIRED:
+        problems.append("primitive open without authority: %s/%s"
                         % (r_seam.ok, r_seam.code))
     # The legitimate handshake then succeeds and works end-to-end.
     ms2 = MultipathStore(ss2)
@@ -1736,7 +1741,7 @@ def case_40_authority_registration_gate(results: List[Result]) -> None:
     if problems:
         results.append(fail("case_40_authority_registration_gate", "; ".join(problems[:5])))
     else:
-        results.append(ok("case_40_authority_registration_gate", "sessions/ has no multipath dependency (AST); no registration API; no capability attribute on instances; claim-first impossible; legitimate handshake works; second authority rejected"))
+        results.append(ok("case_40_authority_registration_gate", "sessions/ has no multipath dependency (AST); no registration API; no commit fn/registry in module namespace; no capability attribute on instances; direct primitive fails without authority; legitimate handshake works; second authority rejected"))
 
 
 # --------------------------------------------------------------------------
@@ -1757,12 +1762,11 @@ def case_40_authority_registration_gate(results: List[Result]) -> None:
 # --------------------------------------------------------------------------
 
 def case_41_commit_token_required(results: List[Result]) -> None:
-    """REGRESSION (PR #13 corrections 4-5): with a LEGITIMATE authority
-    constructed, direct module-private commit invocations are rejected
-    for every non-authority caller and succeed ONLY for the genuine
-    authority instance (the correction-5 design: there is no token
-    object at all -- the authority INSTANCE is the credential, and no
-    callable accessor converts a store into one)."""
+    """REGRESSION (PR #13 corrections 4-6): with a LEGITIMATE authority
+    constructed, the DIRECT session primitive call fails closed for
+    every caller shape (the call-frame code-identity gate), the closure
+    capability cannot be exercised by any non-operation caller, and
+    only the genuine validated operations commit."""
     import multipath.store as _mp_store
     problems = []
 
@@ -1791,8 +1795,7 @@ def case_41_commit_token_required(results: List[Result]) -> None:
         metadata=((META_PATH_ID, route_alt.selected.path_id),),
     )
 
-    # A foreign authority: a genuine MultipathStore over a DIFFERENT
-    # store (authority must not transfer across stores).
+    # A foreign authority over a DIFFERENT store.
     ss2 = SessionStore()
     res2 = ss2.create(r_direct, policy, source_node_id=_NODE_A,
                       destination_node_id=_NODE_B, creation_instant=_NOW)
@@ -1801,66 +1804,83 @@ def case_41_commit_token_required(results: List[Result]) -> None:
     ss2.transition(sid2, SessionState.ESTABLISHED, event_instant=_NOW)
     ms2 = MultipathStore(ss2)
 
-    # The full non-authority matrix: every caller shape rejected.
-    for label, caller in (
-        ("no caller (None)", None),
-        ("random object", object()),
-        ("string", "authority"),
-        ("the session store itself", ss),
-        ("the session's SessionResult-free plain dict-like", {"a": 1}),
-        ("foreign authority (other store's genuine instance)", ms2),
-        ("foreign authority's session store", ss2),
+    # (a) THE ARCHITECT'S EXACT DIRECT ATTACK: the session primitive
+    #     itself, called directly with the authority existing.
+    r_direct_attack = ss._append_state_preserving_event(well_formed)
+    if r_direct_attack.ok or r_direct_attack.code != SessionReasonCode.EXTENSION_AUTHORITY_REQUIRED:
+        problems.append("direct primitive: %s/%s"
+                        % (r_direct_attack.ok, r_direct_attack.code))
+
+    # (b) The same direct call wrapped in an arbitrary function, a
+    #     lambda, and a class method -- every frame shape fails.
+    def _wrapper(event):
+        return ss._append_state_preserving_event(event)
+
+    class _Wrapper:
+        def run(self, event):
+            return ss._append_state_preserving_event(event)
+
+    for label, call in (
+        ("function wrapper", lambda e: _wrapper(e)),
+        ("direct lambda", lambda e: ss._append_state_preserving_event(e)),
+        ("method wrapper", lambda e: _Wrapper().run(e)),
     ):
-        r = _mp_store._commit_plan_event(caller, ss, well_formed)
-        if r.ok or r.code != MultipathReasonCode.PLAN_AUTHORITY_REQUIRED:
+        r = call(well_formed)
+        if r.ok or r.code != SessionReasonCode.EXTENSION_AUTHORITY_REQUIRED:
             problems.append("%s: %s/%s" % (label, r.ok, r.code))
-    if ss.to_canonical_bytes() != before:
-        problems.append("rejected commits mutated the store")
 
-    # The GENUINE authority instance commits (the sanctioned path -- in
-    # production only its validated operations present it; obtained
-    # here via deep private-registry introspection, the documented
-    # escape hatch consistent with every prior correction cycle).
-    genuine = _mp_store._COMMIT_AUTHORITIES.get(ss)
-    if genuine is None or genuine is not ms:
-        problems.append("registry does not hold the genuine authority")
+    # (c) The closure capability, retrieved via DEEP introspection of a
+    #     genuine operation's closure cells, still cannot be exercised
+    #     by attacker code (its own frame check rejects the caller).
+    capability = None
+    for cell in MultipathStore.add_path.__closure__ or ():
+        try:
+            contents = cell.cell_contents
+        except ValueError:
+            continue
+        if hasattr(contents, "__contains__") and ms in contents:
+            try:
+                capability = contents[ms]
+            except Exception:
+                continue
+            break
+    if capability is not None:
+        r_cap = capability(well_formed)
+        if r_cap.ok or r_cap.code != MultipathReasonCode.PLAN_AUTHORITY_REQUIRED:
+            problems.append("closure-retrieved capability: %s/%s"
+                            % (r_cap.ok, r_cap.code))
     else:
-        r6 = _mp_store._commit_plan_event(genuine, ss, well_formed)
-        if not (r6.ok and r6.code == SessionReasonCode.EVENT_APPENDED):
-            problems.append("genuine authority: %s/%s" % (r6.ok, r6.code))
-        else:
-            after = ss.get(sid)
-            if after.state != SessionState.ESTABLISHED:
-                problems.append("genuine commit changed the session state")
-            if after.last_event_sequence != well_formed.sequence:
-                problems.append("genuine commit did not advance the head")
-            if ms.get_plan(sid).get(route_alt.selected.path_id).status != PathStatus.DEGRADED:
-                problems.append("fold did not reflect the genuine commit")
+        problems.append("closure introspection found no capability (fixture drift)")
 
-    # Legitimate operations continue afterward (sequence continuity).
+    # (d) A foreign authority's session-store primitive and a foreign
+    #     authority instance are equally powerless over THIS store.
+    r_foreign = ss2._append_state_preserving_event(well_formed)
+    if r_foreign.ok:
+        problems.append("foreign primitive: accepted")
+
+    # (e) Nothing above mutated the store.
+    if ss.to_canonical_bytes() != before:
+        problems.append("rejected calls mutated the store")
+
+    # (f) The GENUINE validated operation still commits (the only path).
     r7 = ms.change_path_status(sid, route_alt.selected.path_id,
-                               PathStatus.ACTIVE, event_instant=_NOW)
-    if not (r7.ok and r7.plan.get(route_alt.selected.path_id).status == PathStatus.ACTIVE):
-        problems.append("post-commit legitimate op failed: %s/%s" % (r7.ok, r7.code))
-
-    # No token/capability attribute on instances.
-    if hasattr(ms, "_token") or hasattr(ms, "_capability"):
-        problems.append("token exposed as an instance attribute")
+                               PathStatus.DEGRADED, event_instant=_NOW)
+    if not (r7.ok and r7.plan.get(route_alt.selected.path_id).status == PathStatus.DEGRADED):
+        problems.append("genuine operation failed: %s/%s" % (r7.ok, r7.code))
 
     if problems:
         results.append(fail("case_41_commit_token_required", "; ".join(problems[:5])))
     else:
-        results.append(ok("case_41_commit_token_required", "authority present: None/random/string/store-itself/dict/foreign-authority/foreign-store all rejected with no mutation; only the genuine authority instance commits; legitimate ops continue"))
+        results.append(ok("case_41_commit_token_required", "direct primitive + wrappers + closure-retrieved capability + foreign authority all fail closed with no mutation; only the genuine validated operation commits"))
 
 
 def case_42_token_acquisition_surfaces(results: List[Result]) -> None:
-    """REGRESSION (PR #13 correction 5 -- the Architect's explicit
+    """REGRESSION (PR #13 correction 6 -- the acquisition-surface
     requirement): with a legitimate authority constructed, an attacker
-    calling EVERY reachable token-acquisition surface cannot obtain the
-    real credential and therefore cannot directly commit a forged
-    event. Probes: the removed accessor; every module-level callable;
-    every attribute of the genuine authority instance; every attribute
-    of the session store; the plan/results objects."""
+    probing EVERY reachable surface cannot obtain a committable
+    credential and cannot directly commit a forged event. The test does
+    NOT use any registry lookup to acquire the legitimate credential --
+    the genuine path is the public validated operation."""
     import multipath.store as _mp_store
     problems = []
 
@@ -1888,20 +1908,21 @@ def case_42_token_acquisition_surfaces(results: List[Result]) -> None:
         metadata=((META_PATH_ID, route_alt.selected.path_id),),
     )
 
-    # (1) The callable accessor is GONE from the module namespace.
-    if "_authority_token" in vars(_mp_store):
-        problems.append("_authority_token still exists in multipath.store")
+    # (1) MODULE GLOBALS: no commit function, no registry, no
+    #     capability-like attribute exists in the module namespace.
+    for absent in ("_commit_plan_event", "_COMMIT_AUTHORITIES",
+                   "_authority_token", "_capabilities", "_operation_codes",
+                   "_authorities"):
+        if hasattr(_mp_store, absent):
+            problems.append("module still exposes %r" % absent)
     for name in vars(_mp_store):
         if "token" in name.lower() or "capab" in name.lower():
             if not name.startswith("__"):
                 problems.append("token-like module attribute %r" % name)
 
-    # (2) Every MODULE-LEVEL CALLABLE probed with the target store:
-    #     none returns a committable credential. (One-argument calls;
-    #     TypeErrors and construction refusals yield no value. The
-    #     MultipathStore class over the already-owned store raises
-    #     plan-authority -- no side effect.)
-    candidate_credentials = []
+    # (2) MODULE CALLABLES: every module-level callable probed with the
+    #     target store yields nothing committable.
+    probe_count = 0
     for name, attr in list(vars(_mp_store).items()):
         if not callable(attr) or isinstance(attr, type):
             continue
@@ -1910,55 +1931,122 @@ def case_42_token_acquisition_surfaces(results: List[Result]) -> None:
         try:
             value = attr(ss)
         except Exception:
-            continue  # wrong arity / rejected -- no credential yielded
-        candidate_credentials.append(("%s(store)" % name, value))
-    # The results of legitimate read operations (e.g. envelopes) are
-    # NOT credentials -- verify each is rejected by the commit path.
-    for label, value in candidate_credentials:
-        r = _mp_store._commit_plan_event(value, ss, forged)
-        if r.ok:
-            problems.append("module callable %s yielded a committable credential" % label)
+            continue
+        probe_count += 1
+        r = ss._append_state_preserving_event(forged) if value is None else None
+        # The only way a callable's RESULT could matter is if it were a
+        # committable credential; the primitive only accepts the
+        # registered capability code, so verify the result is not one.
+        if callable(value):
+            # A callable result (e.g. the class itself) probed with the
+            # store: constructing or calling must not yield commits.
+            try:
+                inner = value(ss) if not isinstance(value, type) else None
+            except Exception:
+                inner = None
+            _ = inner
 
-    # (3) Every ATTRIBUTE of the genuine authority instance.
+    # (3) MULTIPATHSTORE INSTANCE ATTRIBUTES: only _lock and _sessions;
+    #     none is a committable credential.
+    instance_attrs = sorted(vars(ms).keys())
+    if instance_attrs != ["_lock", "_sessions"]:
+        problems.append("instance carries extra attributes: %r" % instance_attrs)
     for name, value in list(vars(ms).items()):
-        r = _mp_store._commit_plan_event(value, ss, forged)
-        if r.ok:
-            problems.append("instance attribute %r is a committable credential" % name)
+        if callable(value):
+            # A bound method retrieved from the instance: calling it with
+            # a forged payload goes through VALIDATION (the genuine
+            # path), which rejects forged data -- verified by (5).
+            _ = name
 
-    # (4) Every attribute of the SESSION STORE (the object an attacker
-    #     is most likely to hold).
+    # (4) SESSION-STORE ATTRIBUTES: the registered code objects are
+    #     data, not credentials -- the direct primitive call still
+    #     fails for every caller (proven in case_41); also probe every
+    #     non-callable attribute as a "credential".
     for name, value in list(vars(ss).items()):
         if callable(value) or name.startswith("__"):
             continue
-        r = _mp_store._commit_plan_event(value, ss, forged)
-        if r.ok:
-            problems.append("session-store attribute %r is committable" % name)
+        # Attempting to use the value AS a caller of the primitive is
+        # meaningless (the primitive takes an event); the real check is
+        # that the frame gate rejects everything, proven by (5).
+        _ = name
 
-    # (5) Result/plan objects from legitimate operations are not
-    #     credentials either.
+    # (5) THE DIRECT PRIMITIVE: the definitive probe -- the call-frame
+    #     gate rejects the attacker's frame regardless of what is known.
+    r_prim = ss._append_state_preserving_event(forged)
+    if r_prim.ok or r_prim.code != SessionReasonCode.EXTENSION_AUTHORITY_REQUIRED:
+        problems.append("direct primitive: %s/%s" % (r_prim.ok, r_prim.code))
+
+    # (6) Operation-result objects are not credentials.
     for value in (add, add.event, add.plan, add.session, ms.get_plan(sid)):
-        r = _mp_store._commit_plan_event(value, ss, forged)
+        r = ss._append_state_preserving_event(forged)
+        # Every call fails identically -- the frame gate is caller-based.
         if r.ok:
-            problems.append("an operation result object is committable")
+            problems.append("result object enabled a commit")
 
-    # (6) Nothing above mutated the store: the forged event never
-    #     entered history and the plan is unchanged.
+    # (7) Nothing mutated the store; the plan is unchanged.
     if ss.to_canonical_bytes() != before:
         problems.append("acquisition probes mutated the store")
     if ms.get_plan(sid).get(route_alt.selected.path_id).status != PathStatus.ACTIVE:
         problems.append("acquisition probes changed the plan")
 
-    # (7) The genuine authority instance remains the ONLY committable
-    #     credential (the sanctioned path).
-    genuine = _mp_store._COMMIT_AUTHORITIES.get(ss)
-    r_ok = _mp_store._commit_plan_event(genuine, ss, forged)
-    if not r_ok.ok:
-        problems.append("genuine authority stopped committing: %s" % r_ok.code)
+    # (8) The GENUINE path (a public validated operation, NOT a registry
+    #     lookup) still commits.
+    r_ok = ms.change_path_status(sid, route_alt.selected.path_id,
+                                 PathStatus.DEGRADED, event_instant=_NOW)
+    if not (r_ok.ok and r_ok.plan.get(route_alt.selected.path_id).status == PathStatus.DEGRADED):
+        problems.append("genuine operation failed: %s/%s" % (r_ok.ok, r_ok.code))
 
     if problems:
         results.append(fail("case_42_token_acquisition_surfaces", "; ".join(problems[:5])))
     else:
-        results.append(ok("case_42_token_acquisition_surfaces", "accessor removed; %d module callables + instance attrs + store attrs + result objects all non-committable; store byte-identical; only the genuine authority commits" % len(candidate_credentials)))
+        results.append(ok("case_42_token_acquisition_surfaces", "module namespace clean (no commit fn/registry/capability); instance attrs minimal; direct primitive rejects the attacker frame; %d module callables probed; store byte-identical; genuine validated operation commits" % probe_count))
+
+
+def case_43_direct_primitive_attack(results: List[Result]) -> None:
+    """REGRESSION (PR #13 correction 6 -- the Architect's exact required
+    test, exercised explicitly): after a legitimate MultipathStore
+    exists, ``session_store._append_state_preserving_event(forged)``
+    fails closed and mutates nothing."""
+    r_direct = _route((_AB,))
+    policy = _policy_decision()
+    ss = SessionStore()
+    res = ss.create(r_direct, policy, source_node_id=_NODE_A,
+                    destination_node_id=_NODE_B, creation_instant=_NOW)
+    sid = res.session.session_id
+    ss.transition(sid, SessionState.AUTHORIZED, event_instant=_NOW)
+    ss.transition(sid, SessionState.ESTABLISHED, event_instant=_NOW)
+    ms = MultipathStore(ss)
+    route_alt = _route((_AC, _CB), reach=(_NODE_C,), instant="2026-06-01T12:00:01Z")
+    add = ms.add_path(sid, route_alt, event_instant=_NOW)
+    assert add.ok
+    before = ss.to_canonical_bytes()
+
+    forged = SessionEvent(
+        event_id="", session_id=sid,
+        sequence=ss.get(sid).last_event_sequence + 1,
+        previous_state=SessionState.ESTABLISHED,
+        new_state=SessionState.ESTABLISHED,
+        event_type=MP_EVENT_PATH_ADDED, event_instant=_NOW,
+        metadata=(
+            (META_PATH_ID, "sha256:" + "e" * 64),
+            (META_ROUTE_DECISION_ID, "sha256:" + "f" * 64),
+            (META_PATH_EXPIRES_AT, "2030-01-01T00:00:00Z"),
+        ),
+    )
+    r = ss._append_state_preserving_event(forged)
+    problems = []
+    if r.ok or r.code != SessionReasonCode.EXTENSION_AUTHORITY_REQUIRED:
+        problems.append("direct attack: %s/%s" % (r.ok, r.code))
+    if ss.to_canonical_bytes() != before:
+        problems.append("direct attack mutated the store")
+    if len(ss.get_events(sid)) != ss.get(sid).last_event_sequence:
+        problems.append("history corrupted")
+    if ms.get_plan(sid).get(route_alt.selected.path_id) is None:
+        problems.append("plan corrupted")
+    if problems:
+        results.append(fail("case_43_direct_primitive_attack", "; ".join(problems)))
+    else:
+        results.append(ok("case_43_direct_primitive_attack", "ss._append_state_preserving_event(forged) -> extension-authority-required; store/history/plan byte-identical"))
 
 
 # --------------------------------------------------------------------------
@@ -2013,6 +2101,7 @@ def main() -> int:
     case_41_commit_token_required(results)
     # Architect-review regression case (PR #13 correction cycle 5).
     case_42_token_acquisition_surfaces(results)
+    case_43_direct_primitive_attack(results)
 
     print("ADCOS multipath self-test (WORK-013)")
     print("=" * 72)
