@@ -540,7 +540,7 @@ python3 tools/policy_selftest.py
 
 ## routing_selftest.py — path computation/routing tests (WORK-011)
 
-Deterministic, offline verification of the routing package against the frozen WORK-011 handoff: candidate construction from explicit topology/link state, hard-constraint enforcement, policy/resource/evidence integration, deterministic ranking with the frozen 10-level total order, alternate-path retention, snapshot consistency, fail-closed behavior, and the mechanical prohibition of access-generation-specific routing logic. Runs in CI after the policy suite.
+Deterministic, offline verification of the routing package against the frozen WORK-011 handoff: candidate construction from explicit topology/link state, hard-constraint enforcement, policy/resource/evidence integration, deterministic ranking with the frozen 10-level total order, alternate-path retention, snapshot consistency, fail-closed behavior, and the mechanical prohibition of access-generation-specific routing logic — plus the PR #11 correction regressions (tamper-evident `path_id` content binding). Runs in CI after the policy suite.
 
 ### Invocation
 
@@ -622,3 +622,9 @@ python3 tools/routing_selftest.py
 | `68-no-missing-metric-inference` | no-facts link ineligible; distinguished from disconnection |
 | `69-engine-error-envelope` | invalid-input / invalid-node fail closed with stable codes |
 | `70-multi-hop-transit-labels` | locality covers every transit node |
+| `71-path-id-valid-content-bound` | REGRESSION (PR #11 blocker): valid derived id passes construction; identical content yields the same id; the `dataclasses.replace` rebuild path re-validates |
+| `72-path-id-tamper-rejected` | REGRESSION (PR #11 blocker): 5 tampered-id shapes (forged digest, id-lifting from another path, truncated, non-sha256) rejected at construction with code `path-id` |
+| `73-content-change-invalidates-id` | REGRESSION (PR #11 blocker): 4 content-change shapes (different hop, different transit node, swapped node order, different destination) all invalidate the stored id |
+| `74-tampered-path-id-cannot-alter-ranking` | REGRESSION (PR #11 blocker): tie-flip attack unconstructible at construction, `replace()`, and wire form; engine ranking byte-stable; engine-produced ids verify against content |
+| `75-deserialization-path-id-binding` | REGRESSION (PR #11 blocker): tampered stored id / stale id rejected at deserialization; absent id derived (never trusted); invariant re-verified on every deserialized Path |
+| `76-roundtrip-retains-path-id` | REGRESSION (PR #11 blocker): full decision (selected + alternates + rejected) round-trips byte-identically with ids retained and re-verified |

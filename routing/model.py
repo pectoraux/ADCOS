@@ -418,6 +418,15 @@ class Path:
     authorization. It is stable under metric changes (a path's identity
     is its hop sequence, not its volatile measurements).
 
+    TAMPER-EVIDENT CONTENT BINDING (Architect review of PR #11): the
+    constructor mechanically verifies
+    ``path_id == derive_path_id(source, destination, hops, nodes)``.
+    A tampered or deserialized Path can NEVER retain identical
+    topology/hops/metrics while supplying an attacker-chosen
+    ``path_id`` (the final deterministic tie-break level) -- the same
+    content-binding principle as WORK-004 NodeIDs, WORK-008 resource
+    ids, WORK-009 intent digests, and WORK-010 decision ids.
+
     ``feasible`` / ``rejection_code`` / ``rejection_detail`` /
     ``unmet_constraints`` carry the deterministic feasibility verdict:
     a candidate is feasible only when ALL required hard constraints are
@@ -457,6 +466,28 @@ class Path:
                 "nodes",
                 "nodes must contain exactly len(hops)+1 entries (got %d hops, %d nodes)"
                 % (len(self.hops), len(self.nodes)),
+            )
+        # Tamper-evident content binding (Architect review of PR #11,
+        # blocker): path_id MUST equal the fingerprint recomputed from
+        # the path content. Because path_id is the FINAL deterministic
+        # tie-break level, an unbound id could otherwise alter the
+        # selected route without changing any substantive route data.
+        # The binding is enforced at CONSTRUCTION -- the single layer
+        # through which every Path (engine-built, rebuilt via replace,
+        # or deserialized) must pass.
+        expected_path_id = derive_path_id(
+            self.source_node_id,
+            self.destination_node_id,
+            self.hops,
+            self.nodes,
+        )
+        if self.path_id != expected_path_id:
+            raise RoutingError(
+                "path-id",
+                "path_id %r does not match the derived fingerprint %r "
+                "(content binding: source + destination + ordered hops + "
+                "ordered nodes -- tampered or misbound path id rejected)"
+                % (self.path_id[:80], expected_path_id[:80]),
             )
         if not isinstance(self.metrics, RouteMetrics):
             raise RoutingError("metrics", "metrics must be a RouteMetrics instance")

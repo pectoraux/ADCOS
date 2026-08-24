@@ -68,8 +68,10 @@ from resources import (  # noqa: E402
 )
 from routing import (  # noqa: E402
     LinkMetrics,
+    Path,
     RouteDecision,
     RouteEvaluationResult,
+    RouteMetrics,
     RouteReasonCode,
     RoutingContext,
     RoutingEngine,
@@ -2155,6 +2157,334 @@ def case_70_multi_hop_transit_labels(results: List[Result]) -> None:
 
 
 # --------------------------------------------------------------------------
+# Architect-review regression cases (PR #11 correction cycle)
+#
+# Blocker: Path.path_id was not cryptographically/content-bound -- the
+# constructor accepted any non-empty string, so a tampered or
+# deserialized Path could keep identical topology/hops/metrics while
+# supplying an attacker-chosen path_id. Because path_id is the FINAL
+# deterministic tie-break level, an unbound id could alter the selected
+# route without changing any substantive route data (violating the same
+# content-binding principle as WORK-004 NodeIDs, WORK-008 resource ids,
+# WORK-009 intent digests, and WORK-010 decision ids). The constructor
+# now mechanically verifies path_id == derive_path_id(source,
+# destination, hops, nodes); the binding applies to EVERY construction
+# path (engine-built, dataclasses.replace rebuilds, deserialization).
+# --------------------------------------------------------------------------
+
+def _baseline_path(**overrides):
+    """A minimal structurally valid Path with a correctly derived
+    path_id (the regression fixture for the content-binding cases)."""
+    hops = (make_link_subject(_NODE_A, _NODE_B),)
+    nodes = (_NODE_A, _NODE_B)
+    base = dict(
+        path_id=derive_path_id(_NODE_A, _NODE_B, hops, nodes),
+        source_node_id=_NODE_A,
+        destination_node_id=_NODE_B,
+        hops=hops,
+        nodes=nodes,
+        metrics=aggregate_link_metrics((_metrics(),)),
+        feasible=True,
+    )
+    base.update(overrides)
+    return Path(**base)
+
+
+def case_71_path_id_valid_content_bound(results: List[Result]) -> None:
+    """REGRESSION (PR #11 blocker, requirement 1): a VALID derived path
+    id passes construction; identical content always yields the same
+    id; the dataclasses.replace rebuild path (used by the engine for
+    verdicts/policy mirroring) re-validates and still passes."""
+    problems = []
+    hops = (make_link_subject(_NODE_A, _NODE_B),)
+    nodes = (_NODE_A, _NODE_B)
+    expected = derive_path_id(_NODE_A, _NODE_B, hops, nodes)
+    try:
+        p = _baseline_path()
+        if p.path_id != expected:
+            problems.append("constructed id != derive_path_id output")
+    except RoutingError as error:
+        problems.append("valid path rejected: %s" % error)
+    # Determinism of the binding input: same content -> same id.
+    if derive_path_id(_NODE_A, _NODE_B, hops, nodes) != expected:
+        problems.append("derive_path_id not deterministic")
+    # The engine rebuild path (replace) re-runs __post_init__ with the
+    # SAME content + id and must still pass.
+    from dataclasses import replace as _dc_replace
+    try:
+        p2 = _dc_replace(p, policy_eligible=True, utility_score=5)
+        if p2.path_id != p.path_id:
+            problems.append("replace changed the path id")
+    except RoutingError as error:
+        problems.append("replace rebuild rejected a valid path: %s" % error)
+    if problems:
+        results.append(fail("case_71_path_id_valid_content_bound", "; ".join(problems)))
+    else:
+        results.append(ok("case_71_path_id_valid_content_bound", "valid derived id passes; replace rebuild re-validates"))
+
+
+def case_72_path_id_tamper_rejected(results: List[Result]) -> None:
+    """REGRESSION (PR #11 blocker, requirement 2): changing the path ID
+    while keeping the path CONTENT unchanged fails at construction.
+    Multiple attacker shapes: forged all-zero digest, a legitimate
+    (but wrong-for-this-content) id lifted from another path, truncated
+    id, and a non-sha256 string."""
+    problems = []
+    tampered_ids = [
+        "sha256:" + "0" * 64,                                   # forged digest
+        "sha256:" + "f" * 64,                                   # forged digest
+        "sha256:deadbeef",                                      # truncated
+        "not-a-fingerprint",                                    # non-sha256
+    ]
+    # A legitimate id derived from DIFFERENT content (id-lifting).
+    other = derive_path_id(_NODE_A, _NODE_C,
+                           (make_link_subject(_NODE_A, _NODE_C),),
+                           (_NODE_A, _NODE_C))
+    tampered_ids.append(other)
+    for tampered in tampered_ids:
+        try:
+            Path(
+                path_id=tampered,
+                source_node_id=_NODE_A,
+                destination_node_id=_NODE_B,
+                hops=(make_link_subject(_NODE_A, _NODE_B),),
+                nodes=(_NODE_A, _NODE_B),
+                metrics=aggregate_link_metrics((_metrics(),)),
+                feasible=True,
+            )
+            problems.append("tampered id %r accepted" % tampered[:24])
+        except RoutingError as error:
+            if error.code != "path-id":
+                problems.append("tampered id %r rejected with wrong code %r" % (tampered[:24], error.code))
+    if problems:
+        results.append(fail("case_72_path_id_tamper_rejected", "; ".join(problems)))
+    else:
+        results.append(ok("case_72_path_id_tamper_rejected", "5 tampered-id shapes rejected at construction (code path-id)"))
+
+
+def case_73_content_change_invalidates_id(results: List[Result]) -> None:
+    """REGRESSION (PR #11 blocker, requirement 3): changing hops/nodes
+    while RETAINING the old ID fails at construction -- the fingerprint
+    tracks the content, not the stored string."""
+    problems = []
+    old_id = derive_path_id(_NODE_A, _NODE_B,
+                            (make_link_subject(_NODE_A, _NODE_B),),
+                            (_NODE_A, _NODE_B))
+    m = aggregate_link_metrics((_metrics(),))
+    # (a) different hop link, same endpoints.
+    try:
+        Path(path_id=old_id, source_node_id=_NODE_A, destination_node_id=_NODE_B,
+             hops=("link:other:subject",), nodes=(_NODE_A, _NODE_B),
+             metrics=m, feasible=True)
+        problems.append("(a) changed hop accepted with old id")
+    except RoutingError:
+        pass
+    # (b) different transit node (2-hop content, 1-hop id).
+    hops2 = (make_link_subject(_NODE_A, _NODE_C), make_link_subject(_NODE_C, _NODE_B))
+    m2 = aggregate_link_metrics((_metrics(), _metrics()))
+    try:
+        Path(path_id=old_id, source_node_id=_NODE_A, destination_node_id=_NODE_B,
+             hops=hops2, nodes=(_NODE_A, _NODE_C, _NODE_B),
+             metrics=m2, feasible=True)
+        problems.append("(b) changed nodes accepted with old id")
+    except RoutingError:
+        pass
+    # (c) swapped node order.
+    try:
+        Path(path_id=old_id, source_node_id=_NODE_A, destination_node_id=_NODE_B,
+             hops=(make_link_subject(_NODE_A, _NODE_B),), nodes=(_NODE_B, _NODE_A),
+             metrics=m, feasible=True)
+        problems.append("(c) swapped node order accepted with old id")
+    except RoutingError:
+        pass
+    # (d) different destination with the old id.
+    try:
+        Path(path_id=old_id, source_node_id=_NODE_A, destination_node_id=_NODE_C,
+             hops=(make_link_subject(_NODE_A, _NODE_C),), nodes=(_NODE_A, _NODE_C),
+             metrics=m, feasible=True)
+        problems.append("(d) changed destination accepted with old id")
+    except RoutingError:
+        pass
+    if problems:
+        results.append(fail("case_73_content_change_invalidates_id", "; ".join(problems)))
+    else:
+        results.append(ok("case_73_content_change_invalidates_id", "4 content-change shapes all invalidate the stored id"))
+
+
+def case_74_tampered_path_id_cannot_alter_ranking(results: List[Result]) -> None:
+    """REGRESSION (PR #11 blocker, requirement 4): tampered path IDs
+    cannot alter deterministic ranking. Because path_id is the FINAL
+    tie-break level, an unbound id could otherwise flip a tie between
+    two candidates with identical metrics. The binding makes the
+    attack unconstructible: (a) swapping ids between two real paths
+    fails at construction; (b) injecting a tampered path through the
+    wire form fails at deserialization; (c) the engine's ranking over
+    the untampered context is unchanged and byte-stable."""
+    # Two parallel 2-hop paths with IDENTICAL aggregate metrics (a
+    # genuine tie that falls through to lexicographic path_id).
+    pairs = ((_NODE_A, _NODE_C), (_NODE_C, _NODE_B),
+             (_NODE_A, _NODE_D), (_NODE_D, _NODE_B))
+    graph = _chain_graph(pairs, reach_nodes=(_NODE_C, _NODE_D))
+    metrics = _chain_metrics(pairs)
+    ctx = _context(graph, metrics=metrics)
+    res = RoutingEngine().evaluate(ctx)
+    problems = []
+    if not (res.ok and res.decision and res.decision.selected and res.decision.alternates):
+        problems.append("precondition: expected a selected path plus one alternate")
+    else:
+        selected = res.decision.selected
+        alternate = res.decision.alternates[0]
+        if selected.path_id >= alternate.path_id:
+            problems.append("precondition: lexicographic tie-break not in effect")
+        # (a) Attempt to flip the tie: construct a Path with the
+        #     alternate's CONTENT but the selected's (smaller) id --
+        #     i.e. try to make the alternate win. Must fail closed.
+        from dataclasses import replace as _dc_replace
+        try:
+            _dc_replace(alternate, path_id=selected.path_id)
+            problems.append("(a) id-swap tamper accepted by replace()")
+        except RoutingError as error:
+            if error.code != "path-id":
+                problems.append("(a) wrong code %r" % error.code)
+        # (b) Attempt to inject the tampered path through the wire form
+        #     (a decision document whose alternate carries the selected's
+        #     path_id). Must fail at deserialization.
+        tampered_doc = dict(res.decision.to_dict())
+        alt_doc = dict(tampered_doc["alternates"][0])
+        alt_doc["path_id"] = selected.path_id
+        tampered_doc["alternates"] = [alt_doc]
+        try:
+            route_decision_from_mapping(tampered_doc)
+            problems.append("(b) wire-form id tamper accepted")
+        except RoutingError:
+            pass
+        # (c) The untampered decision is unchanged, repeatable, and its
+        #     selected/alternate ids verify against their own content.
+        res2 = RoutingEngine().evaluate(ctx)
+        if res2.decision.decision_id != res.decision.decision_id:
+            problems.append("(c) decision not stable across re-evaluation")
+        if res2.decision.selected.path_id != selected.path_id:
+            problems.append("(c) selection not stable across re-evaluation")
+        for path_obj in (res.decision.selected, *res.decision.alternates):
+            recomputed = derive_path_id(path_obj.source_node_id,
+                                        path_obj.destination_node_id,
+                                        path_obj.hops, path_obj.nodes)
+            if path_obj.path_id != recomputed:
+                problems.append("(c) engine-produced path id unbound from content")
+    if problems:
+        results.append(fail("case_74_tampered_path_id_cannot_alter_ranking", "; ".join(problems)))
+    else:
+        results.append(ok("case_74_tampered_path_id_cannot_alter_ranking", "tie-flip unconstructible at construction, replace(), and wire form; ranking byte-stable"))
+
+
+def case_75_deserialization_path_id_binding(results: List[Result]) -> None:
+    """REGRESSION (PR #11 blocker): the binding applies to
+    DESERIALIZATION, not merely candidate construction. A wire-form
+    path whose stored path_id disagrees with its recomputed content
+    fingerprint is rejected (serialization-layer check AND constructor
+    binding); a stored id that is absent is derived, never trusted;
+    every deserialized Path re-verifies against its own content."""
+    problems = []
+    p = _baseline_path()
+    doc = p.to_dict()
+    # Valid roundtrip: id retained.
+    p2 = path_from_mapping(doc)
+    if p2.path_id != p.path_id:
+        problems.append("valid roundtrip changed the id")
+    # Tampered stored id: rejected at the serialization layer.
+    tampered = dict(doc)
+    tampered["path_id"] = "sha256:" + "9" * 64
+    try:
+        path_from_mapping(tampered)
+        problems.append("tampered stored id accepted at deserialization")
+    except RoutingError as error:
+        if error.code != "path-id":
+            problems.append("deserialization rejected with wrong code %r" % error.code)
+    # Tampered CONTENT under a valid stored id (content swapped after
+    # serialization): also rejected (the id no longer matches).
+    tampered_content = dict(doc)
+    tampered_content["hops"] = ["link:some:other:link"]
+    try:
+        path_from_mapping(tampered_content)
+        problems.append("tampered content accepted under a stale id")
+    except RoutingError:
+        pass
+    # Absent stored id: derived (never trusted from the wire).
+    no_id = dict(doc)
+    del no_id["path_id"]
+    p3 = path_from_mapping(no_id)
+    if p3.path_id != p.path_id:
+        problems.append("derived-on-absent id diverged from the content fingerprint")
+    # Every deserialized Path still satisfies the content invariant.
+    for path_obj in (p2, p3):
+        if path_obj.path_id != derive_path_id(path_obj.source_node_id,
+                                              path_obj.destination_node_id,
+                                              path_obj.hops, path_obj.nodes):
+            problems.append("deserialized path id unbound from content")
+    if problems:
+        results.append(fail("case_75_deserialization_path_id_binding", "; ".join(problems)))
+    else:
+        results.append(ok("case_75_deserialization_path_id_binding", "tampered stored id / stale id rejected; absent id derived; invariant re-verified"))
+
+
+def case_76_roundtrip_retains_path_id(results: List[Result]) -> None:
+    """REGRESSION (PR #11 blocker, requirement 5): round-tripped valid
+    paths retain the same ID -- across the FULL decision (selected +
+    alternates + rejected), byte-identically, with the decision_id
+    unchanged and every path id re-verifying against its own content."""
+    # A scenario with a selected path, a retained alternate, AND a
+    # rejected candidate (hard-capacity violation on the direct link).
+    intent = _normalized((
+        Constraint(constraint_id="bw", dimension="bandwidth", operator=">=",
+                   value=900_000, unit="bps", hardness="hard"),
+    ))
+    pairs = ((_NODE_A, _NODE_B), (_NODE_A, _NODE_C), (_NODE_C, _NODE_B),
+             (_NODE_A, _NODE_D), (_NODE_D, _NODE_B))
+    graph = _chain_graph(pairs, reach_nodes=(_NODE_C, _NODE_D))
+    metrics = _chain_metrics(pairs)
+    # Direct link: capacity 500 kbps < 900 kbps demand -> REJECTED.
+    metrics[make_link_subject(_NODE_A, _NODE_B)] = _metrics(capacity=500_000, latency=50)
+    # A-C-B: latency 20 -> SELECTED.
+    metrics[make_link_subject(_NODE_A, _NODE_C)] = _metrics(capacity=1_000_000)
+    metrics[make_link_subject(_NODE_C, _NODE_B)] = _metrics(capacity=1_000_000)
+    # A-D-B: latency 30 -> feasible ALTERNATE.
+    metrics[make_link_subject(_NODE_A, _NODE_D)] = _metrics(capacity=1_000_000, latency=15)
+    metrics[make_link_subject(_NODE_D, _NODE_B)] = _metrics(capacity=1_000_000, latency=15)
+    res = RoutingEngine().evaluate(_context(graph, metrics=metrics, intent=intent))
+    problems = []
+    if not (res.decision and res.decision.selected and res.decision.alternates
+            and res.decision.rejected):
+        problems.append(
+            "precondition: expected selected + alternate + rejected (got code %s, "
+            "%d alternates, %d rejected)" % (res.code,
+                                             len(res.decision.alternates) if res.decision else -1,
+                                             len(res.decision.rejected) if res.decision else -1))
+    else:
+        d = res.decision
+        d2 = route_decision_from_mapping(d.to_dict())
+        # Byte-identical full round-trip.
+        if json.dumps(d2.to_dict(), sort_keys=True) != json.dumps(d.to_dict(), sort_keys=True):
+            problems.append("full decision round-trip not byte-identical")
+        if d2.decision_id != d.decision_id:
+            problems.append("decision_id changed across round-trip")
+        # Every round-tripped path retains its id and verifies.
+        originals = [d.selected, *d.alternates, *d.rejected]
+        roundtripped = [d2.selected, *d2.alternates, *d2.rejected]
+        for orig, rt in zip(originals, roundtripped):
+            if orig.path_id != rt.path_id:
+                problems.append("path id changed across round-trip")
+            if rt.path_id != derive_path_id(rt.source_node_id, rt.destination_node_id,
+                                            rt.hops, rt.nodes):
+                problems.append("round-tripped path id unbound from content")
+        if d.rejected and not d2.rejected:
+            problems.append("rejected candidates lost in round-trip")
+    if problems:
+        results.append(fail("case_76_roundtrip_retains_path_id", "; ".join(problems)))
+    else:
+        results.append(ok("case_76_roundtrip_retains_path_id", "selected+alternates+rejected round-trip byte-identical; ids retained + re-verified"))
+
+
+# --------------------------------------------------------------------------
 # Main
 # --------------------------------------------------------------------------
 
@@ -2230,6 +2560,13 @@ def main() -> int:
     case_68_no_missing_metric_inference(results)
     case_69_engine_error_envelope(results)
     case_70_multi_hop_transit_labels(results)
+    # Architect-review regression cases (PR #11 correction cycle).
+    case_71_path_id_valid_content_bound(results)
+    case_72_path_id_tamper_rejected(results)
+    case_73_content_change_invalidates_id(results)
+    case_74_tampered_path_id_cannot_alter_ranking(results)
+    case_75_deserialization_path_id_binding(results)
+    case_76_roundtrip_retains_path_id(results)
 
     print("ADCOS routing self-test (WORK-011)")
     print("=" * 72)

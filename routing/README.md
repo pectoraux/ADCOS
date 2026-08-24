@@ -230,7 +230,14 @@ WORK-003 canonical JSON primitives throughout (`canonical_json_bytes`).
 `path_id` = `"sha256:" + sha256(canonical(path content))` — a stable
 fingerprint over (source, destination, hops, transit nodes); metrics and
 verdicts are deliberately excluded (a path's identity is its hop
-sequence). `decision_id` = `"sha256:" + sha256(canonical(decision
+sequence). The binding is TAMPER-EVIDENT and enforced at CONSTRUCTION:
+`Path.__post_init__` mechanically verifies
+`path_id == derive_path_id(source, destination, hops, nodes)`, so a
+tampered or deserialized Path can never keep identical
+topology/hops/metrics while supplying an attacker-chosen `path_id` —
+critical because `path_id` is the final deterministic tie-break level
+(the same content-binding principle as WORK-004 NodeIDs, WORK-008
+resource ids, WORK-009 intent digests, and WORK-010 decision ids). `decision_id` = `"sha256:" + sha256(canonical(decision
 content))` with the public invariant
 `sha256(decision.canonical_bytes()) == decision_id`. Unknown extension
 fields survive round-trips. No new envelope message type is introduced

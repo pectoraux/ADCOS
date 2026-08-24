@@ -85,7 +85,10 @@ def route_metrics_from_mapping(data: object) -> RouteMetrics:
 def path_from_mapping(data: object) -> Path:
     """Build a :class:`Path` from a mapping (fail closed). The
     ``path_id`` is recomputed from the content and MUST match the stored
-    value (tamper evidence)."""
+    value (tamper evidence). This serialization-layer check is
+    defense-in-depth: the authoritative binding lives in
+    ``Path.__post_init__``, which mechanically rejects ANY misbound id
+    regardless of the construction path (Architect review of PR #11)."""
     if not isinstance(data, Mapping):
         raise RoutingError("invalid-input", "path must be a JSON object")
     required = (
