@@ -30,7 +30,7 @@ from typing import Any, Mapping, Tuple
 
 from identity.node_id import NodeIdError, parse_node_id
 
-from .model import PolicyContext, PolicyError
+from .model import PolicyContext, PolicyError, is_valid_content_digest
 
 
 class PredicateKind:
@@ -389,10 +389,24 @@ def _match_intent_present(arguments: Mapping[str, Any], context: PolicyContext) 
     convert soft preferences into routing choices. This predicate only
     checks presence of the digest reference; it does not inspect the
     intent's internals.
+
+    Fail-closed: a non-empty but structurally malformed digest (not a
+    valid 64-lowercase-hex sha256-style fingerprint) MUST NOT satisfy
+    this predicate. The :class:`PolicyContext` constructor and
+    :func:`validate_context` already reject malformed digests, but this
+    matcher validates defensively so that a future bypass (e.g. a
+    context constructed via a path that skips validation) cannot
+    authorize on a malformed intent reference such as ``"not-an-intent"``
+    (Architect review of PR #10, blocker 2). A malformed non-empty
+    digest yields ``unsupported-argument`` (fail closed), never
+    ``satisfied``.
     """
-    if context.normalized_intent_digest:
-        return PredicateResult.satisfied()
-    return PredicateResult.not_matched()
+    digest = context.normalized_intent_digest
+    if not digest:
+        return PredicateResult.not_matched()
+    if not is_valid_content_digest(digest):
+        return PredicateResult.unsupported_argument()
+    return PredicateResult.satisfied()
 
 
 #: Dispatch table: predicate name -> pure matcher function. Adding a

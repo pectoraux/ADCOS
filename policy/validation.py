@@ -33,6 +33,7 @@ from .model import (
     PolicyError,
     PolicyRule,
     PolicySet,
+    is_valid_content_digest,
 )
 from .predicates import PredicateKind
 
@@ -160,10 +161,17 @@ def _reject_forbidden_tokens(value: str, label: str, owner: str) -> None:
 # --------------------------------------------------------------------------
 
 def _validate_node_id_string(value: str, label: str, owner: str) -> None:
-    """Validate a NodeID string via WORK-004 ``parse_node_id``.
+    """Validate an OPTIONAL NodeID string via WORK-004 ``parse_node_id``.
 
     Empty string is permitted (means "absent / any subject selector"),
-    consistent with the intent layer's treatment of ``requester_node_id``.
+    consistent with the intent layer's treatment of ``requester_node_id``
+    and the policy context's ``requester_node_id`` / ``resource_owner_node_id``.
+    This is the right helper for SUBJECT fields, where "any subject" is a
+    legitimate selector.
+
+    For the PolicySet ``issuer_node_id`` -- which is MANDATORY under the
+    frozen "Policy authority and provenance" requirement -- use
+    :func:`_validate_issuer_node_id` instead, which rejects empty.
     """
     if not value:
         return
@@ -173,6 +181,41 @@ def _validate_node_id_string(value: str, label: str, owner: str) -> None:
         raise PolicyError(
             "node-id",
             "%s %r in %s is not a canonical NodeID: %s" % (label, value, owner, error),
+        ) from error
+
+
+def _validate_issuer_node_id(value: str, owner: str) -> None:
+    """Validate the PolicySet ``issuer_node_id`` as a MANDATORY canonical
+    WORK-004 NodeID.
+
+    The frozen "Policy authority and provenance" requirement mandates that
+    every PolicySet/PolicyDocument identify its authority/issuer in an
+    access-independent manner. An anonymous policy (empty issuer) MUST NOT
+    be publishable or evaluable -- "issuer != truth" does not mean
+    "issuer may be absent". (Architect review of PR #10, blocker 1.)
+
+    This is defense-in-depth: the :class:`PolicySet` constructor already
+    rejects an empty ``issuer_node_id`` at the dataclass level, but this
+    guard catches the wire-form deserialization path and any future caller
+    that bypasses construction. The canonical-NodeID parse check (via
+    WORK-004 ``parse_node_id``) is also enforced here so that a
+    well-formed-but-non-canonical issuer (wrong prefix, short/long digest,
+    uppercase, malformed profile) fails closed.
+    """
+    if not value:
+        raise PolicyError(
+            "issuer",
+            "policy set %r has an empty issuer_node_id; every PolicySet MUST "
+            "identify its authority/issuer in an access-independent manner "
+            "(frozen 'Policy authority and provenance' requirement)" % owner,
+        )
+    try:
+        parse_node_id(value)
+    except NodeIdError as error:
+        raise PolicyError(
+            "issuer",
+            "issuer_node_id %r in %s is not a canonical NodeID: %s "
+            "(issuer must be a valid WORK-004 NodeID)" % (value, owner, error),
         ) from error
 
 
@@ -290,8 +333,12 @@ def validate_policy_set(policy_set: PolicySet) -> None:
       precedence always beats implicit, but a partial coverage is a
       configuration error if it is intended to be a total ordering).
     """
-    # Issuer NodeID.
-    _validate_node_id_string(policy_set.issuer_node_id, "issuer", policy_set.set_id)
+    # Issuer NodeID -- MANDATORY canonical WORK-004 NodeID. The
+    # constructor already rejects empty, but this guard is defense-in-
+    # depth for the wire-form deserialization path and any future caller,
+    # and it enforces the canonical-NodeID parse check (Architect review
+    # of PR #10, blocker 1).
+    _validate_issuer_node_id(policy_set.issuer_node_id, policy_set.set_id)
     # Set-level temporal window.
     _validate_temporal_window(
         policy_set.valid_from, policy_set.valid_until, policy_set.set_id
@@ -341,8 +388,9 @@ def validate_policy_set(policy_set: PolicySet) -> None:
 def validate_context(context: PolicyContext) -> None:
     """Validate a :class:`PolicyContext` (beyond what the dataclass
     constructor already checks). Adds NodeID validation on the requester
-    and resource owner, forbidden-token rejection on free-form strings,
-    and secret-material rejection on extensions.
+    and resource owner, structural validation of the intent digest,
+    forbidden-token rejection on free-form strings, and secret-material
+    rejection on extensions.
     """
     # The constructor already validates that operation is one of the
     # frozen Operation values. Re-check defensively.
@@ -355,6 +403,21 @@ def validate_context(context: PolicyContext) -> None:
     _validate_node_id_string(
         context.resource_owner_node_id, "resource_owner_node_id", "context"
     )
+    # Structural validation of the intent digest: a non-empty digest MUST
+    # be a valid 64-lowercase-hex content digest. The constructor already
+    # rejects malformed values, but this guard is defense-in-depth for the
+    # wire-form deserialization path and any future caller (Architect
+    # review of PR #10, blocker 2). A malformed digest MUST NOT satisfy
+    # INTENT_PRESENT and MUST NOT participate in an allow rule.
+    if context.normalized_intent_digest and not is_valid_content_digest(
+        context.normalized_intent_digest
+    ):
+        raise PolicyError(
+            "intent-digest",
+            "context.normalized_intent_digest %r is not a valid content digest "
+            "(64 lowercase hex); a malformed intent reference cannot satisfy "
+            "intent-present (fail closed)" % (context.normalized_intent_digest,),
+        )
     # Forbidden-token sweep on policy-owned free-form strings AND on
     # resource_kind (which is a WORK-008 vocabulary value but the sweep
     # uses WORD-BOUNDARY matching so "bandwidth" is accepted while
@@ -384,6 +447,7 @@ __all__ = [
     # Exported for the self-test's mechanical audits.
     "_reject_secret_material",
     "_reject_forbidden_tokens",
+    "_validate_issuer_node_id",
     "_FORBIDDEN_TOKENS",
     "_SECRET_HINTS",
 ]

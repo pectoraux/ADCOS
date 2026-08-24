@@ -66,6 +66,12 @@ These are NOT collapsed into a generic `false`. Auditability requires the distin
 
 Non-privileged read-only or purely local normalization operations MAY have an explicitly defined permissive default IF AND ONLY IF the operation class is declared non-privileged in `Privileged.NON_PRIVILEGED`.
 
+## Policy authority and provenance
+
+Every `PolicySet` MUST identify its authority/issuer in an access-independent manner (frozen "Policy authority and provenance" requirement). The `issuer_node_id` field is **MANDATORY**: an empty/missing issuer is rejected at construction (`PolicyError("issuer", ...)`), at `validate_policy_set`, and at wire-form deserialization — an anonymous policy MUST NOT be publishable or evaluable. The issuer MUST also be a **canonical WORK-004 `NodeID`** (`parse_node_id`); a well-formed-but-non-canonical issuer (wrong prefix, short/long digest, uppercase, non-hex, malformed profile) fails closed at validation with code `issuer`.
+
+"issuer != truth": a signed/identified policy document proves **provenance** of the policy, not truth of external facts. The issuer field establishes who authored the policy set; it does not make the policy's claims about resources/topology/identity true. Policy decisions retain which policy version and rules participated in the result (the decision's `policy_set_id` / `policy_set_version` / `matched_rule_ids` audit trail).
+
 ## Conflict resolution
 
 Policy conflicts MUST resolve deterministically and be auditable. The frozen minimum semantics (encoded as a pure deterministic function in `policy/conflict.py`):
@@ -113,7 +119,9 @@ Policy may require an ACTIVE, non-revoked, non-expired credential via the `crede
 
 ## Intent integration
 
-WORK-009 normalized intent is an INPUT to policy (consumed via the context's `normalized_intent_digest` reference), not a policy result. Policy MUST NOT rewrite the intent, downgrade hard constraints, or convert soft preferences into routing choices. The `intent-present` predicate only checks that a digest is present — it does not inspect the intent's internals.
+WORK-009 normalized intent is an INPUT to policy (consumed via the context's `normalized_intent_digest` reference), not a policy result. Policy MUST NOT rewrite the intent, downgrade hard constraints, or convert soft preferences into routing choices. The `intent-present` predicate checks that a digest is present — it does not inspect the intent's internals.
+
+A non-empty `normalized_intent_digest` is **structurally validated** as a 64-lowercase-hex sha256-style content digest (`is_valid_content_digest`, matching WORK-009 `NormalizedIntent.digest`). A malformed value such as `"not-an-intent"` is rejected at `PolicyContext` construction, at `validate_context`, at wire-form deserialization, and defensively inside the `_match_intent_present` matcher — it can NEVER satisfy `intent-present` and NEVER participate in an allow rule (fail closed, code `intent-digest` / `unsupported-argument`). Empty string is permitted (means "no intent referenced"); an empty digest does not satisfy `intent-present` (deny-by-default for privileged operations).
 
 ## Policy mutation vs evaluation
 

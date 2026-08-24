@@ -50,6 +50,7 @@ from .model import (
     PolicyRule,
     PolicySet,
     Privileged,
+    is_valid_content_digest,
 )
 from .predicates import PredicateKind, PredicateResult, evaluate_condition
 from .serialization import (
@@ -107,4 +108,6 @@ __all__ = [
     # Constants
     "MAX_PRIORITY",
     "MAX_SPECIFICITY",
+    # Structural validators (exported for the self-test's mechanical audits)
+    "is_valid_content_digest",
 ]

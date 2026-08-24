@@ -42,10 +42,40 @@ or dynamic callbacks.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import Any, Mapping, Optional, Tuple
 
 from protocol.canonicalization import CanonicalizationError, canonical_json_bytes
+
+
+# --------------------------------------------------------------------------
+# Content-digest structural validator (WORK-009 sha256-style fingerprint)
+# --------------------------------------------------------------------------
+
+#: A WORK-009 ``NormalizedIntent`` digest is ``sha256(canonical_json_bytes(
+#: content_dict()))`` -- exactly 64 lowercase hexadecimal characters. The
+#: policy context carries this digest BY REFERENCE (policy MUST NOT
+#: rewrite the intent). A non-empty ``normalized_intent_digest`` MUST be
+#: structurally valid: a malformed string such as ``"not-an-intent"``
+#: MUST NOT satisfy ``INTENT_PRESENT`` and MUST NOT participate in an
+#: allow rule (Architect review of PR #10, blocker 2). The check is
+#: deliberately the same shape the intent layer produces (64 lowercase
+#: hex), so a genuine WORK-009 digest always passes and a garbage value
+#: always fails closed.
+_CONTENT_DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
+
+
+def is_valid_content_digest(value: str) -> bool:
+    """Return True if ``value`` is a valid 64-lowercase-hex content digest
+    (sha256-style, matching WORK-009 ``NormalizedIntent.digest``).
+
+    This is a STRUCTURAL check only -- it does not verify that the digest
+    corresponds to any particular intent content (that is the intent
+    layer's authority). Policy consumes the digest by reference and MUST
+    NOT re-derive or rewrite it.
+    """
+    return isinstance(value, str) and bool(_CONTENT_DIGEST_RE.match(value))
 
 
 class PolicyError(ValueError):
@@ -562,8 +592,13 @@ class PolicySet:
       a policy-owned concept: it MUST NOT be conflated with WORK-008
       resource-account versions or WORK-007 topology sequences (rule 9
       of the prompt's policy-store sequencing section).
-    - ``issuer_node_id``: optional canonical NodeID text form (provenance
-      of the policy, NOT truth of external facts -- "issuer != truth");
+    - ``issuer_node_id``: MANDATORY canonical WORK-004 NodeID text form
+      (provenance of the policy, NOT truth of external facts --
+      "issuer != truth"); every PolicySet MUST identify its authority/
+      issuer in an access-independent manner (frozen "Policy authority
+      and provenance" requirement). An empty/missing issuer is rejected
+      at construction and at validation -- an anonymous policy MUST NOT
+      be publishable or evaluable;
     - ``valid_from`` / ``valid_until``: optional RFC 3339 UTC instants;
     - ``rules``: tuple of :class:`PolicyRule`;
     - ``default_effect``: ``ALLOW`` or ``DENY`` -- the default when no
@@ -622,11 +657,21 @@ class PolicySet:
                     "rules entries must be PolicyRule instances (got %s)"
                     % type(r).__name__,
                 )
-        if not isinstance(self.issuer_node_id, str):
+        # issuer_node_id is MANDATORY: every PolicySet MUST identify its
+        # authority/issuer in an access-independent manner (frozen "Policy
+        # authority and provenance" requirement; Architect review of PR #10,
+        # blocker 1). An empty/missing issuer is rejected here at the
+        # dataclass level so that anonymous policies cannot even be
+        # constructed, regardless of whether validate_policy_set() is
+        # called. The canonical-NodeID parse check happens in
+        # validation.validate_policy_set (defense-in-depth).
+        if not isinstance(self.issuer_node_id, str) or not self.issuer_node_id:
             raise PolicyError(
                 "issuer",
-                "issuer_node_id must be a string (got %s)"
-                % type(self.issuer_node_id).__name__,
+                "issuer_node_id must be a non-empty canonical NodeID string "
+                "(got %r); every PolicySet MUST identify its authority/issuer "
+                "(frozen 'Policy authority and provenance' requirement)"
+                % (self.issuer_node_id,),
             )
         for label, value in (("valid_from", self.valid_from), ("valid_until", self.valid_until)):
             if not isinstance(value, str):
@@ -731,7 +776,13 @@ class PolicyContext:
     - ``operation``: one of the frozen :class:`Operation` values;
     - ``normalized_intent_digest``: optional content digest of a WORK-009
       NormalizedIntent (the intent is consumed by reference; policy MUST
-      NOT rewrite the intent or downgrade hard constraints);
+      NOT rewrite the intent or downgrade hard constraints). When non-
+      empty, it MUST be structurally a valid 64-lowercase-hex sha256-
+      style digest (``is_valid_content_digest``); a malformed value such
+      as ``"not-an-intent"`` is rejected at construction and at
+      validation so it can never satisfy ``INTENT_PRESENT`` and never
+      participate in an allow rule (Architect review of PR #10,
+      blocker 2);
     - ``resource_refs``: tuple of resource identifier strings;
     - ``resource_owner_node_id``: optional NodeID text form;
     - ``resource_kind``: optional WORK-008 ResourceKind string;
@@ -802,6 +853,23 @@ class PolicyContext:
                 "intent-digest",
                 "normalized_intent_digest must be a string (got %s)"
                 % type(self.normalized_intent_digest).__name__,
+            )
+        # Structural validation: a non-empty intent digest MUST be a valid
+        # 64-lowercase-hex content digest. A malformed value (e.g. "not-an-
+        # intent") MUST NOT satisfy INTENT_PRESENT and MUST NOT participate
+        # in an allow rule (Architect review of PR #10, blocker 2). The
+        # check is structural only -- policy does not re-derive the digest
+        # (the intent layer owns that authority). Empty string is permitted
+        # (means "no intent referenced").
+        if self.normalized_intent_digest and not is_valid_content_digest(
+            self.normalized_intent_digest
+        ):
+            raise PolicyError(
+                "intent-digest",
+                "normalized_intent_digest %r is not a valid content digest "
+                "(64 lowercase hex); a malformed intent reference cannot "
+                "satisfy intent-present (fail closed)"
+                % (self.normalized_intent_digest,),
             )
         for label, value in (
             ("resource_refs", self.resource_refs),

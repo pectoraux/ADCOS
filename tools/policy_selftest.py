@@ -81,6 +81,7 @@ from policy import (  # noqa: E402
     policy_set_from_mapping,
     resolve_conflicts,
     rule_from_mapping,
+    context_from_mapping,
     validate_context,
     validate_policy_set,
     validate_rule,
@@ -155,8 +156,14 @@ def base_set(
     domain_precedence: Tuple[str, ...] = (),
     valid_from: str = "",
     valid_until: str = "",
-    issuer_node_id: str = "",
+    issuer_node_id: str = _NODE_A,
 ) -> PolicySet:
+    # issuer_node_id defaults to a canonical WORK-004 NodeID because the
+    # frozen "Policy authority and provenance" requirement mandates
+    # that every PolicySet identify its authority/issuer; an anonymous
+    # policy MUST NOT be publishable or evaluable (Architect review of
+    # PR #10, blocker 1). Tests that specifically exercise the empty-
+    # issuer rejection pass issuer_node_id="" explicitly.
     return PolicySet(
         set_id=set_id,
         version=version,
@@ -1395,6 +1402,7 @@ def case_56_partial_domain_precedence_coverage_rejected(results: List[Result]) -
             version=1,
             rules=(r_resource, r_identity),
             domain_precedence=(PolicyDomain.RESOURCE,),  # IDENTITY missing
+            issuer_node_id=_NODE_A,
         )
         validate_policy_set(ps)
         results.append(fail("case_56_partial_domain_precedence_coverage_rejected", "partial coverage accepted"))
@@ -1411,7 +1419,7 @@ def case_57_duplicate_rule_id_rejected(results: List[Result]) -> None:
     r1 = base_rule(rule_id="dup", effect=Effect.ALLOW)
     r2 = base_rule(rule_id="dup", effect=Effect.DENY)  # same rule_id
     try:
-        ps = PolicySet(set_id="dup-set", version=1, rules=(r1, r2))
+        ps = PolicySet(set_id="dup-set", version=1, rules=(r1, r2), issuer_node_id=_NODE_A)
         validate_policy_set(ps)
         results.append(fail("case_57_duplicate_rule_id_rejected", "duplicate rule_id accepted"))
         return
@@ -1638,6 +1646,187 @@ def case_69_prior_prompts_unchanged(results: List[Result]) -> None:
         results.append(ok("case_69_prior_prompts_unchanged", "all %d prior prompts unchanged vs origin/main" % len(prior)))
 
 
+# --------------------------------------------------------------------------
+# Architect-review regression cases (PR #10 correction cycle)
+# --------------------------------------------------------------------------
+
+def case_70_issuer_mandatory(results: List[Result]) -> None:
+    """REGRESSION (Architect review of PR #10, blocker 1): every PolicySet
+    MUST identify its authority/issuer. An empty/missing ``issuer_node_id``
+    is rejected at construction, at validation, and at wire-form
+    deserialization -- an anonymous policy MUST NOT be publishable or
+    evaluable (frozen "Policy authority and provenance" requirement).
+    """
+    from policy.validation import _validate_issuer_node_id
+    r = base_rule(rule_id="r1", effect=Effect.ALLOW, domain=PolicyDomain.RESOURCE)
+    problems = []
+    # 1. Direct construction with empty issuer -> rejected at __post_init__.
+    try:
+        PolicySet(set_id="anon", version=1, rules=(r,), issuer_node_id="")
+        problems.append("construction with empty issuer accepted")
+    except PolicyError as e:
+        if e.code != "issuer":
+            problems.append("construction wrong code %r (want 'issuer')" % e.code)
+    # 2. The validator's _validate_issuer_node_id rejects empty.
+    try:
+        _validate_issuer_node_id("", "anon-set")
+        problems.append("validate_issuer_node_id('') accepted")
+    except PolicyError as e:
+        if e.code != "issuer":
+            problems.append("validate_issuer_node_id('') wrong code %r" % e.code)
+    # 3. Wire-form deserialization without issuer -> rejected.
+    wire = {"set_id": "anon-wire", "version": 1, "rules": [r.to_dict()]}
+    try:
+        policy_set_from_mapping(wire)
+        problems.append("deserialization without issuer accepted")
+    except PolicyError as e:
+        if e.code != "issuer":
+            problems.append("deserialization wrong code %r (want 'issuer')" % e.code)
+    # 4. A well-formed canonical issuer round-trips and evaluates normally.
+    ps = base_set(rules=(r,), issuer_node_id=_NODE_A)
+    validate_policy_set(ps)
+    ctx = base_ctx()
+    res = evaluate(ps, ctx)
+    if not (res.ok and res.code == DecisionCode.ALLOW):
+        problems.append("well-formed issuer did not evaluate to ALLOW: %r" % res.code)
+    if problems:
+        results.append(fail("case_70_issuer_mandatory", "; ".join(problems)))
+    else:
+        results.append(ok("case_70_issuer_mandatory", "empty issuer rejected at construction/validation/deserialization; valid issuer round-trips"))
+
+
+def case_71_issuer_must_be_canonical_nodeid(results: List[Result]) -> None:
+    """REGRESSION (Architect review of PR #10, blocker 1): the issuer MUST be
+    a CANONICAL WORK-004 NodeID, not merely a non-empty string. A well-
+    formed-but-non-canonical issuer (wrong prefix, short/long digest,
+    uppercase, non-hex, malformed profile) fails closed at validation.
+    The model constructor checks non-emptiness only; the canonical-NodeID
+    parse check is enforced by ``validate_policy_set`` (defense-in-depth
+    at the wire-form boundary), so the deserialization + evaluation path
+    rejects non-canonical issuers.
+    """
+    from policy.validation import _validate_issuer_node_id
+    r = base_rule(rule_id="r1", effect=Effect.ALLOW)
+    malformed_issuers = (
+        "not-a-node",                                    # wrong prefix / shape
+        "adcos:node:test.profile.v1:abc",                # short digest
+        "adcos:node:test.profile.v1:" + "a" * 65,        # long digest
+        "adcos:node:test.profile.v1:" + "A" * 64,        # uppercase hex
+        "adcos:node:test.profile.v1:" + "z" * 64,        # non-hex chars
+        "adcos:node:badprofile:" + "a" * 64,             # malformed profile
+        "ADcos:node:test.profile.v1:" + "a" * 64,        # uppercase prefix
+        "adcos:node:test.profile.v1:" + "a" * 64 + ":x",  # extra segment
+    )
+    problems = []
+    # 1. The validator rejects every non-canonical issuer with code 'issuer'.
+    for bad in malformed_issuers:
+        try:
+            _validate_issuer_node_id(bad, "set-x")
+            problems.append("validator accepted %r" % (bad[:40],))
+        except PolicyError as e:
+            if e.code != "issuer":
+                problems.append("validator wrong code %r for %r" % (e.code, bad[:40]))
+    # 2. The model constructor accepts any non-empty string for issuer_node_id
+    #    (it checks non-emptiness only), so a non-canonical issuer CAN be
+    #    constructed directly -- but validate_policy_set rejects it. This
+    #    proves the canonical-NodeID parse check is enforced at the
+    #    validation layer, which is what evaluate() calls before evaluating.
+    try:
+        ps = PolicySet(set_id="badissuer", version=1, rules=(r,), issuer_node_id="not-a-node")
+        validate_policy_set(ps)
+        problems.append("validate_policy_set accepted non-canonical issuer")
+    except PolicyError as e:
+        if e.code != "issuer":
+            problems.append("validate_policy_set wrong code %r for non-canonical issuer" % e.code)
+    # 3. evaluate() itself rejects a non-canonical issuer (it calls
+    #    validate_policy_set first and returns a fail-closed result -- the
+    #    engine NEVER raises; it produces a stable INVALID_POLICY code so
+    #    a non-canonical issuer cannot authorize anything).
+    try:
+        ps = PolicySet(set_id="badissuer-eval", version=1, rules=(r,), issuer_node_id="not-a-node")
+    except PolicyError as e:  # pragma: no cover - constructor only checks non-empty
+        problems.append("constructor rejected non-canonical issuer unexpectedly: %r" % e.code)
+    else:
+        res = evaluate(ps, base_ctx())
+        if res.ok:
+            problems.append("evaluate accepted non-canonical issuer (ok=True, code=%r)" % res.code)
+        elif res.code != DecisionCode.INVALID_POLICY:
+            problems.append("evaluate wrong code %r for non-canonical issuer (want INVALID_POLICY)" % res.code)
+    if problems:
+        results.append(fail("case_71_issuer_must_be_canonical_nodeid", "; ".join(problems)))
+    else:
+        results.append(ok("case_71_issuer_must_be_canonical_nodeid", "%d non-canonical issuers rejected at validation; evaluate() rejects too" % len(malformed_issuers)))
+
+
+def case_72_malformed_intent_digest_cannot_authorize(results: List[Result]) -> None:
+    """REGRESSION (Architect review of PR #10, blocker 2): a malformed
+    intent reference (e.g. ``"not-an-intent"``) MUST NOT satisfy
+    ``INTENT_PRESENT`` and MUST NOT participate in an allow rule. The
+    digest is validated structurally (64 lowercase hex) at construction,
+    at validation, at wire-form deserialization, and defensively inside
+    the matcher. A malformed non-empty digest yields ``intent-digest``
+    (fail closed), never ``satisfied``.
+    """
+    cond = Condition(predicate=PredicateKind.INTENT_PRESENT, arguments={})
+    r = base_rule(rule_id="r1", effect=Effect.ALLOW, domain=PolicyDomain.RESOURCE, conditions=(cond,))
+    ps = base_set(rules=(r,), domain_precedence=(PolicyDomain.RESOURCE,))
+    problems = []
+    malformed = (
+        "not-an-intent",   # not hex at all
+        "a" * 63,          # too short
+        "a" * 65,          # too long
+        "A" * 64,          # uppercase hex (must be lowercase)
+        "g" * 64,          # non-hex chars
+        "deadbeef",        # short hex
+        "0123456789abcdef" * 4 + "0",  # 65 hex (boundary overflow)
+    )
+    for bad in malformed:
+        # 1. Construction rejects malformed digests with code 'intent-digest'.
+        try:
+            PolicyContext(
+                operation=Operation.RESOURCE_RESERVE,
+                requester_node_id=_NODE_A,
+                evaluation_instant=_NOW,
+                normalized_intent_digest=bad,
+            )
+            problems.append("construction accepted malformed digest %r" % (bad[:20],))
+        except PolicyError as e:
+            if e.code != "intent-digest":
+                problems.append("construction wrong code %r for %r" % (e.code, bad[:20]))
+    # 2. Wire-form deserialization rejects a malformed digest.
+    wire_ctx = {
+        "operation": Operation.RESOURCE_RESERVE,
+        "requester_node_id": _NODE_A,
+        "evaluation_instant": _NOW,
+        "normalized_intent_digest": "not-an-intent",
+    }
+    try:
+        context_from_mapping(wire_ctx)
+        problems.append("deserialization accepted malformed digest")
+    except PolicyError as e:
+        if e.code != "intent-digest":
+            problems.append("deserialization wrong code %r" % e.code)
+    # 3. A VALID 64-lowercase-hex digest satisfies INTENT_PRESENT and
+    #    authorizes ALLOW (proves the gate is not over-restrictive).
+    good = "a" * 64
+    ctx_good = base_ctx(normalized_intent_digest=good)
+    res = evaluate(ps, ctx_good)
+    if not (res.ok and res.code == DecisionCode.ALLOW):
+        problems.append("valid digest did not authorize ALLOW: %r" % res.code)
+    # 4. An EMPTY digest does NOT satisfy INTENT_PRESENT (no intent
+    #    referenced -> deny-by-default for the privileged resource.reserve
+    #    operation). This proves the predicate is a presence check, not a
+    #    blanket allow.
+    ctx_empty = base_ctx()
+    res_empty = evaluate(ps, ctx_empty)
+    if res_empty.ok and res_empty.code == DecisionCode.ALLOW:
+        problems.append("empty digest authorized ALLOW (intent-present should not match)")
+    if problems:
+        results.append(fail("case_72_malformed_intent_digest_cannot_authorize", "; ".join(problems)))
+    else:
+        results.append(ok("case_72_malformed_intent_digest_cannot_authorize", "malformed digests rejected at construction/deserialization; valid digest authorizes ALLOW; empty digest does not"))
+
+
 def main() -> int:
     results: List[Result] = []
     # Required adversarial verification cases (1-41 from the prompt).
@@ -1711,6 +1900,10 @@ def main() -> int:
     case_67_capability_required(results)
     case_68_frozen_doc_unchanged(results)
     case_69_prior_prompts_unchanged(results)
+    # Architect-review regression cases (PR #10 correction cycle).
+    case_70_issuer_mandatory(results)
+    case_71_issuer_must_be_canonical_nodeid(results)
+    case_72_malformed_intent_digest_cannot_authorize(results)
 
     print("ADCOS policy self-test (WORK-010)")
     print("=" * 72)

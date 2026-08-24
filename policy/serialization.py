@@ -211,9 +211,13 @@ def rule_from_mapping(data: object) -> PolicyRule:
 def policy_set_from_mapping(data: object) -> PolicySet:
     """Construct a :class:`PolicySet` from a wire-form mapping.
 
-    Required keys: ``set_id``, ``version``, ``rules``. Optional keys:
-    ``issuer_node_id``, ``valid_from``, ``valid_until``,
-    ``default_effect``, ``domain_precedence``, ``extensions``.
+    Required keys: ``set_id``, ``version``, ``rules``, ``issuer_node_id``
+    (the issuer is MANDATORY under the frozen "Policy authority and
+    provenance" requirement; an anonymous policy MUST NOT be
+    deserialized -- the :class:`PolicySet` constructor rejects an empty
+    issuer, and this function lets that ``PolicyError`` propagate).
+    Optional keys: ``valid_from``, ``valid_until``, ``default_effect``,
+    ``domain_precedence``, ``extensions``.
     """
     if not isinstance(data, Mapping):
         raise PolicyError(
