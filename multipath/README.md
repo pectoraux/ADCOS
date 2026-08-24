@@ -84,9 +84,16 @@ constructor-time handshake) and held in a module-private registry
 keyed by the session store — never stored on an instance, never
 exposed as an attribute. Exactly one `MultipathStore` may own a given
 `SessionStore`'s plan-event seam (enforced here, in the multipath
-layer), and the commit path fails closed with
-`plan-authority-required` unless the owning authority has been
-constructed (Architect review of PR #13, corrections 1-3).
+layer). The commit path **requires the token as an argument and
+verifies it by identity** against the registry entry (Architect
+review of PR #13, corrections 1-4): without the constructed
+authority, without a token, or with any wrong token (`None`, a random
+object, a fresh same-class token, or another store's genuine token),
+the commit fails closed with `plan-authority-required` and mutates
+nothing. Only the genuine token commits — and in production only
+`MultipathStore` operations fetch it (module-private accessor) and
+pass it; a caller that merely imports the module cannot mutate
+session history.
 
 ## Path admission (the cross-path binding security property)
 

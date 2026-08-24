@@ -894,7 +894,7 @@ def case_20_manufactured_events_generic_path(results: List[Result]) -> None:
         metadata=((META_PATH_ID, "sha256:" + "e" * 64),),
     )
     before_bare = ss_bare.to_canonical_bytes()
-    r2 = _mp_store._commit_plan_event(ss_bare, manufactured_bare)
+    r2 = _mp_store._commit_plan_event(ss_bare, object(), manufactured_bare)
     if r2.ok or r2.code != MultipathReasonCode.PLAN_AUTHORITY_REQUIRED:
         problems.append("no-authority commit: %s/%s" % (r2.ok, r2.code))
     if ss_bare.to_canonical_bytes() != before_bare:
@@ -1603,7 +1603,7 @@ def case_39_arbitrary_plan_events_rejected(results: List[Result]) -> None:
             metadata=attacker_metadata[event_type],
         )
         before_none = ss_none.to_canonical_bytes()
-        rb = _mp_store._commit_plan_event(ss_none, forged_none)
+        rb = _mp_store._commit_plan_event(ss_none, object(), forged_none)
         checked += 1
         if rb.ok or rb.code != MultipathReasonCode.PLAN_AUTHORITY_REQUIRED:
             problems.append("%s no-authority commit: %s/%s"
@@ -1708,7 +1708,7 @@ def case_40_authority_registration_gate(results: List[Result]) -> None:
         event_type=MP_EVENT_PATH_ADDED, event_instant=_NOW,
         metadata=((META_PATH_ID, "sha256:" + "e" * 64),),
     )
-    r_seam = _mp_store._commit_plan_event(ss2, forged)
+    r_seam = _mp_store._commit_plan_event(ss2, object(), forged)
     if r_seam.ok or r_seam.code != MultipathReasonCode.PLAN_AUTHORITY_REQUIRED:
         problems.append("commit path open without authority: %s/%s"
                         % (r_seam.ok, r_seam.code))
@@ -1732,6 +1732,130 @@ def case_40_authority_registration_gate(results: List[Result]) -> None:
         results.append(fail("case_40_authority_registration_gate", "; ".join(problems[:5])))
     else:
         results.append(ok("case_40_authority_registration_gate", "sessions/ has no multipath dependency (AST); no registration API; no capability attribute on instances; claim-first impossible; legitimate handshake works; second authority rejected"))
+
+
+# --------------------------------------------------------------------------
+# Architect-review regression case (PR #13 correction cycle 4)
+#
+# Blocker: the module-private _commit_plan_event only PRESENCE-checked
+# the registry -- the token was never required by the commit operation
+# itself. Once a legitimate MultipathStore existed for a SessionStore,
+# any caller importing multipath.store could invoke
+# _commit_plan_event(session_store, forged_event) directly and mutate
+# the authoritative session history with NO multipath semantic
+# validation (the underscore prefix is not a security boundary).
+#
+# Fix: the commit path now REQUIRES the token as an argument and
+# verifies it BY IDENTITY against the registry entry. Only the genuine
+# token commits; in production only MultipathStore operations fetch it
+# (module-private accessor) and pass it.
+# --------------------------------------------------------------------------
+
+def case_41_commit_token_required(results: List[Result]) -> None:
+    """REGRESSION (PR #13 correction 4): with a LEGITIMATE authority
+    constructed, direct module-private commit invocations are rejected
+    for every wrong-token shape and succeed ONLY for the genuine token
+    (the Architect's five-row matrix, invoked directly after a
+    legitimate MultipathStore has been constructed)."""
+    import multipath.store as _mp_store
+    problems = []
+
+    # A legitimate authority + session + one admitted path.
+    r_direct = _route((_AB,))
+    policy = _policy_decision()
+    ss = SessionStore()
+    res = ss.create(r_direct, policy, source_node_id=_NODE_A,
+                    destination_node_id=_NODE_B, creation_instant=_NOW)
+    sid = res.session.session_id
+    ss.transition(sid, SessionState.AUTHORIZED, event_instant=_NOW)
+    ss.transition(sid, SessionState.ESTABLISHED, event_instant=_NOW)
+    ms = MultipathStore(ss)
+    route_alt = _route((_AC, _CB), reach=(_NODE_C,), instant="2026-06-01T12:00:01Z")
+    add = ms.add_path(sid, route_alt, event_instant=_NOW)
+    assert add.ok, "fixture add failed: %s" % add.detail
+    before = ss.to_canonical_bytes()
+
+    # A well-formed, correctly-sequenced state-preserving plan event
+    # (the next legal fold step: degrade the admitted ACTIVE path).
+    well_formed = SessionEvent(
+        event_id="", session_id=sid,
+        sequence=ss.get(sid).last_event_sequence + 1,
+        previous_state=SessionState.ESTABLISHED,
+        new_state=SessionState.ESTABLISHED,
+        event_type=MP_EVENT_PATH_DEGRADED, event_instant=_NOW,
+        metadata=((META_PATH_ID, route_alt.selected.path_id),),
+    )
+
+    # The genuine token is only obtainable via deep introspection of
+    # the module-private registry (the sanctioned test path).
+    genuine = _mp_store._COMMIT_TOKENS.get(ss)
+    if genuine is None:
+        problems.append("no registry token after legitimate construction")
+        results.append(fail("case_41_commit_token_required", "; ".join(problems)))
+        return
+
+    # (1) authority exists + no token -> reject, no mutation.
+    r1 = _mp_store._commit_plan_event(ss, None, well_formed)
+    # (2) authority exists + random object -> reject.
+    r2 = _mp_store._commit_plan_event(ss, object(), well_formed)
+    # (3) authority exists + string -> reject.
+    r3 = _mp_store._commit_plan_event(ss, "token", well_formed)
+    # (4) authority exists + fresh same-class token -> reject (identity,
+    #     not type, is the boundary).
+    r4 = _mp_store._commit_plan_event(
+        ss, _mp_store._PlanCommitToken(), well_formed
+    )
+    # (5) authority exists + ANOTHER store's genuine token -> reject.
+    ss2 = SessionStore()
+    res2 = ss2.create(r_direct, policy, source_node_id=_NODE_A,
+                      destination_node_id=_NODE_B, creation_instant=_NOW)
+    sid2 = res2.session.session_id
+    ss2.transition(sid2, SessionState.AUTHORIZED, event_instant=_NOW)
+    ss2.transition(sid2, SessionState.ESTABLISHED, event_instant=_NOW)
+    ms2 = MultipathStore(ss2)
+    _ = ms2
+    tok2 = _mp_store._COMMIT_TOKENS.get(ss2)
+    r5 = _mp_store._commit_plan_event(ss, tok2, well_formed)
+    for label, r in (
+        ("no token", r1), ("random object", r2), ("string", r3),
+        ("fresh same-class token", r4), ("wrong-store token", r5),
+    ):
+        if r.ok or r.code != MultipathReasonCode.PLAN_AUTHORITY_REQUIRED:
+            problems.append("%s: %s/%s" % (label, r.ok, r.code))
+    if ss.to_canonical_bytes() != before:
+        problems.append("rejected commits mutated the store")
+
+    # (6) authority exists + GENUINE token -> the commit succeeds (the
+    #     token IS the authority; in production only MultipathStore
+    #     operations fetch and pass it). The event applies, the session
+    #     state is preserved, and the fold reflects it.
+    r6 = _mp_store._commit_plan_event(ss, genuine, well_formed)
+    if not (r6.ok and r6.code == SessionReasonCode.EVENT_APPENDED):
+        problems.append("genuine token: %s/%s" % (r6.ok, r6.code))
+    else:
+        after = ss.get(sid)
+        if after.state != SessionState.ESTABLISHED:
+            problems.append("genuine-token commit changed the session state")
+        if after.last_event_sequence != well_formed.sequence:
+            problems.append("genuine-token commit did not advance the head")
+        if ms.get_plan(sid).get(route_alt.selected.path_id).status != PathStatus.DEGRADED:
+            problems.append("fold did not reflect the genuine-token commit")
+
+    # (7) The legitimate MultipathStore path keeps working after the
+    #     direct commit (sequence continuity preserved).
+    r7 = ms.change_path_status(sid, route_alt.selected.path_id,
+                               PathStatus.ACTIVE, event_instant=_NOW)
+    if not (r7.ok and r7.plan.get(route_alt.selected.path_id).status == PathStatus.ACTIVE):
+        problems.append("post-commit legitimate op failed: %s/%s" % (r7.ok, r7.code))
+
+    # (8) The token is still never an instance attribute.
+    if hasattr(ms, "_token") or hasattr(ms, "_capability"):
+        problems.append("token exposed as an instance attribute")
+
+    if problems:
+        results.append(fail("case_41_commit_token_required", "; ".join(problems[:5])))
+    else:
+        results.append(ok("case_41_commit_token_required", "authority present: None/random/string/same-class/wrong-store tokens all rejected with no mutation; genuine token commits; legitimate ops continue; token not an attribute"))
 
 
 # --------------------------------------------------------------------------
@@ -1782,6 +1906,8 @@ def main() -> int:
     case_39_arbitrary_plan_events_rejected(results)
     # Architect-review regression case (PR #13 correction cycle 2).
     case_40_authority_registration_gate(results)
+    # Architect-review regression case (PR #13 correction cycle 4).
+    case_41_commit_token_required(results)
 
     print("ADCOS multipath self-test (WORK-013)")
     print("=" * 72)

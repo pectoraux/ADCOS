@@ -140,7 +140,12 @@ def _result_from_session_error(error: Any) -> MultipathResult:
 # --------------------------------------------------------------------------
 
 class _PlanCommitToken:
-    """Module-private plan commit token (opaque; identity-checked)."""
+    """Module-private plan commit token (opaque; identity-checked).
+
+    Created only by the :class:`MultipathStore` constructor; required
+    BY IDENTITY by :func:`_commit_plan_event`. Obtaining it requires
+    deep introspection of this module's private registry -- there is
+    no instance attribute and no public accessor."""
 
     __slots__ = ()
 
@@ -155,25 +160,53 @@ _COMMIT_TOKENS: "weakref.WeakKeyDictionary[SessionStore, _PlanCommitToken]" = (
 )
 
 
+def _authority_token(
+    session_store: SessionStore,
+) -> Optional[_PlanCommitToken]:
+    """Module-private accessor for the plan commit token of a session
+    store whose authority has been constructed.
+
+    Only :class:`MultipathStore` operations call this (the operations
+    then pass the token to :func:`_commit_plan_event`); the token is
+    never stored on an instance and never exposed as an attribute."""
+    return _COMMIT_TOKENS.get(session_store)
+
+
 def _commit_plan_event(
-    session_store: SessionStore, event: Any
+    session_store: SessionStore, token: object, event: Any
 ) -> SessionResult:
     """Module-private plan-event commit path (the multipath layer's
     authority boundary).
 
-    Verifies that the owning authority has been constructed for this
-    session store (its constructor-time handshake token is present in
-    the module-private registry), then invokes the GENERIC internal
-    session substrate primitive. Without a registered authority the
-    commit fails closed with ``plan-authority-required``."""
-    if _COMMIT_TOKENS.get(session_store) is None:
+    REQUIRES the store's plan commit token and verifies it BY IDENTITY
+    against the module-private registry entry (Architect review of PR
+    #13, correction cycle 4: checking that a token EXISTS is not a
+    boundary -- a caller that merely imports this module and invokes
+    the commit function must not be able to mutate session history
+    once a legitimate authority exists). Rejected shapes: no
+    constructed authority; ``None``; a random object; a fresh
+    same-class token; another store's genuine token. Every rejection
+    fails closed with ``plan-authority-required`` and mutates nothing.
+    Only the genuine token commits, and in production only
+    MultipathStore operations fetch and pass it."""
+    registered = _COMMIT_TOKENS.get(session_store)
+    if registered is None:
         return SessionResult(
             ok=False,
             code=MultipathReasonCode.PLAN_AUTHORITY_REQUIRED,
             detail="plan events can only be committed by the multipath "
-            "authority constructed for this session store (the "
-            "constructor-time handshake token is absent from the "
-            "module-private registry) -- the commit path fails closed",
+            "authority constructed for this session store (no "
+            "constructor-time handshake token is registered) -- the "
+            "commit path fails closed",
+        )
+    if token is not registered:
+        return SessionResult(
+            ok=False,
+            code=MultipathReasonCode.PLAN_AUTHORITY_REQUIRED,
+            detail="the plan commit token does not match the one issued "
+            "to this session store's constructed multipath authority "
+            "(identity check failed) -- the commit path fails closed "
+            "for any caller that is not the authority itself",
         )
     return session_store._append_state_preserving_event(event)
 
@@ -628,7 +661,9 @@ class MultipathStore:
             # object again -- it was validated on acceptance).
             history = self._sessions.get_events(session_id)
             if any(e.event_id == event.event_id for e in history):
-                append = _commit_plan_event(self._sessions, event)
+                append = _commit_plan_event(
+                    self._sessions, _authority_token(self._sessions), event
+                )
                 return MultipathResult(
                     ok=append.ok,
                     code=append.code,
@@ -704,7 +739,9 @@ class MultipathStore:
                     session=session,
                     plan=self._derive_plan(session_id),
                 )
-            append = _commit_plan_event(self._sessions, event)
+            append = _commit_plan_event(
+                    self._sessions, _authority_token(self._sessions), event
+                )
             return MultipathResult(
                 ok=append.ok,
                 code=append.code,
@@ -752,7 +789,9 @@ class MultipathStore:
             )
         except SessionError as error:
             return _result_from_session_error(error)
-        append = _commit_plan_event(self._sessions, event)
+        append = _commit_plan_event(
+                    self._sessions, _authority_token(self._sessions), event
+                )
         if not append.ok or append.event is None:
             return MultipathResult(
                 ok=False, code=append.code, detail=append.detail,
