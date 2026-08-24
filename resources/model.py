@@ -75,9 +75,10 @@ resource kind / availability enum.
 from __future__ import annotations
 
 import hashlib
+import re
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Dict, List, Mapping, Optional, Tuple
+from typing import Any, Dict, List, Mapping, NamedTuple, Optional, Tuple
 
 from identity.node_id import NodeIdError, parse_node_id
 from protocol.canonicalization import CanonicalizationError, canonical_json_bytes
@@ -453,25 +454,86 @@ def make_resource_id(owner_node_id: str, kind: str, scope: str) -> str:
     return "%s%s:%s:%s" % (_RESOURCE_ID_PREFIX, owner, kind, scope_hash)
 
 
-def _validate_resource_id(resource_id: str) -> None:
-    if not isinstance(resource_id, str) or not resource_id.startswith(_RESOURCE_ID_PREFIX):
+#: Strict resource_id regex. The owner NodeID is the full canonical form
+#: ``adcos:node:<profile_id>:<64hex>`` (the profile_id is a dotted lowercase
+#: segment and the 64-hex digest terminates it, so the boundary between the
+#: owner and the following ``:<kind>:`` segment is unambiguous despite the
+#: colons). The kind is a lowercase-hyphen segment between the owner NodeID
+#: and the 16-hex scope hash; the scope hash is exactly 16 lowercase hex chars
+#: at the end. There is exactly one canonical representation and it
+#: round-trips with ``make_resource_id`` without ambiguity.
+_RESOURCE_ID_RE = re.compile(
+    r"^adcos:resource:"
+    r"(adcos:node:(?:[a-z0-9][a-z0-9-]*\.)+[a-z0-9][a-z0-9-]*:[0-9a-f]{64})"
+    r":([a-z][a-z0-9-]*)"
+    r":([0-9a-f]{16})$"
+)
+
+
+class ParsedResourceId(NamedTuple):
+    """The canonical components extracted from a resource_id by the strict
+    parser. ``scope_hash`` is the 16-hex sha256(scope) prefix -- the scope
+    plaintext is NOT recoverable from the id (by design, rule 3); callers that
+    hold the scope plaintext verify it via ``make_resource_id`` equality
+    (full canonical binding, enforced in ``Resource.__post_init__``)."""
+
+    owner_node_id: str
+    kind: str
+    scope_hash: str
+
+
+def parse_resource_id(resource_id: object) -> ParsedResourceId:
+    """Strict parser: extract ``(owner_node_id, kind, scope_hash)`` from a
+    canonical resource_id, or raise ResourceError. Enforces the exact
+    canonical shape (Architect review of PR #8, blocker 2):
+
+        adcos:resource:<owner_node_id>:<kind>:<16hex scope_hash>
+
+    A non-canonical id (wrong prefix, missing/short owner NodeID, wrong digest
+    length, missing kind segment, wrong scope-hash length, extra trailing
+    data, non-string input) is rejected -- there is exactly one canonical
+    representation. The owner segment is additionally run through
+    ``parse_node_id`` so a structurally-shaped-but-non-canonical owner is
+    still rejected. ``Resource.__post_init__`` layers full owner/kind/scope
+    binding on top of this shape check.
+    """
+    if not isinstance(resource_id, str):
         raise ResourceError(
             "resource-id",
-            "resource_id %r must start with %r" % (resource_id, _RESOURCE_ID_PREFIX),
+            "resource_id must be a string (found %s)" % type(resource_id).__name__,
         )
-    tail = resource_id[len(_RESOURCE_ID_PREFIX):]
-    # tail = "<owner_node_id>:<kind>:<scope_hash>" -- the owner is a full
-    # canonical NodeID text "adcos:node:<profile>:<64hex>".
-    node_prefix = "adcos:node:"
-    if not tail.startswith(node_prefix):
-        raise ResourceError("resource-id", "resource_id %r missing owner NodeID" % resource_id)
-    rest = tail[len(node_prefix):]
-    sep = ":" + node_prefix
-    # We just need a stable shape; do not over-parse the kind/scope hash here
-    # (the Resource __post_init__ re-validates the owner/kind explicitly).
-    if not rest:
-        raise ResourceError("resource-id", "resource_id %r is malformed" % resource_id)
-    _ = sep  # marker; the kind+scope_hash follow after the owner NodeID text.
+    match = _RESOURCE_ID_RE.fullmatch(resource_id)
+    if match is None:
+        raise ResourceError(
+            "resource-id",
+            "resource_id %r is not the canonical form "
+            "'adcos:resource:<owner_node_id>:<kind>:<16hex>'"
+            % (resource_id[:96] + ("\u2026" if len(resource_id) > 96 else "")),
+        )
+    owner_node_id, kind, scope_hash = (
+        match.group(1), match.group(2), match.group(3),
+    )
+    # Validate the owner segment is a real canonical NodeID (redundant with
+    # the regex but keeps the contract explicit and catches drift).
+    try:
+        parse_node_id(owner_node_id)
+    except NodeIdError as error:
+        raise ResourceError(
+            "resource-id", "owner NodeID invalid: %s" % error
+        ) from error
+    return ParsedResourceId(
+        owner_node_id=owner_node_id, kind=kind, scope_hash=scope_hash,
+    )
+
+
+def _validate_resource_id(resource_id: str) -> None:
+    """Strict structural validation of a resource_id (raises ResourceError on
+    any non-canonical shape). Used by record types that reference a resource
+    without owning one (ResourceOffer, ResourceMeasurement) -- they do not
+    carry owner/kind/scope fields to bind against, but they MUST reject a
+    malformed/tampered resource_id at the same canonical shape boundary
+    (Architect review of PR #8, blocker 2)."""
+    parse_resource_id(resource_id)
 
 
 @dataclass(frozen=True)
@@ -495,7 +557,16 @@ class Resource:
     created_at: str = ""
 
     def __post_init__(self) -> None:
-        _validate_resource_id(self.resource_id)
+        # Strict canonical binding (Architect review of PR #8, blocker 2):
+        # resource_id MUST equal make_resource_id(owner_node_id, kind, scope).
+        # The owner and kind embedded in the resource_id MUST match the
+        # explicit fields, and the scope hash embedded in the resource_id
+        # MUST equal the hash of the explicit scope. Owner/kind/scope
+        # tampering is rejected (no loose substring match -- the prior
+        # ``owner.text in self.resource_id`` check accepted ids where the
+        # owner merely appeared as a substring, which is not a canonical
+        # binding).
+        parsed = parse_resource_id(self.resource_id)
         if self.kind not in ResourceKind.values():
             raise ResourceError(
                 "resource-kind",
@@ -507,12 +578,35 @@ class Resource:
             raise ResourceError(
                 "resource-owner", "owner must be a canonical NodeID: %s" % error
             ) from error
-        # The owner in resource_id MUST match the explicit owner field.
-        if owner.text not in self.resource_id:
+        if parsed.owner_node_id != owner.text:
             raise ResourceError(
-                "resource-owner",
-                "owner_node_id %r does not appear in resource_id %r"
-                % (self.owner_node_id, self.resource_id),
+                "resource-id",
+                "resource_id owner %r does not match owner_node_id %r "
+                "(canonical binding -- owner tampering rejected)"
+                % (parsed.owner_node_id, owner.text),
+            )
+        if parsed.kind != self.kind:
+            raise ResourceError(
+                "resource-id",
+                "resource_id kind %r does not match kind field %r "
+                "(canonical binding -- kind tampering rejected)"
+                % (parsed.kind, self.kind),
+            )
+        if not isinstance(self.scope, str):
+            raise ResourceError("resource-scope", "scope must be a string")
+        # Full canonical equality: the resource_id MUST be exactly the id
+        # derived from (owner, kind, scope). This catches scope tampering
+        # (a scope field whose hash does not match the scope_hash embedded in
+        # the resource_id) as well as any drift in owner/kind after the
+        # parsed-field checks above.
+        expected_id = make_resource_id(owner.text, self.kind, self.scope)
+        if self.resource_id != expected_id:
+            raise ResourceError(
+                "resource-id",
+                "resource_id %r is not the canonical id for "
+                "(owner=%r, kind=%r, scope=%r); expected %r "
+                "(canonical binding -- scope tampering rejected)"
+                % (self.resource_id, owner.text, self.kind, self.scope, expected_id),
             )
         if self.availability not in AvailabilityMode.values():
             raise ResourceError(
@@ -535,8 +629,6 @@ class Resource:
                 "base_unit %r does not match the registry base %r for kind %r"
                 % (self.base_unit, derived_base, self.kind),
             )
-        if not isinstance(self.scope, str):
-            raise ResourceError("resource-scope", "scope must be a string")
         # created_at: optional but, if present, must be RFC 3339 UTC.
         if self.created_at:
             try:
@@ -1159,25 +1251,34 @@ class ResourceAccount:
                 "operation %r already applied (%s) -- no double-count"
                 % (op_id, self._operations[op_id]), self)
         self._check_version(expected_version)
-        # Consumption draws down reserved first (the documented model: you
-        # reserve, then consume against the reservation). If a caller
-        # consumes without a reservation the consumption is rejected unless
-        # it fits within remaining unreserved capacity -- this is the
-        # "available quantity" branch of rule 18.
-        available = self.offered - self.reserved
+        # Consumption explicitly transfers reserved quantity into consumed
+        # quantity for the reserve->consume path (Architect review of PR #8,
+        # blocker 1). A consume draws down reserved capacity first
+        # (transferring it into consumed); any remainder is drawn from
+        # unreserved capacity (the "available quantity" branch, rule 18).
+        # The total capacity a consume may draw from is (offered - consumed):
+        # the reserved portion transfers out of reserved into consumed, the
+        # unreserved portion is directly consumed, so reserved + consumed
+        # never double-counts the same unit. Before this fix a reserve(5)
+        # then consume(5) left the ledger at reserved=5, consumed=5 -- the
+        # consumed quantity was still counted as reserved, which is
+        # semantically wrong (the reservation had been realized, not held).
+        available = self.offered - self.consumed
         if qty > available:
             raise ResourceError(
                 "account-overconsumption",
                 "qty(%d) > available(%d) -- consumption rejected (fail closed)"
                 % (qty, available),
             )
+        transfer_from_reserved = qty if qty <= self.reserved else self.reserved
+        self.reserved -= transfer_from_reserved
         self.consumed += qty
         self.version += 1
         self._operations[op_id] = "consumed"
         self._check_invariants()
         return AccountingOutcome(True, "consumed",
-            "consumed %d (account: offered=%d reserved=%d consumed=%d remaining=%d)"
-            % (qty, self.offered, self.reserved, self.consumed, self.remaining), self)
+            "consumed %d (transferred %d from reservation; account: offered=%d reserved=%d consumed=%d remaining=%d)"
+            % (qty, transfer_from_reserved, self.offered, self.reserved, self.consumed, self.remaining), self)
 
     def release_consumption(self, op_id: str, qty: int, expected_version: Optional[int] = None) -> AccountingOutcome:
         if not isinstance(op_id, str) or not op_id:

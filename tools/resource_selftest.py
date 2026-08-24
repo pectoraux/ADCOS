@@ -3,9 +3,11 @@
 
 Deterministic, offline verification of the resources package against the
 frozen WORK-008 requirements (spec/prompts/WORK-008.md): the 30 required
-test cases plus mechanical forbidden-API/imports checks, frozen-dimensions
-presence, serialization round-trips, a seeded fuzz, and a byte-identical
-determinism proof.
+test cases plus the Architect-review regression coverage for both PR #8
+blockers (cases 31-39: reserve->consume transfer semantics and canonical
+resource_id binding), mechanical forbidden-API/imports checks, frozen-
+dimensions presence, serialization round-trips, a seeded fuzz, and a
+byte-identical determinism proof.
 
 The central boundary is exercised throughout:
 
@@ -51,6 +53,7 @@ from resources import (  # noqa: E402
     EnergyState,
     MeasurementSource,
     MergeOutcome,
+    ParsedResourceId,
     Quantity,
     Resource,
     ResourceAccount,
@@ -62,6 +65,7 @@ from resources import (  # noqa: E402
     make_resource_id,
     measurement_from_mapping,
     offer_from_mapping,
+    parse_resource_id,
     power_unit_base,
     power_unit_multiplier,
     unit_base_for,
@@ -488,7 +492,11 @@ def case_15_offer_renewal_newer_sequence(results: List[Result]) -> None:
 
 def case_16_accounting_equations_hold(results: List[Result]) -> None:
     """Resource accounting equations hold (rule 9):
-    remaining = offered - reserved - consumed, with invariants."""
+    remaining = offered - reserved - consumed, with invariants. After the
+    reserve->consume transfer fix, a consume draws down reserved first
+    (transferring into consumed), so reserve(30) then consume(10) leaves
+    reserved=20, consumed=10 (the 10 consumed units are NOT still counted
+    as reserved -- Architect review of PR #8, blocker 1)."""
     try:
         _, _, _, idA, _ = make_identity()
         owner = str(idA.node_id)
@@ -501,11 +509,12 @@ def case_16_accounting_equations_hold(results: List[Result]) -> None:
         rs.consume(r.resource_id, "op2", Quantity(10, "mbps"), now=FRESH_NOW)
         acct2 = rs.get_account(r.resource_id)
         assert acct2 is not None
-        assert acct2.reserved == 30_000_000
-        assert acct2.consumed == 10_000_000
-        assert acct2.remaining == 60_000_000  # 100 - 30 - 10
+        # reserve(30) then consume(10): 10 transferred from reserved -> consumed
+        assert acct2.reserved == 20_000_000, "reserved=%d (expected 20M after transfer)" % acct2.reserved
+        assert acct2.consumed == 10_000_000, "consumed=%d" % acct2.consumed
+        assert acct2.remaining == 70_000_000  # 100 - 20 - 10
         assert acct2.reserved + acct2.consumed <= acct2.offered
-        results.append(("case_16_accounting_equations_hold", True, "remaining = offered - reserved - consumed"))
+        results.append(("case_16_accounting_equations_hold", True, "remaining = offered - reserved - consumed (transfer)"))
     except Exception as error:
         results.append(("case_16_accounting_equations_hold", False, repr(error)))
 
@@ -536,7 +545,12 @@ def case_17_reservation_cannot_exceed_offered(results: List[Result]) -> None:
 
 
 def case_18_consumption_cannot_exceed_available(results: List[Result]) -> None:
-    """Consumption cannot exceed available quantity (rule 9 / accounting req)."""
+    """Consumption cannot exceed available quantity (rule 9 / accounting req).
+    After the reserve->consume transfer fix, available = offered - consumed
+    (a consume draws from reserved first, transferring, then from unreserved).
+    So consume(70) after reserve(40) SUCCEEDS (transfers 40 from reservation
+    + 30 from unreserved -> reserved=0, consumed=70); a subsequent consume(40)
+    fails because only 30 remains (offered 100 - consumed 70)."""
     try:
         _, _, _, idA, _ = make_identity()
         owner = str(idA.node_id)
@@ -545,18 +559,27 @@ def case_18_consumption_cannot_exceed_available(results: List[Result]) -> None:
         rs.create_offer(base_offer(resource=r, quantity=Quantity(100, "mbps")))
         rs.init_account_from_offer(r.resource_id, now=FRESH_NOW)
         rs.reserve(r.resource_id, "op1", Quantity(40, "mbps"), now=FRESH_NOW)
-        # available = offered - reserved = 60; consuming 70 fails
+        # consume 70: transfers 40 from reservation + 30 from unreserved (succeeds)
+        out = rs.consume(r.resource_id, "op2", Quantity(70, "mbps"), now=FRESH_NOW)
+        assert out.accepted, out.detail
+        acct = rs.get_account(r.resource_id)
+        assert acct is not None
+        assert acct.reserved == 0, "reserved=%d (reservation fully transferred)" % acct.reserved
+        assert acct.consumed == 70_000_000, "consumed=%d" % acct.consumed
+        # over-consumption: only 30 remaining (offered 100 - consumed 70)
         try:
-            rs.consume(r.resource_id, "op2", Quantity(70, "mbps"), now=FRESH_NOW)
+            rs.consume(r.resource_id, "op3", Quantity(40, "mbps"), now=FRESH_NOW)
             raise AssertionError("over-consumption should fail closed")
         except ResourceError as e:
             assert e.code == "account-overconsumption", e.code
-        # consuming 50 (<= 60 available) succeeds
-        rs.consume(r.resource_id, "op3", Quantity(50, "mbps"), now=FRESH_NOW)
-        acct = rs.get_account(r.resource_id)
-        assert acct is not None
-        assert acct.consumed == 50_000_000
-        results.append(("case_18_consumption_cannot_exceed_available", True, "over-consumption rejected, valid consumption OK"))
+        # consuming exactly the remaining (30) succeeds and saturates the ledger
+        rs.consume(r.resource_id, "op4", Quantity(30, "mbps"), now=FRESH_NOW)
+        acct2 = rs.get_account(r.resource_id)
+        assert acct2 is not None
+        assert acct2.consumed == 100_000_000  # saturated
+        assert acct2.reserved == 0
+        assert acct2.remaining == 0
+        results.append(("case_18_consumption_cannot_exceed_available", True, "over-consumption rejected after reserve->consume transfer"))
     except Exception as error:
         results.append(("case_18_consumption_cannot_exceed_available", False, repr(error)))
 
@@ -883,6 +906,258 @@ def case_30_repeated_runs_byte_identical(results: List[Result]) -> None:
 
 
 # ==========================================================================
+# Architect review of PR #8 -- regression coverage for both blockers
+# ==========================================================================
+
+def case_31_reserve_then_consume_full_transfer(results: List[Result]) -> None:
+    """Architect review of PR #8, blocker 1: after reserve(5) then consume(5)
+    the ledger MUST be reserved=0, consumed=5 (NOT reserved=5, consumed=5).
+    Consumption explicitly transfers reserved quantity into consumed quantity
+    for the reserve->consume path -- the consumed quantity is no longer
+    counted as reserved (the prior implementation left the consumed quantity
+    still counted as reserved, which is semantically wrong)."""
+    try:
+        _, _, _, idA, _ = make_identity()
+        owner = str(idA.node_id)
+        r = make_resource(owner=owner, kind=ResourceKind.BANDWIDTH, scope="full-xfer")
+        rs = ResourceStore(); rs.register_resource(r)
+        rs.create_offer(base_offer(resource=r, quantity=Quantity(10, "mbps")))
+        rs.init_account_from_offer(r.resource_id, now=FRESH_NOW)
+        out_r = rs.reserve(r.resource_id, "op1", Quantity(5, "mbps"), now=FRESH_NOW)
+        assert out_r.accepted and out_r.code == "reserved", out_r.detail
+        out_c = rs.consume(r.resource_id, "op2", Quantity(5, "mbps"), now=FRESH_NOW)
+        assert out_c.accepted and out_c.code == "consumed", out_c.detail
+        acct = rs.get_account(r.resource_id)
+        assert acct is not None
+        assert acct.reserved == 0, "reserved=%d (full transfer: reservation consumed, not held)" % acct.reserved
+        assert acct.consumed == 5_000_000, "consumed=%d" % acct.consumed
+        assert acct.remaining == 5_000_000  # 10 - 0 - 5
+        assert acct.reserved + acct.consumed <= acct.offered
+        results.append(("case_31_reserve_then_consume_full_transfer", True, "reserve(5)+consume(5) -> reserved=0, consumed=5"))
+    except Exception as error:
+        results.append(("case_31_reserve_then_consume_full_transfer", False, repr(error)))
+
+
+def case_32_reserve_then_consume_partial_transfer(results: List[Result]) -> None:
+    """Architect review of PR #8, blocker 1 (partial consumption): after
+    reserve(5) then consume(3) the ledger MUST be reserved=2, consumed=3 --
+    only the consumed portion transfers out of reserved; the unconsumed
+    reservation (2) remains held."""
+    try:
+        _, _, _, idA, _ = make_identity()
+        owner = str(idA.node_id)
+        r = make_resource(owner=owner, kind=ResourceKind.BANDWIDTH, scope="partial-xfer")
+        rs = ResourceStore(); rs.register_resource(r)
+        rs.create_offer(base_offer(resource=r, quantity=Quantity(10, "mbps")))
+        rs.init_account_from_offer(r.resource_id, now=FRESH_NOW)
+        rs.reserve(r.resource_id, "op1", Quantity(5, "mbps"), now=FRESH_NOW)
+        rs.consume(r.resource_id, "op2", Quantity(3, "mbps"), now=FRESH_NOW)
+        acct = rs.get_account(r.resource_id)
+        assert acct is not None
+        assert acct.reserved == 2_000_000, "reserved=%d (partial: 5-3=2 held)" % acct.reserved
+        assert acct.consumed == 3_000_000, "consumed=%d" % acct.consumed
+        assert acct.remaining == 5_000_000  # 10 - 2 - 3
+        results.append(("case_32_reserve_then_consume_partial_transfer", True, "reserve(5)+consume(3) -> reserved=2, consumed=3"))
+    except Exception as error:
+        results.append(("case_32_reserve_then_consume_partial_transfer", False, repr(error)))
+
+
+def case_33_consume_exceeds_reservation_draws_unreserved(results: List[Result]) -> None:
+    """Architect review of PR #8, blocker 1 (consume exceeds reservation): a
+    consume that exceeds the reserved amount transfers the full reservation
+    and draws the remainder from unreserved capacity (the "available
+    quantity" branch, rule 18). reserve(5) then consume(7) -> reserved=0
+    (full transfer), consumed=7 (5 transferred + 2 from unreserved)."""
+    try:
+        _, _, _, idA, _ = make_identity()
+        owner = str(idA.node_id)
+        r = make_resource(owner=owner, kind=ResourceKind.BANDWIDTH, scope="exceed-res")
+        rs = ResourceStore(); rs.register_resource(r)
+        rs.create_offer(base_offer(resource=r, quantity=Quantity(10, "mbps")))
+        rs.init_account_from_offer(r.resource_id, now=FRESH_NOW)
+        rs.reserve(r.resource_id, "op1", Quantity(5, "mbps"), now=FRESH_NOW)
+        out = rs.consume(r.resource_id, "op2", Quantity(7, "mbps"), now=FRESH_NOW)
+        assert out.accepted, out.detail
+        acct = rs.get_account(r.resource_id)
+        assert acct is not None
+        assert acct.reserved == 0, "reserved=%d (full transfer of 5)" % acct.reserved
+        assert acct.consumed == 7_000_000, "consumed=%d (5 transferred + 2 unreserved)" % acct.consumed
+        assert acct.remaining == 3_000_000  # 10 - 0 - 7
+        results.append(("case_33_consume_exceeds_reservation_draws_unreserved", True, "reserve(5)+consume(7) -> reserved=0, consumed=7"))
+    except Exception as error:
+        results.append(("case_33_consume_exceeds_reservation_draws_unreserved", False, repr(error)))
+
+
+def case_34_consume_without_reservation_direct(results: List[Result]) -> None:
+    """Architect review of PR #8, blocker 1 (direct consume, no reservation):
+    a consume with no prior reservation draws entirely from unreserved
+    capacity (the "available quantity" branch, rule 18). reserved stays 0,
+    consumed increases by the consumed amount."""
+    try:
+        _, _, _, idA, _ = make_identity()
+        owner = str(idA.node_id)
+        r = make_resource(owner=owner, kind=ResourceKind.BANDWIDTH, scope="direct-consume")
+        rs = ResourceStore(); rs.register_resource(r)
+        rs.create_offer(base_offer(resource=r, quantity=Quantity(10, "mbps")))
+        rs.init_account_from_offer(r.resource_id, now=FRESH_NOW)
+        # no reserve -- direct consume
+        out = rs.consume(r.resource_id, "op1", Quantity(3, "mbps"), now=FRESH_NOW)
+        assert out.accepted, out.detail
+        acct = rs.get_account(r.resource_id)
+        assert acct is not None
+        assert acct.reserved == 0, "reserved=%d (no reservation)" % acct.reserved
+        assert acct.consumed == 3_000_000, "consumed=%d" % acct.consumed
+        assert acct.remaining == 7_000_000  # 10 - 0 - 3
+        results.append(("case_34_consume_without_reservation_direct", True, "consume(3) no-reserve -> reserved=0, consumed=3"))
+    except Exception as error:
+        results.append(("case_34_consume_without_reservation_direct", False, repr(error)))
+
+
+def case_35_resource_id_owner_tamper_rejected(results: List[Result]) -> None:
+    """Architect review of PR #8, blocker 2 (owner tampering): a Resource
+    whose resource_id embeds owner A but whose owner_node_id field is B is
+    rejected. The prior validation only checked that the owner string
+    appeared somewhere in the id (loose substring), accepting e.g. an id for
+    owner A attached to a Resource whose owner field is a DIFFERENT node B
+    as long as B's text was a substring -- this is not a canonical binding."""
+    try:
+        _, creds, prov, idA, _ = make_identity()
+        idB, _ = make_node(RELAYER_SECRET, IdentityService(store=creds, provider=prov, profiles=ProfileSet.load_default()), prov)
+        ownerA = str(idA.node_id)
+        ownerB = str(idB.node_id)
+        # build a valid id for owner A, then attach it to a Resource whose
+        # owner_node_id field is B (tampering)
+        rid_for_a = make_resource_id(ownerA, ResourceKind.BANDWIDTH, "scope-A")
+        try:
+            Resource(
+                resource_id=rid_for_a, owner_node_id=ownerB,
+                kind=ResourceKind.BANDWIDTH, availability=AvailabilityMode.RESERVATION_BASED,
+                scope="scope-A", created_at=NOW_TEXT,
+            )
+            raise AssertionError("owner tamper should be rejected")
+        except ResourceError as e:
+            assert e.code == "resource-id", e.code
+        results.append(("case_35_resource_id_owner_tamper_rejected", True, "owner field != id owner rejected"))
+    except Exception as error:
+        results.append(("case_35_resource_id_owner_tamper_rejected", False, repr(error)))
+
+
+def case_36_resource_id_kind_tamper_rejected(results: List[Result]) -> None:
+    """Architect review of PR #8, blocker 2 (kind tampering): a Resource
+    whose resource_id embeds kind=bandwidth but whose kind field is storage
+    is rejected (the kind in the id MUST match the kind field)."""
+    try:
+        _, _, _, idA, _ = make_identity()
+        owner = str(idA.node_id)
+        # build a valid id for bandwidth, then attach to a Resource whose
+        # kind field is storage (tampering)
+        rid_bw = make_resource_id(owner, ResourceKind.BANDWIDTH, "scope-k")
+        try:
+            Resource(
+                resource_id=rid_bw, owner_node_id=owner,
+                kind=ResourceKind.STORAGE,  # tampered: id says bandwidth
+                availability=AvailabilityMode.RESERVATION_BASED,
+                scope="scope-k", created_at=NOW_TEXT,
+            )
+            raise AssertionError("kind tamper should be rejected")
+        except ResourceError as e:
+            assert e.code == "resource-id", e.code
+        results.append(("case_36_resource_id_kind_tamper_rejected", True, "kind field != id kind rejected"))
+    except Exception as error:
+        results.append(("case_36_resource_id_kind_tamper_rejected", False, repr(error)))
+
+
+def case_37_resource_id_scope_tamper_rejected(results: List[Result]) -> None:
+    """Architect review of PR #8, blocker 2 (scope tampering): a Resource
+    whose resource_id embeds the hash of scope1 but whose scope field is
+    scope2 is rejected. The resource_id MUST equal
+    make_resource_id(owner, kind, scope) -- the scope hash embedded in the
+    id must match the hash of the explicit scope."""
+    try:
+        _, _, _, idA, _ = make_identity()
+        owner = str(idA.node_id)
+        # build a valid id for scope1, then attach to a Resource whose
+        # scope field is scope2 (tampering) -- owner and kind match, only
+        # scope is tampered. The full canonical equality check catches this.
+        rid_scope1 = make_resource_id(owner, ResourceKind.BANDWIDTH, "scope1")
+        try:
+            Resource(
+                resource_id=rid_scope1, owner_node_id=owner,
+                kind=ResourceKind.BANDWIDTH,
+                availability=AvailabilityMode.RESERVATION_BASED,
+                scope="scope2",  # tampered: id hashes scope1, field says scope2
+                created_at=NOW_TEXT,
+            )
+            raise AssertionError("scope tamper should be rejected")
+        except ResourceError as e:
+            assert e.code == "resource-id", e.code
+        results.append(("case_37_resource_id_scope_tamper_rejected", True, "scope field hash != id scope_hash rejected"))
+    except Exception as error:
+        results.append(("case_37_resource_id_scope_tamper_rejected", False, repr(error)))
+
+
+def case_38_malformed_resource_id_rejected(results: List[Result]) -> None:
+    """Architect review of PR #8, blocker 2 (strict parser): a malformed
+    resource_id (wrong prefix, short digest, missing kind segment, wrong
+    scope-hash length, extra trailing data, non-string) is rejected by the
+    strict parser -- there is exactly one canonical representation."""
+    try:
+        _, _, _, idA, _ = make_identity()
+        owner = str(idA.node_id)
+        good = make_resource_id(owner, ResourceKind.BANDWIDTH, "ok")
+        bad_ids = [
+            "not-a-resource-id",  # wrong prefix entirely
+            "adcos:resource:bandwidth:0123456789abcdef",  # missing owner NodeID
+            good[:-1],  # truncated scope hash (15 hex)
+            good + "x",  # extra trailing data
+            good.replace("bandwidth", ""),  # empty kind segment
+            "adcos:resource:adcos:node:identity.sha256-hmac-dev.v1:deadbeef:bandwidth:0123456789abcdef",  # short digest
+            "",  # empty string
+        ]
+        for bad in bad_ids:
+            try:
+                parse_resource_id(bad)
+                raise AssertionError("malformed id should be rejected: %r" % bad)
+            except ResourceError as e:
+                assert e.code == "resource-id", (bad, e.code)
+        # non-string input rejected
+        try:
+            parse_resource_id(123)  # type: ignore[arg-type]
+            raise AssertionError("non-string id should be rejected")
+        except ResourceError as e:
+            assert e.code == "resource-id", e.code
+        results.append(("case_38_malformed_resource_id_rejected", True, "strict parser rejects 8 malformed shapes"))
+    except Exception as error:
+        results.append(("case_38_malformed_resource_id_rejected", False, repr(error)))
+
+
+def case_39_parse_resource_id_roundtrip(results: List[Result]) -> None:
+    """Architect review of PR #8, blocker 2 (round-trip): parse_resource_id
+    extracts the exact (owner_node_id, kind, scope_hash) tuple that
+    make_resource_id embedded, and the parsed id round-trips through
+    make_resource_id for every frozen kind + scope combination."""
+    try:
+        _, _, _, idA, _ = make_identity()
+        owner = str(idA.node_id)
+        scopes = ["", "default", "uplink-A", "battery-A", "k-bandwidth"]
+        for kind in ResourceKind.values():
+            for scope in scopes:
+                rid = make_resource_id(owner, kind, scope)
+                parsed = parse_resource_id(rid)
+                assert isinstance(parsed, ParsedResourceId), type(parsed)
+                assert parsed.owner_node_id == owner, (kind, scope, parsed.owner_node_id)
+                assert parsed.kind == kind, (kind, scope, parsed.kind)
+                assert len(parsed.scope_hash) == 16, (kind, scope, parsed.scope_hash)
+                # round-trip: make_resource_id(parsed.owner, parsed.kind, <scope>)
+                # equals the original -- the scope plaintext is not recoverable
+                # from scope_hash (by design), so re-derive with the known scope.
+                assert make_resource_id(parsed.owner_node_id, parsed.kind, scope) == rid
+        results.append(("case_39_parse_resource_id_roundtrip", True, "8 kinds x 5 scopes round-trip"))
+    except Exception as error:
+        results.append(("case_39_parse_resource_id_roundtrip", False, repr(error)))
+
+
+# ==========================================================================
 # Mechanical checks (mirrors topology_selftest mechanical cases)
 # ==========================================================================
 
@@ -1181,6 +1456,15 @@ def main() -> int:
     case_28_cross_resource_measurement_mismatch_rejected(results)
     case_29_seeded_fuzz_no_crash(results)
     case_30_repeated_runs_byte_identical(results)
+    case_31_reserve_then_consume_full_transfer(results)
+    case_32_reserve_then_consume_partial_transfer(results)
+    case_33_consume_exceeds_reservation_draws_unreserved(results)
+    case_34_consume_without_reservation_direct(results)
+    case_35_resource_id_owner_tamper_rejected(results)
+    case_36_resource_id_kind_tamper_rejected(results)
+    case_37_resource_id_scope_tamper_rejected(results)
+    case_38_malformed_resource_id_rejected(results)
+    case_39_parse_resource_id_roundtrip(results)
     case_serialization_roundtrip(results)
     case_no_forbidden_fields_or_methods(results)
     case_no_5g_vendor_imports(results)
