@@ -756,3 +756,4 @@ python3 tools/multipath_selftest.py
 | `37-interleaved-lifecycle-and-plan-ops` | one contiguous sequence; fold correct across interleaving (invariant 11) |
 | `38-plan-derivation-pure` | pure fold; empty plan deterministic; unknown session → None |
 | `39-arbitrary-plan-events-rejected` | REGRESSION (PR #13 blocker): all 5 plan-event types × 4 append paths (generic / no capability / wrong capability / None) fail closed with no mutation; single semantic authority enforced (second MultipathStore rejected; same-authority re-registration idempotent) |
+| `40-authority-registration-gate` | REGRESSION (PR #13 correction 2): arbitrary objects / strings / functions / stores / forged same-named classes / subclasses all rejected at registration with no capability issued; claim-first fails with the seam closed; the legitimate handshake then succeeds; a second authority cannot take over |

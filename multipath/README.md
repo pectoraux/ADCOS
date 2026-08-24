@@ -77,10 +77,14 @@ any public path: the generic session append rejects state-preserving
 events as `illegal-transition`, and the plan-event commit seam is a
 PRIVATE, capability-guarded internal primitive
 (`SessionStore._append_state_preserving_event`) whose capability is
-issued to exactly one registered semantic authority — this store
-(Architect review of PR #13: a public "pre-validated" append would be
-an authority bypass). Calls without the registered capability fail
-closed with `plan-authority-required`.
+issued to exactly one registered semantic authority — this store.
+Capability issuance is a **constructor-time handshake with a
+mechanical ownership proof**: the session layer issues the capability
+only to an EXACT instance of the genuine `MultipathStore` class, so
+arbitrary objects, forged same-named classes, and subclasses cannot
+claim the authority first (Architect review of PR #13, corrections 1
+and 2). Calls without the registered capability fail closed with
+`plan-authority-required`.
 
 ## Path admission (the cross-path binding security property)
 

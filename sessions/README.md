@@ -197,7 +197,16 @@ are appended through a **private, capability-guarded internal seam**:
 `SessionStore._append_state_preserving_event(capability, event)`. The
 capability is issued by `SessionStore._register_plan_authority` to
 exactly ONE semantic authority — the `MultipathStore` constructor —
-and is verified by identity on every call. There is deliberately NO
+and is verified by identity on every call.
+
+Capability ISSUANCE is itself a **constructor-time handshake with a
+mechanical ownership proof**: the session layer issues the capability
+only to an EXACT instance of the genuine `multipath.MultipathStore`
+class (resolved from the real package via a deferred import — class
+identity, never a name convention). Arbitrary objects, forged
+same-named classes, functions, and even subclasses of the
+implementation are rejected, so an arbitrary caller cannot claim the
+sole authority first and then own the seam. There is deliberately NO
 public equivalent: the store performs only the atomic session commit
 (state-preserving, sequenced, defense-in-depth checks), while the plan
 SEMANTICS (admission binding verification) belong solely to the

@@ -824,8 +824,22 @@ class SessionStore:
     # -- plan-authority seam (WORK-013; capability-guarded) --------------
 
     def _register_plan_authority(self, authority: object) -> "_PlanCapability":
-        """Register THE semantic plan authority for this store (called
-        by the ``MultipathStore`` constructor).
+        """Register THE semantic plan authority for this store -- the
+        CONSTRUCTOR-TIME HANDSHAKE of the ``MultipathStore``
+        constructor.
+
+        MECHANICAL OWNERSHIP PROOF (Architect review of PR #13,
+        correction cycle 2): the caller must BE the actual multipath
+        implementation -- verified as an EXACT instance of the genuine
+        ``multipath.MultipathStore`` class (resolved from the real
+        package via a deferred import, so class identity is checked
+        against the authentic class object, never a name convention).
+        Arbitrary objects, forged same-named classes, functions, and
+        even SUBCLASSES of the implementation are rejected: capability
+        issuance cannot be claimed first by anyone who is not the
+        multipath implementation itself, so the sole-authority
+        invariant holds at the issuance path, not merely at the append
+        primitive.
 
         Exactly one authority may own a store's plan-event seam: the
         first registration issues the opaque capability; re-registration
@@ -834,6 +848,22 @@ class SessionStore:
         is required (and verified by identity) by
         :meth:`_append_state_preserving_event` -- the internal commit
         primitive is therefore not usable by arbitrary callers."""
+        # Deferred import: multipath imports this module at load time,
+        # so the import must happen at call time (no module cycle). The
+        # class object identity check below is the ownership proof.
+        from multipath.store import MultipathStore as _MultipathStore
+
+        if type(authority) is not _MultipathStore:
+            raise SessionError(
+                "plan-authority",
+                "the semantic plan authority must be the actual multipath "
+                "implementation (an exact multipath.MultipathStore "
+                "instance); arbitrary objects, forged classes, and "
+                "subclasses cannot claim the authority -- capability "
+                "issuance is a constructor-time handshake, not a "
+                "callable convention (Architect review of PR #13, "
+                "correction cycle 2)",
+            )
         with self._lock:
             if self._plan_authority is None:
                 self._plan_authority = authority

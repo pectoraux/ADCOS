@@ -1617,6 +1617,113 @@ def case_39_arbitrary_plan_events_rejected(results: List[Result]) -> None:
 
 
 # --------------------------------------------------------------------------
+# Architect-review regression case (PR #13 correction cycle 2)
+#
+# Blocker: the capability-issuance gate itself was forgeable.
+# _register_plan_authority(arbitrary_object) had no proof that the
+# caller was the actual MultipathStore, so an arbitrary caller could
+# register FIRST, own the store's sole capability, and append forged
+# plan events through the (otherwise correctly guarded) seam -- the
+# bypass had only moved one step upstream.
+#
+# Fix: capability issuance is a CONSTRUCTOR-TIME HANDSHAKE with a
+# mechanical ownership proof -- the session layer issues the capability
+# only to an EXACT instance of the genuine multipath.MultipathStore
+# class (resolved from the real package via a deferred import; class
+# identity, never a name convention). Arbitrary objects, forged
+# same-named classes, functions, and subclasses are all rejected.
+# --------------------------------------------------------------------------
+
+def case_40_authority_registration_gate(results: List[Result]) -> None:
+    """REGRESSION (PR #13 correction 2): the four required properties
+    of the issuance gate -- arbitrary objects cannot register; arbitrary
+    callers cannot obtain a valid capability; a second MultipathStore
+    cannot take over; legitimate registration succeeds."""
+    problems = []
+
+    def rejects(candidate: object, label: str) -> None:
+        store = SessionStore()
+        try:
+            store._register_plan_authority(candidate)
+            problems.append("%s registered as authority" % label)
+        except Exception as error:
+            if not (isinstance(error, Exception) and getattr(error, "code", "") == "plan-authority"):
+                problems.append("%s rejected with wrong error: %r" % (label, error))
+            # No capability may have been issued by the rejected call.
+            if store._plan_capability is not None:
+                problems.append("%s rejection still issued a capability" % label)
+
+    # (1) Arbitrary objects cannot register (and issue nothing).
+    rejects(object(), "plain object")
+    rejects("a string", "string")
+    rejects(lambda: None, "function")
+    rejects(SessionStore(), "a SessionStore")
+    # (2) Forged same-named class: type identity is checked against the
+    #     genuine class object, not the name.
+    Fake = type("MultipathStore", (), {})
+    rejects(Fake(), "forged same-named class")
+    # (3) Subclasses of the implementation are rejected too (a subclass
+    #     could override the validated operations).
+    class _Evil(MultipathStore):
+        pass
+
+    try:
+        _Evil(SessionStore())
+        problems.append("subclass registered as authority")
+    except Exception as error:
+        if getattr(error, "code", "") != "plan-authority":
+            problems.append("subclass rejected with wrong error: %r" % error)
+
+    # (4) "Cannot claim the authority FIRST": a failed arbitrary
+    #     registration leaves the store unowned, the capability
+    #     unobtainable, and the seam closed -- then the LEGITIMATE
+    #     handshake still succeeds.
+    ss = SessionStore()
+    try:
+        ss._register_plan_authority(object())
+        problems.append("arbitrary object claimed authority first")
+    except Exception:
+        pass
+    if ss._plan_capability is not None:
+        problems.append("rejected first-claim still issued a capability")
+    # The seam is closed without a registered authority.
+    r_direct = _route((_AB,))
+    policy = _policy_decision()
+    res = ss.create(r_direct, policy, source_node_id=_NODE_A,
+                    destination_node_id=_NODE_B, creation_instant=_NOW)
+    sid = res.session.session_id
+    ss.transition(sid, SessionState.AUTHORIZED, event_instant=_NOW)
+    ss.transition(sid, SessionState.ESTABLISHED, event_instant=_NOW)
+    forged = SessionEvent(
+        event_id="", session_id=sid, sequence=4,
+        previous_state=SessionState.ESTABLISHED, new_state=SessionState.ESTABLISHED,
+        event_type=MP_EVENT_PATH_ADDED, event_instant=_NOW,
+        metadata=((META_PATH_ID, "sha256:" + "e" * 64),),
+    )
+    r_seam = ss._append_state_preserving_event(object(), forged)
+    if r_seam.ok or r_seam.code != SessionReasonCode.PLAN_AUTHORITY_REQUIRED:
+        problems.append("seam open without authority: %s/%s" % (r_seam.ok, r_seam.code))
+    # The legitimate handshake then succeeds and works end-to-end.
+    ms = MultipathStore(ss)
+    route_alt = _route((_AC, _CB), reach=(_NODE_C,), instant="2026-06-01T12:00:01Z")
+    r_add = ms.add_path(sid, route_alt, event_instant=_NOW)
+    if not (r_add.ok and r_add.plan.get(route_alt.selected.path_id)):
+        problems.append("legitimate handshake broken: %s/%s" % (r_add.ok, r_add.code))
+    # (5) A second MultipathStore cannot take over.
+    try:
+        MultipathStore(ss)
+        problems.append("second authority took over")
+    except Exception as error:
+        if getattr(error, "code", "") != "plan-authority":
+            problems.append("takeover rejected with wrong error: %r" % error)
+
+    if problems:
+        results.append(fail("case_40_authority_registration_gate", "; ".join(problems[:5])))
+    else:
+        results.append(ok("case_40_authority_registration_gate", "arbitrary objects/names/subclasses rejected; claim-first fails with the seam closed; legitimate handshake works; second authority rejected"))
+
+
+# --------------------------------------------------------------------------
 # Main
 # --------------------------------------------------------------------------
 
@@ -1662,6 +1769,8 @@ def main() -> int:
     case_38_plan_derivation_pure(results)
     # Architect-review regression case (PR #13 correction cycle).
     case_39_arbitrary_plan_events_rejected(results)
+    # Architect-review regression case (PR #13 correction cycle 2).
+    case_40_authority_registration_gate(results)
 
     print("ADCOS multipath self-test (WORK-013)")
     print("=" * 72)
