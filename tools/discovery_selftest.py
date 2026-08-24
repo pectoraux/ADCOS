@@ -4,8 +4,9 @@
 Deterministic, offline verification of the discovery package against the
 frozen WORK-006 requirements (spec/prompts/WORK-006.md): the 20 required
 test cases plus serialization round-trips, WORK-003 envelope integration,
-adversarial provenance checks, seeded fuzz, and the configurable
-local-interface transport.
+adversarial provenance checks, seeded fuzz, the configurable
+local-interface transport (cycle 1), and the destination-scope
+enforcement (cycle 2).
 
 The central boundary is exercised throughout:
 
@@ -22,7 +23,9 @@ between two genuinely independent loopback IP endpoints
 (127.0.0.2 and 127.0.0.3) to prove two ADCOS nodes on the same local IP
 network can exchange a discovery observation — the same transport a
 Raspberry Pi / laptop / router would bind to a private LAN address in
-production.
+production. The destination-scope enforcement (cycle 2) is proven with a
+``_SendSpy`` that mechanically verifies no ``sendto()`` call is ever made
+to a public, multicast, malformed, or non-RFC-1918 destination.
 """
 
 from __future__ import annotations
@@ -200,6 +203,30 @@ def _find_free_local_port(bind_address: str) -> int:
         return s.getsockname()[1]  # type: ignore[no-any-return]
     finally:
         s.close()
+
+
+class _SendSpy:
+    """Minimal socket stand-in that records ``sendto()`` calls WITHOUT
+    actually transmitting — used to PROVE the destination scope check
+    happens BEFORE any ``sendto()`` call (the mechanical 'before
+    sendto' guarantee required by the Architect's cycle-2 review).
+
+    The spy replaces the real socket on a constructed transport (via
+    ``tx._sock = spy``). If the scope check is missing or bypassed, the
+    spy would record a call and the test would fail. For every refused
+    destination the spy MUST record zero calls; for every accepted
+    destination it MUST record exactly one call.
+    """
+
+    def __init__(self) -> None:
+        self.calls: List[Tuple[bytes, Tuple[Any, int]]] = []
+
+    def sendto(self, data: Any, to: Any) -> int:
+        self.calls.append((bytes(data), to))
+        return len(bytes(data))
+
+    def close(self) -> None:
+        pass
 
 
 # ---------------------------------------------------------------------------
@@ -468,6 +495,184 @@ def case_local_interface_transport_scope(results: List[Tuple[str, bool, str]]) -
 # ---------------------------------------------------------------------------
 # Required tests 3-5: authenticated observation; forged sender; NodeID mismatch
 # ---------------------------------------------------------------------------
+
+
+def case_loopback_transport_destination_scope(results: List[Tuple[str, bool, str]]) -> None:
+    """2c: the loopback transport refuses to sendto() any non-loopback
+    destination BEFORE the OS sees a sendto() call.
+
+    The bind check (cycle 1) refuses to bind a public address. This test
+    proves the SECOND safety boundary (cycle 2): a node bound safely to
+    a loopback address can never be made to send discovery traffic to a
+    public, RFC 1918, multicast, malformed, or non-RFC-1918 172.x
+    destination. The destination scope matches the transport's declared
+    scope EXACTLY — the loopback transport sends ONLY to loopback
+    destinations (127.0.0.0/8); even RFC 1918 private destinations are
+    refused (use ``LocalInterfaceUdpTransport`` for those).
+
+    A ``_SendSpy`` replaces the real socket on a constructed transport
+    to mechanically PROVE the scope check happens before sendto(): the
+    spy records zero calls for every refused destination and exactly one
+    call for every accepted destination.
+    """
+    port = _find_free_loopback_port()
+    tx = LoopbackUdpTransport(port=port)
+    spy = _SendSpy()
+    real_sock = tx._sock
+    tx._sock = spy  # type: ignore[assignment]  # test seam: real socket -> recording spy
+    try:
+        # Accepted destinations — loopback only (the transport's scope).
+        accepted = ("127.0.0.1", "127.0.0.2", "127.255.255.255")
+        accepted_ok = True
+        for addr in accepted:
+            spy.calls.clear()
+            tx.send(b"x", to=(addr, 9999))
+            if len(spy.calls) != 1 or spy.calls[0][1] != (addr, 9999):
+                accepted_ok = False
+                break
+        # Refused destinations — public, RFC 1918 (refused because the
+        # loopback transport is STRICT loopback), multicast, 172.x
+        # outside /12, malformed. Each refusal MUST be a
+        # TransportError with code "peer-address" AND the spy MUST
+        # record zero sendto calls (the mechanical 'before sendto'
+        # proof).
+        refused = (
+            # public
+            "8.8.8.8", "1.1.1.1", "203.0.113.1",
+            # RFC 1918 — refused because loopback transport is STRICT
+            # loopback (use LocalInterfaceUdpTransport for these)
+            "10.0.0.1", "172.16.0.1", "192.168.1.50",
+            # multicast
+            "224.0.0.1", "239.0.0.1",
+            # 172.x outside the 172.16.0.0/12 private block — public
+            "172.1.2.3", "172.15.0.1", "172.32.0.1",
+            # malformed
+            "not-an-ip", "", "172", "172.1", "256.0.0.1", "1.2.3.4.5",
+        )
+        refused_ok = True
+        refused_detail: List[str] = []
+        for addr in refused:
+            spy.calls.clear()
+            raised = False
+            code = None
+            try:
+                tx.send(b"x", to=(addr, 9999))
+            except TransportError as error:
+                raised = True
+                code = error.code
+            # Must raise with peer-address code AND zero sendto calls.
+            if not raised or code != "peer-address" or len(spy.calls) != 0:
+                refused_ok = False
+                refused_detail.append(
+                    "%s(raised=%r code=%r spy=%d)"
+                    % (addr, raised, code, len(spy.calls))
+                )
+        ok = accepted_ok and refused_ok
+        results.append((
+            "loopback-transport-destination-scope",
+            ok,
+            ("loopback transport sends only to loopback destinations; "
+             "%d accepted (sendto called once each); %d refused "
+             "(public/RFC1918/multicast/172.x-outside-/12/malformed) "
+             "with peer-address code and ZERO sendto calls (before-sendto "
+             "guarantee)" % (len(accepted), len(refused)))
+            if ok else "FAILED: accepted-ok=%r refused-ok=%r %s"
+                      % (accepted_ok, refused_ok, refused_detail[:3]),
+        ))
+    finally:
+        tx._sock = real_sock
+        tx.close()
+
+
+def case_local_interface_transport_destination_scope(results: List[Tuple[str, bool, str]]) -> None:
+    """2d: the configurable local-interface transport refuses to sendto()
+    any non-local (public/multicast/malformed/non-RFC-1918 172.x)
+    destination BEFORE the OS sees a sendto() call.
+
+    The bind check (cycle 1) refuses to bind a public address. This test
+    proves the SECOND safety boundary (cycle 2) for the production LAN
+    substrate: a node bound safely to a private/LAN address
+    (192.168.x / 10.x / 172.16-31.x — the same transport a
+    Pi/laptop/router would use on a real LAN) can never be made to send
+    discovery traffic to a public, multicast, malformed, or
+    non-RFC-1918 172.x destination. The destination scope matches the
+    transport's declared scope: loopback + RFC 1918 private destinations
+    are accepted; everything else is refused.
+
+    A ``_SendSpy`` replaces the real socket on a constructed transport
+    to mechanically PROVE the scope check happens before sendto(): the
+    spy records zero calls for every refused destination and exactly one
+    call for every accepted destination.
+    """
+    port = _find_free_loopback_port()
+    # Bound to 127.0.0.1 in the sandbox; the SAME transport class a
+    # Pi/laptop/router would bind to 192.168.x/10.x/172.16-31.x on a
+    # real LAN. The destination scope is independent of the bind
+    # address — the scope predicate is the same for both.
+    tx = LocalInterfaceUdpTransport(port=port, bind_address="127.0.0.1")
+    spy = _SendSpy()
+    real_sock = tx._sock
+    tx._sock = spy  # type: ignore[assignment]  # test seam: real socket -> recording spy
+    try:
+        # Accepted destinations — loopback + RFC 1918 private.
+        accepted = (
+            # loopback
+            "127.0.0.1", "127.0.0.2",
+            # RFC 1918 private
+            "10.0.0.1", "172.16.0.1", "172.31.255.255", "192.168.1.50",
+        )
+        accepted_ok = True
+        for addr in accepted:
+            spy.calls.clear()
+            tx.send(b"x", to=(addr, 9999))
+            if len(spy.calls) != 1 or spy.calls[0][1] != (addr, 9999):
+                accepted_ok = False
+                break
+        # Refused destinations — public, multicast, 172.x outside /12,
+        # malformed. Each refusal MUST be a TransportError with code
+        # "peer-address" AND the spy MUST record zero sendto calls.
+        refused = (
+            # public
+            "8.8.8.8", "1.1.1.1", "203.0.113.1",
+            # multicast
+            "224.0.0.1", "239.0.0.1",
+            # 172.x outside the 172.16.0.0/12 private block — public
+            "172.1.2.3", "172.15.0.1", "172.32.0.1",
+            # malformed
+            "not-an-ip", "", "172", "256.0.0.1", "1.2.3.4.5",
+        )
+        refused_ok = True
+        refused_detail: List[str] = []
+        for addr in refused:
+            spy.calls.clear()
+            raised = False
+            code = None
+            try:
+                tx.send(b"x", to=(addr, 9999))
+            except TransportError as error:
+                raised = True
+                code = error.code
+            if not raised or code != "peer-address" or len(spy.calls) != 0:
+                refused_ok = False
+                refused_detail.append(
+                    "%s(raised=%r code=%r spy=%d)"
+                    % (addr, raised, code, len(spy.calls))
+                )
+        ok = accepted_ok and refused_ok
+        results.append((
+            "local-interface-transport-destination-scope",
+            ok,
+            ("local-interface transport sends only to loopback + RFC1918 "
+             "destinations; %d accepted (sendto called once each); %d "
+             "refused (public/multicast/172.x-outside-/12/malformed) with "
+             "peer-address code and ZERO sendto calls (before-sendto "
+             "guarantee)" % (len(accepted), len(refused)))
+            if ok else "FAILED: accepted-ok=%r refused-ok=%r %s"
+                      % (accepted_ok, refused_ok, refused_detail[:3]),
+        ))
+    finally:
+        tx._sock = real_sock
+        tx.close()
 
 
 def case_authenticated_observation_accepted(results: List[Tuple[str, bool, str]]) -> None:
@@ -1254,6 +1459,8 @@ def main() -> int:
     case_no_upstream_internet_required(results)
     case_two_independent_endpoints_exchange_locally(results)
     case_local_interface_transport_scope(results)
+    case_loopback_transport_destination_scope(results)
+    case_local_interface_transport_destination_scope(results)
     case_authenticated_observation_accepted(results)
     case_forged_sender_identity_rejected(results)
     case_credential_nodeid_mismatch_rejected(results)

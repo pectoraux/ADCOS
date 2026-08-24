@@ -6,25 +6,39 @@ moves signed observation bytes. Three concrete transports are provided:
 ``LoopbackUdpTransport`` — a real UDP socket bound strictly to a
 loopback address (127.0.0.0/8). This is the deterministic-test
 substrate: it makes NO outbound Internet connection, and its bind scope
-is loopback only, so the name matches the behaviour exactly. Used by the
-deterministic local-discovery tests.
+is loopback only, so the name matches the behaviour exactly. Destinations
+are likewise restricted to loopback only (127.0.0.0/8) — a public,
+RFC 1918, multicast, or malformed destination is REFUSED at the scope
+stage BEFORE ``sendto()`` is ever called. Used by the deterministic
+local-discovery tests.
 
 ``LocalInterfaceUdpTransport`` — a real UDP socket bound to a
 CONFIGURABLE local interface address. This is the concrete IP-local
 discovery substrate a Raspberry Pi / laptop / router would use on a real
-LAN: it accepts loopback (127.0.0.0/8) OR RFC 1918 private ranges
-(10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16) and REFUSES every other
-address (no Internet binding). The bind address is operator-configured
-— the transport makes no access-technology decision (5G/Wi-Fi/6G/
-satellite/vendor names are forbidden in core discovery logic). The
-discovery contract above this transport is identical to the loopback
-case; future 6G/IMT-2030 access nodes use the same contract, their
-access details are capability/profile data.
+LAN: it accepts bind to loopback (127.0.0.0/8) OR RFC 1918 private
+ranges (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16) and REFUSES every
+other bind address (no Internet binding). Destinations are likewise
+restricted to the SAME scope (loopback + RFC 1918 private) — a public,
+multicast, malformed, or non-RFC-1918 172.x destination is REFUSED at
+the scope stage BEFORE ``sendto()`` is ever called. The bind address is
+operator-configured — the transport makes no access-technology decision
+(5G/Wi-Fi/6G/satellite/vendor names are forbidden in core discovery
+logic). The discovery contract above this transport is identical to the
+loopback case; future 6G/IMT-2030 access nodes use the same contract,
+their access details are capability/profile data.
 
 ``InMemoryTransportBus`` — an injectable, deterministic, no-socket
 message bus connecting multiple in-memory endpoints. Used by the
 convergence/replay/adversarial tests so results never depend on socket
-timing or OS scheduling.
+timing or OS scheduling. Routes only to previously-registered in-memory
+addresses; cannot egress to any real network.
+
+The two safety boundaries on the real-socket transports are MECHANICAL:
+(1) the bind address must pass the transport's scope predicate
+(``bind-address`` TransportError if not); (2) the destination address
+must pass the SAME scope predicate (``peer-address`` TransportError if
+not). A node bound safely to a private/LAN address can therefore never
+be made to send discovery traffic to a public/Internet destination.
 
 All real-socket transports move opaque bytes keyed by IP-local
 addresses; the discovery contract above them never sees the transport
@@ -45,11 +59,16 @@ class TransportError(ValueError):
     """Raised when a transport operation fails (fail closed).
 
     The first constructor argument is a short machine-readable ``code``
-    (e.g. ``"bind-address"``, ``"bind"``, ``"send"``, ``"recv"``); the
-    second is a human-readable detail. The ``code`` attribute lets
-    callers distinguish a scope-stage refusal (``bind-address``) from a
-    later OS-level bind failure (``bind``) — the safety guarantee that a
-    public address is REFUSED by scope, never by the OS.
+    (e.g. ``"bind-address"``, ``"peer-address"``, ``"bind"``, ``"send"``,
+    ``"recv"``); the second is a human-readable detail. The ``code``
+    attribute lets callers distinguish a scope-stage refusal
+    (``bind-address`` for an out-of-scope BIND address,
+    ``peer-address`` for an out-of-scope DESTINATION address) from a
+    later OS-level failure (``bind`` / ``send``) — the safety guarantee
+    that a public address is REFUSED by scope at BOTH the bind and the
+    send stage, never by the OS. A node bound safely to a private/LAN
+    address can therefore never be made to sendto() a public/Internet
+    destination.
     """
 
     def __init__(self, code: str, detail: str) -> None:
@@ -154,9 +173,13 @@ class DiscoveryTransport:
 
 class _UdpSocketTransport(DiscoveryTransport):
     """Common real-UDP-socket implementation shared by the loopback and
-    local-interface transports. Bind-scope validation is delegated to a
-    predicate supplied by the subclass; the transport itself never
-    branches on access technology."""
+    local-interface transports. Bind-scope AND destination-scope
+    validation are both delegated to a single predicate supplied by the
+    subclass; the transport itself never branches on access technology.
+    The same predicate guards the bind address (``bind-address`` code)
+    and the destination address (``peer-address`` code) — a node bound
+    safely to a private/LAN address can never be made to sendto() a
+    public/Internet destination."""
 
     def __init__(
         self,
@@ -189,6 +212,7 @@ class _UdpSocketTransport(DiscoveryTransport):
             ) from error
         self._sock = sock
         self._bind_address = bind_address
+        self._scope_predicate = scope_predicate
         self._scope_name = scope_name
 
     def send(self, data: bytes, *, to: Address) -> None:
@@ -196,6 +220,22 @@ class _UdpSocketTransport(DiscoveryTransport):
             raise TransportError("data", "data must be bytes")
         if not (isinstance(to, tuple) and len(to) == 2):
             raise TransportError("to", "to must be a (host, port) tuple")
+        # Destination/peer scope enforcement — the SECOND safety boundary.
+        # The bind check above refuses to bind a public address; this check
+        # refuses to sendto() a public/Internet/multicast/malformed
+        # destination BEFORE the OS ever sees a sendto() call. A node bound
+        # safely to a private/LAN address (192.168.x / 10.x / 172.16-31.x)
+        # can therefore never be made to egress discovery traffic to a
+        # public address. The destination scope MUST match the transport's
+        # declared scope (loopback transport -> loopback destinations only;
+        # local-interface transport -> loopback + RFC 1918 destinations).
+        peer_host = to[0]
+        if not isinstance(peer_host, str) or not self._scope_predicate(peer_host):
+            raise TransportError(
+                "peer-address",
+                "peer %r is not a %s address (no Internet egress)"
+                % (peer_host, self._scope_name),
+            )
         try:
             self._sock.sendto(bytes(data), to)
         except OSError as error:
@@ -233,12 +273,16 @@ class LoopbackUdpTransport(_UdpSocketTransport):
     """A real UDP socket bound STRICTLY to a loopback address
     (127.0.0.0/8) — the deterministic-test substrate.
 
-    Binds ONLY to loopback. Makes NO outbound Internet connection.
-    Suitable for deterministic local discovery tests on Linux/reference
-    platforms. No access-technology branching. The class name matches
-    the bind scope exactly: this transport refuses every non-loopback
-    address, including RFC 1918 private ranges (use
-    ``LocalInterfaceUdpTransport`` for those).
+    Binds ONLY to loopback AND sends ONLY to loopback destinations.
+    Makes NO outbound Internet connection. Suitable for deterministic
+    local discovery tests on Linux/reference platforms. No
+    access-technology branching. The class name matches the scope
+    exactly: this transport refuses every non-loopback BIND address
+    (``bind-address`` code, including RFC 1918 private ranges — use
+    ``LocalInterfaceUdpTransport`` for those) AND every non-loopback
+    DESTINATION address (``peer-address`` code, including RFC 1918,
+    public, multicast, and malformed destinations — refused BEFORE
+    ``sendto()`` is ever called).
     """
 
     def __init__(self, *, port: int = 0, bind_address: str = "127.0.0.1") -> None:
@@ -257,10 +301,14 @@ class LocalInterfaceUdpTransport(_UdpSocketTransport):
     real LAN.
 
     Accepts bind to loopback (127.0.0.0/8) OR any RFC 1918 private
-    range (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16). REFUSES every
-    other address — no Internet binding. The bind address is
-    operator-configured (e.g. ``192.168.1.50`` on a Pi, ``10.0.0.5`` on
-    a laptop); the transport makes no access-technology decision.
+    range (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16) and sends only to
+    destinations in the SAME scope. REFUSES every other BIND address
+    (``bind-address`` code — no Internet binding) AND every other
+    DESTINATION address (``peer-address`` code — public, multicast,
+    malformed, non-RFC-1918 172.x destinations are refused BEFORE
+    ``sendto()`` is ever called). The bind address is operator-configured
+    (e.g. ``192.168.1.50`` on a Pi, ``10.0.0.5`` on a laptop); the
+    transport makes no access-technology decision.
 
     Pair this transport with a configured peer address (the
     "configured neighbor seed" pattern explicitly permitted by the

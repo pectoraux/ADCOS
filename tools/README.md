@@ -245,7 +245,7 @@ python3 tools/capability_selftest.py
 
 ## discovery_selftest.py — peer discovery tests (WORK-006)
 
-Deterministic, offline verification of the discovery package against the frozen WORK-006 requirements (spec/prompts/WORK-006.md): the 20 required adversarial/convergence/replay/freshness tests plus serialization/envelope round-trip, freshness matrix, seeded fuzz, and the configurable local-interface transport. The local-discovery transport tests use real UDP sockets bound to loopback addresses (127.0.0.0/8) only — no external network access is permitted or required; the configurable `LocalInterfaceUdpTransport` is proven between two genuinely independent loopback IP endpoints (127.0.0.2 / 127.0.0.3) and its scope validated for every RFC 1918 private range.
+Deterministic, offline verification of the discovery package against the frozen WORK-006 requirements (spec/prompts/WORK-006.md): the 20 required adversarial/convergence/replay/freshness tests plus serialization/envelope round-trip, freshness matrix, seeded fuzz, the configurable local-interface transport (cycle 1), and the destination-scope enforcement (cycle 2). The local-discovery transport tests use real UDP sockets bound to loopback addresses (127.0.0.0/8) only — no external network access is permitted or required; the configurable `LocalInterfaceUdpTransport` is proven between two genuinely independent loopback IP endpoints (127.0.0.2 / 127.0.0.3), its bind scope validated for every RFC 1918 private range, AND its destination-scope enforcement proven with a `_SendSpy` that records zero `sendto()` calls for every refused destination (public, multicast, malformed, non-RFC-1918 172.x).
 
 ```bash
 python3 tools/discovery_selftest.py
@@ -259,6 +259,8 @@ python3 tools/discovery_selftest.py
 | `no-upstream-internet-required` | loopback binds 127.0.0.1; no outbound Internet; non-private bind refused (2) |
 | `two-independent-endpoints-exchange-locally` | two `LocalInterfaceUdpTransport` on 127.0.0.2 / 127.0.0.3 bidirectionally exchange a signed discovery observation — the same transport a Pi/laptop/router binds to a private LAN address (2a) |
 | `local-interface-transport-scope` | `LocalInterfaceUdpTransport` accepts loopback + RFC1918 private; refuses public/Internet incl. 172.x outside /12 at the scope stage (2b) |
+| `loopback-transport-destination-scope` | `LoopbackUdpTransport` sends only to loopback destinations; public/RFC1918/multicast/malformed destinations refused with `peer-address` code and ZERO `sendto()` calls (2c — cycle 2) |
+| `local-interface-transport-destination-scope` | `LocalInterfaceUdpTransport` sends only to loopback + RFC1918 destinations; public/multicast/malformed/non-RFC1918 172.x refused with `peer-address` code and ZERO `sendto()` calls (2d — cycle 2) |
 | `authenticated-observation-accepted` | valid signature + provenance + ACTIVE credential -> accepted (3) |
 | `forged-sender-identity-rejected` | B's signature on an observation naming A -> verification-failed (4) |
 | `credential-nodeid-mismatch-rejected` | A's valid signature verified with B's credential -> NodeID mismatch -> rejected (5) |

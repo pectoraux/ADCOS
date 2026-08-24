@@ -82,15 +82,23 @@ discovery/
   refreshed. No global anti-replay database; local bounded state only.
 - **Upstream-independent operation**: `LoopbackUdpTransport` binds STRICTLY
   to 127.0.0.0/8 (the deterministic-test substrate, refuses every
-  non-loopback address including private ranges). `LocalInterfaceUdpTransport`
-  is the configurable production substrate — accepts loopback OR any RFC 1918
-  private range (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16) and REFUSES
-  every public/Internet address at the scope stage; a Pi/laptop/router
-  binds it to its LAN address and pairs it with a configured peer address
-  (the "configured neighbor seed" pattern). Neither transport makes an
-  outbound Internet connection. Bootstrap assistance is additive — its
-  failure does NOT disable local discovery. A bootstrap node is NOT a
-  trusted authority.
+  non-loopback address including private ranges) AND sends only to
+  loopback destinations. `LocalInterfaceUdpTransport` is the configurable
+  production substrate — accepts bind to loopback OR any RFC 1918 private
+  range (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16) and sends only to
+  destinations in the same scope. Both transports enforce TWO mechanical
+  safety boundaries with the SAME scope predicate: (1) the BIND address
+  must pass it (`bind-address` `TransportError`); (2) the DESTINATION
+  address must pass it (`peer-address` `TransportError`) BEFORE
+  `sendto()` is ever called. A node bound safely to a private/LAN
+  address can therefore never be made to egress discovery traffic to a
+  public/Internet destination — public, multicast, malformed, and
+  non-RFC-1918 172.x destinations are refused at the scope stage. A
+  Pi/laptop/router binds `LocalInterfaceUdpTransport` to its LAN address
+  and pairs it with a configured peer address (the "configured neighbor
+  seed" pattern). Neither transport makes an outbound Internet
+  connection. Bootstrap assistance is additive — its failure does NOT
+  disable local discovery. A bootstrap node is NOT a trusted authority.
 - **Envelope integration**: the discovery observation travels under an
   unregistered `discovery.observe` envelope message_type — forwarded
   opaquely by WORK-003's UNKNOWN_TYPE policy (same boundary decision as
@@ -100,7 +108,7 @@ discovery/
 ## Verification
 
 ```bash
-python3 tools/discovery_selftest.py   # 25 deterministic cases (20 required)
+python3 tools/discovery_selftest.py   # 27 deterministic cases (20 required)
 ```
 
 CI runs this suite with all prior suites. All key material is TEST-ONLY;
@@ -108,7 +116,9 @@ all clocks are injected; seeded PRNGs make runs byte-identical. The
 local-discovery transport tests use real UDP sockets bound to loopback
 addresses (127.0.0.0/8) only — no external network access is permitted or
 required. The configurable `LocalInterfaceUdpTransport` is proven between
-two genuinely independent loopback IP endpoints (127.0.0.2 / 127.0.0.3)
-and its scope is validated for every RFC 1918 private range — the same
-transport a Raspberry Pi / laptop / router would bind to a private LAN
-address in production.
+two genuinely independent loopback IP endpoints (127.0.0.2 / 127.0.0.3),
+its bind scope is validated for every RFC 1918 private range, AND its
+destination-scope enforcement is proven with a `_SendSpy` that records
+zero `sendto()` calls for every refused destination (public, multicast,
+malformed, non-RFC-1918 172.x) — the same transport a Raspberry Pi /
+laptop / router would bind to a private LAN address in production.
