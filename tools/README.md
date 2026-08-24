@@ -281,3 +281,48 @@ python3 tools/discovery_selftest.py
 | `repeated-runs-byte-identical` | two independent builds produce byte-identical snapshot + signature input + observation_id (20) |
 | `envelope-roundtrip-opaque-forward` | canonical round-trip byte-stable; duplicate keys rejected; WORK-003 envelope (unregistered discovery.observe type) forwarded opaquely; compact codec stable (round-trip) |
 | `freshness-matrix-and-local-replay-state` | fresh/stale/future/boundary distinct; replay defense is per-sender watermark, no global anti-replay database |
+
+## topology_selftest.py — evidence-aware topology tests (WORK-007)
+
+Deterministic, offline verification of the topology package against the frozen WORK-007 requirements (`spec/prompts/WORK-007.md`): the 28 required adversarial/provenance/convergence tests plus a canonical envelope round-trip, a frozen-dimensions presence check, and a no-5G/6G/vendor-imports mechanical check. The central boundary exercised throughout is the independence of identity / advertisement / reachability / link dimensions and the mechanical provenance-collapse prevention (`A says "C is a gateway"` is stored as `reporter=A, subject=C, source_class=REMOTE_CLAIM` and never becomes an authoritative `C.gateway=true`). `get_authoritative_claims(subject)` returns only self-attributed claims, so a remote summary can never enter the authoritative set. All key material is TEST-ONLY; all clocks are injected; all PRNGs are seeded; no external network access is required.
+
+```bash
+python3 tools/topology_selftest.py
+```
+
+### Case catalog
+
+| Case | Verifies (required-test numbers) |
+|---|---|
+| `01-discovery-ingests-as-provenance-bearing-claim` | discovery observation -> discovered + identity/present claims; reporter=sender, source=DIRECT_OBSERVATION, provenance=observation_id; capability refs stay opaque data (no self-advertisement) (1) |
+| `02-identity-independent-from-advertisement` | identity=KNOWN, advertisement=STALE simultaneously (independent dimensions) (2) |
+| `03-advertisement-independent-from-reachability` | advertisement=CURRENT, reachability=UNREACHABLE simultaneously (3) |
+| `04-link-independent-from-advertisement-freshness` | link=UP, advertisement=STALE (link independent from advertisement freshness) (4) |
+| `05-stale-advertisement-historical-not-current` | fresh->CURRENT, stale->STALE; claim retained & queryable but not in current_observations (5) |
+| `06-removed-identity-not-resurrected-by-replay` | self present(seq1)->removed(seq2); replay seq1 rejected by watermark; identity=REMOVED; present retained as historical (6) |
+| `07-exact-duplicate-idempotent` | same claim twice -> second idempotent; graph size unchanged (7) |
+| `08-arrival-order-byte-identical` | snapshot bytes identical across 3 insertion orders (8) |
+| `09-newer-supersedes-older` | head seq=3; seq=1 retained as historical (9) |
+| `10-conflicting-same-sequence-preserved` | both conflicting same-seq claims retained; no arrival-order winner; current head conflicted (10) |
+| `11-two-reporters-both-retained` | A and B gateway claims about C both retained with provenance (11) |
+| `12-self-advertisement-and-remote-claim-distinct` | self (SELF) + remote (REMOTE) both stored; authoritative set contains only the self claim (12) |
+| `13-remote-gateway-not-authoritative` | A->C gateway stored as REMOTE_CLAIM (reporter=A); authoritative set empty (13) |
+| `14-remote-reachable-not-global-truth` | A->C reachable stored as DIRECT_OBSERVATION; derived state REACHABLE but provenance preserved; no authoritative self-claim (14) |
+| `15-remote-advertises-not-self-advertisement` | A->C advertises stored as REMOTE_CLAIM; C's self-advertisement set empty (15) |
+| `16-remote-backhaul-reporter-derived` | A->C backhaul stored as REMOTE_CLAIM (reporter=A); authoritative set empty (16) |
+| `17-valid-self-advertisement-attributable` | C self-advertises multipath -> authoritative claim (reporter=C, SELF) (17) |
+| `18-tampered-signature-rejected` | tampered observation signature -> verification-failed at ingest (18) |
+| `19-reporter-credential-mismatch-rejected` | verify with B's credential on A's observation -> verification-failed (19) |
+| `20-stale-replayed-highvalue-cannot-refresh` | fresh->current, stale->not current; replay idempotent (no refresh); authoritative empty (20) |
+| `21-bootstrap-claim-not-direct-evidence` | bootstrap-sourced observation -> BOOTSTRAP_CLAIM (not DIRECT_OBSERVATION); not self-attribution (21) |
+| `22-link-up-stale-advertisement-representable` | advertisement=STALE, link=UP representable (22) |
+| `23-advert-current-link-down-representable` | advertisement=CURRENT, link=DOWN representable (23) |
+| `24-partition-recovery-convergence-deterministic` | snapshot byte-identical across replay + reorder reconciliation (24) |
+| `25-future-access-identifiers-as-data` | future access id stored as opaque capability value; no 5g/6g/lte/wifi/satellite/imt-2030 branching (25) |
+| `26-no-forbidden-trust-routing-resource-fields` | no best_path/next_hop/gateway_for_destination/preferred_peer/route_score methods; no trust/reputation/authorization/route/resource fields on result types (26) |
+| `27-seeded-fuzz-no-crash` | 256 fuzz rounds x 8 mutated claims; ingestion/query/snapshot never crash (27) |
+| `28-repeated-runs-byte-identical` | 5 independent builds of the same evidence -> identical canonical bytes (28) |
+| `envelope-roundtrip-opaque-forward` | claim canonical round-trip byte-stable; duplicate keys rejected; WORK-003 envelope (unregistered topology.observe type) forwarded opaquely; compact codec stable |
+| `frozen-dimensions-present` | identity/advertisement/reachability/link + source-class enums match frozen value sets (LOCK-009) |
+| `no-5g-6g-vendor-sdk-imports` | topology source has no 5G/6G/vendor SDK imports |
+

@@ -39,3 +39,6 @@ jobs:
 
       - name: Run peer discovery tests
         run: python3 tools/discovery_selftest.py
+
+      - name: Run evidence-aware topology tests
+        run: python3 tools/topology_selftest.py
