@@ -441,7 +441,49 @@ class NormalizedIntent:
     digest: str
     extensions: Tuple[Mapping[str, Any], ...] = field(default=())
 
+    def content_dict(self) -> dict:
+        """Return the canonical *content* dict -- the dict over which the
+        ``digest`` is computed, deliberately EXCLUDING the ``digest`` field.
+
+        A content fingerprint that included itself would be circular and
+        unsatisfiable (no fixed point exists in general for SHA-256). The
+        digest is therefore defined as a pure function of content:
+
+            digest = sha256(canonical_json_bytes(content_dict()))
+
+        Callers MAY recompute the digest from the public canonical
+        representation via :meth:`canonical_bytes` (see below). The
+        ``content_dict`` is the explicit, single source of truth for that
+        representation: ``canonical_bytes()`` returns
+        ``canonical_json_bytes(content_dict())``.
+
+        Field set (never includes ``digest``): ``intent_id``, optional
+        ``requester_node_id`` / ``issued_at`` / ``expires_at``, the
+        canonicalized ``constraints`` list, and optional ``extensions``.
+        Optional empty fields are omitted; absent members are never emitted
+        as null. Order is deterministic via ``canonical_json_bytes``.
+        """
+        out: dict = {"intent_id": self.intent_id}
+        if self.requester_node_id:
+            out["requester_node_id"] = self.requester_node_id
+        if self.issued_at:
+            out["issued_at"] = self.issued_at
+        if self.expires_at:
+            out["expires_at"] = self.expires_at
+        out["constraints"] = [c.to_dict() for c in self.constraints]
+        if self.extensions:
+            out["extensions"] = [dict(item) for item in self.extensions]
+        return out
+
     def to_dict(self) -> dict:
+        """Return the serialized dict form, INCLUDING the ``digest`` field
+        for storage / transmission convenience.
+
+        This is NOT the representation over which the digest is computed --
+        use :meth:`content_dict` (or :meth:`canonical_bytes`) for that. The
+        digest field is metadata about the content, not part of the content
+        itself; including it in the digest input would be circular.
+        """
         out: dict = {
             "intent_id": self.intent_id,
             "digest": self.digest,
@@ -458,12 +500,24 @@ class NormalizedIntent:
         return out
 
     def canonical_bytes(self) -> bytes:
-        """Return the canonical JSON bytes (UTF-8) used to derive the digest.
+        """Return the canonical JSON bytes (UTF-8) over which the ``digest``
+        was computed.
+
+        Public invariant (callers MAY rely on this):
+
+            sha256(canonical_bytes()) == self.digest
+
+        This returns ``canonical_json_bytes(content_dict())`` -- i.e. the
+        canonical bytes of the *content* representation, which deliberately
+        excludes the ``digest`` field (a content fingerprint that included
+        itself would be circular and unsatisfiable). Use :meth:`to_dict` for
+        the full serialized form (which carries the digest for storage /
+        transmission convenience).
 
         Always succeeds for a NormalizedIntent (validated at construction).
         """
         try:
-            return canonical_json_bytes(self.to_dict())
+            return canonical_json_bytes(self.content_dict())
         except CanonicalizationError as error:  # pragma: no cover - defensive
             raise IntentError(
                 "canonical",

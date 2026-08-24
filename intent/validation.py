@@ -134,9 +134,21 @@ def validate_constraint(constraint: Constraint) -> None:
 # --------------------------------------------------------------------------
 
 #: Constraint fields that define "same semantic meaning". Two constraints
-#: with the same (dimension, operator, value, unit, scope) but different
-#: constraint_ids create ambiguity (which one wins?). They MUST be deduped
-#: by the caller or rejected by normalization (rule 10).
+#: with the same (dimension, operator, CANONICAL value, CANONICAL unit,
+#: scope) but different constraint_ids create ambiguity (which one wins?).
+#: They MUST be deduped by the caller or rejected by normalization
+#: (rule 10).
+#:
+#: IMPORTANT: the semantic key is computed over the *canonical* (base-unit)
+#: form, NOT the raw input form, so equivalent units (``1 Mbps`` and
+#: ``1000 kbps``) produce the same key and are detected as duplicates
+#: *before* canonicalization downstream. If duplicate detection ran on
+#: raw input units, ``1 Mbps`` and ``1000 kbps`` would look distinct,
+#: pass the check, and then both normalize to ``1_000_000 bps`` --
+#: producing duplicate canonical constraints instead of failing closed
+#: (Architect blocker on PR #9). Canonicalizing units here, before the
+#: duplicate-semantic check, restores fail-closed semantics for
+#: equivalent-unit pairs.
 _SEMANTIC_KEY_FIELDS = (
     "dimension",
     "operator",
@@ -146,12 +158,65 @@ _SEMANTIC_KEY_FIELDS = (
 )
 
 
-def _semantic_key(constraint: Constraint) -> tuple:
-    return tuple(getattr(constraint, f) for f in _SEMANTIC_KEY_FIELDS)
+def _canonical_semantic_key(constraint: Constraint) -> tuple:
+    """Return the *canonical* semantic key for duplicate detection.
+
+    Units are resolved to their base form (via :func:`resolve_unit`) so
+    equivalent inputs (``1 Mbps`` vs ``1000 kbps``) collapse to the same
+    key and are detected as duplicates here, BEFORE normalization. This
+    is the fail-closed fix for the equivalent-unit-duplicate bypass
+    (Architect blocker on PR #9): without canonicalization at this
+    stage, distinct raw units would pass the duplicate check and then
+    normalize to identical canonical constraints, producing duplicate
+    canonical constraints instead of failing closed.
+
+    For label dimensions (locality / privacy / service), the value is a
+    non-empty string and the unit is the empty string; the canonical key
+    is ``(dimension, operator, value_str, "", scope)``.
+
+    For numeric dimensions, the canonical value is ``value * multiplier``
+    (an exact integer in the base unit) and the canonical unit is the
+    base-unit name returned by ``resolve_unit``. The key is
+    ``(dimension, operator, canonical_value_int, base_unit, scope)``.
+
+    This function assumes per-constraint validation has already run (it
+    is called from :func:`validate_constraint_set`, which runs after
+    :func:`validate_constraint`). Units are therefore already known-good;
+    ``resolve_unit`` will not raise for a validated constraint. If it
+    somehow does, the IntentError propagates as a fail-closed signal.
+    """
+    if _is_label_dimension(constraint.dimension):
+        # Label dimension: value is a non-empty string, unit is empty.
+        return (
+            constraint.dimension,
+            constraint.operator,
+            constraint.value,  # string label, already canonical
+            "",  # base unit for label dimensions
+            constraint.scope,
+        )
+    # Numeric dimension: resolve to base unit + integer multiplier.
+    # value is an int here (Constraint constructor enforces int-or-str and
+    # rejects bool/float; label path handled above).
+    base_unit, multiplier = resolve_unit(constraint.dimension, constraint.unit)
+    canonical_value = constraint.value * multiplier  # type: ignore[operator]
+    return (
+        constraint.dimension,
+        constraint.operator,
+        canonical_value,
+        base_unit,
+        constraint.scope,
+    )
 
 
 def validate_constraint_set(constraints) -> None:
-    """Reject duplicate constraint_ids and ambiguous semantic duplicates."""
+    """Reject duplicate constraint_ids and ambiguous semantic duplicates.
+
+    Duplicate-semantic detection runs over the *canonical* (base-unit)
+    semantic key so that equivalent-unit pairs (``1 Mbps`` and
+    ``1000 kbps``) collide here and fail closed, rather than slipping
+    through and producing duplicate canonical constraints downstream
+    (Architect blocker on PR #9).
+    """
     # 1. Duplicate constraint_id (any bucket): ambiguity, fail closed.
     seen_ids: dict = {}
     for c in constraints:
@@ -163,21 +228,26 @@ def validate_constraint_set(constraints) -> None:
                 "within an intent)" % c.constraint_id,
             )
         seen_ids[c.constraint_id] = c
-    # 2. Two constraints with the same semantic key (dimension/operator/
-    #    value/unit/scope) but different hardness or weight: ambiguity.
-    #    The prompt says "duplicate constraints that create ambiguity fail
-    #    closed" -- this catches the most common case.
+    # 2. Two constraints with the same CANONICAL semantic key (dimension /
+    #    operator / base-value / base-unit / scope) but different hardness
+    #    or weight: ambiguity. Equivalent-unit pairs (1 Mbps / 1000 kbps)
+    #    collide here because the key is computed over the canonical
+    #    base-unit form. The prompt says "duplicate constraints that create
+    #    ambiguity fail closed" -- this catches the most common case AND
+    #    the equivalent-unit bypass (Architect blocker on PR #9).
     seen_semantic: dict = {}
     for c in constraints:
-        key = _semantic_key(c)
+        key = _canonical_semantic_key(c)
         if key in seen_semantic:
             prev = seen_semantic[key]
             if (prev.hardness, prev.weight) != (c.hardness, c.weight):
                 raise IntentError(
                     "duplicate-semantic",
-                    "constraints %r and %r have the same (dimension, operator, "
-                    "value, unit, scope) but different hardness/weight -- "
-                    "ambiguous intent" % (prev.constraint_id, c.constraint_id),
+                    "constraints %r and %r have the same canonical "
+                    "(dimension, operator, base-value, base-unit, scope) "
+                    "but different hardness/weight -- ambiguous intent "
+                    "(equivalent units collapse to the same canonical form)"
+                    % (prev.constraint_id, c.constraint_id),
                 )
             # If hardness/weight also match, this is a true duplicate; the
             # first one wins (idempotent). The constraint_id differs so
@@ -185,8 +255,10 @@ def validate_constraint_set(constraints) -> None:
             # constraints is still an ambiguity (which ID is authoritative?).
             raise IntentError(
                 "duplicate-semantic",
-                "constraints %r and %r are semantically identical -- "
-                "ambiguous intent (use one constraint_id)" % (prev.constraint_id, c.constraint_id),
+                "constraints %r and %r are canonically identical "
+                "(equivalent units / values collapse to the same base form) "
+                "-- ambiguous intent (use one constraint_id)"
+                % (prev.constraint_id, c.constraint_id),
             )
         seen_semantic[key] = c
 
@@ -218,4 +290,7 @@ __all__ = [
     "validate_constraint",
     "validate_constraint_set",
     "validate_intent",
+    # ``_canonical_semantic_key`` is exported so the self-test and future
+    # tooling can assert the canonical-key contract directly.
+    "_canonical_semantic_key",
 ]

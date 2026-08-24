@@ -22,11 +22,16 @@ Normalization MUST NEVER:
 - consult a wall clock (rule 14 -- any time-dependent logic uses an
   injected instant).
 
-The digest is ``sha256(canonical_json_bytes(NormalizedIntent.to_dict()))``
+The digest is ``sha256(canonical_json_bytes(NormalizedIntent.content_dict()))``
 (truncated to 64 lowercase hex chars, matching WORK-008's id-derivation
-convention). The digest is content-derived: it never competes with
-``intent_id`` as an identity authority, and the intent layer does not
-create a second NodeID-style authority.
+convention). The ``content_dict`` deliberately excludes the ``digest``
+field: a content fingerprint that included itself would be circular and
+unsatisfiable. The public :meth:`NormalizedIntent.canonical_bytes`
+returns ``canonical_json_bytes(content_dict())`` so callers can
+recompute the digest and verify the invariant
+``sha256(canonical_bytes()) == digest``. The digest is content-derived:
+it never competes with ``intent_id`` as an identity authority, and the
+intent layer does not create a second NodeID-style authority.
 """
 
 from __future__ import annotations
@@ -225,7 +230,7 @@ def normalize_intent(intent: ConnectivityIntent) -> NormalizationResult:
               / ``expires_at`` as the input;
             * ``constraints`` sorted in canonical deterministic order
               (regardless of insertion order in the input buckets);
-            * ``digest`` = ``sha256(canonical_json_bytes(to_dict()))``;
+            * ``digest`` = ``sha256(canonical_json_bytes(content_dict()))``;
             * ``extensions`` preserved verbatim (WORK-003 opaque extensions).
 
     On failure:
@@ -258,29 +263,29 @@ def normalize_intent(intent: ConnectivityIntent) -> NormalizationResult:
         _canonical_constraint(c) for c in intent.all_constraints()
     )
     canonical_constraints = _canonical_constraint_order(canonical_constraints)
-    # Build the NormalizedIntent. The digest is computed over the canonical
-    # dict form so equivalent intents always produce the same digest.
+    # Build the NormalizedIntent. The digest is computed over the
+    # canonical *content* representation (``content_dict`` -- the dict
+    # WITHOUT the digest field, since a content fingerprint that included
+    # itself would be circular and unsatisfiable). The public
+    # ``NormalizedIntent.canonical_bytes()`` returns the same bytes, so
+    # callers can recompute the digest and verify
+    # ``sha256(canonical_bytes()) == digest``.
     normalized = NormalizedIntent(
         intent_id=intent.intent_id,
         requester_node_id=intent.requester_node_id,
         issued_at=intent.issued_at,
         expires_at=intent.expires_at,
         constraints=canonical_constraints,
-        digest="",  # filled in below
+        digest="",  # placeholder; filled in below from content_dict()
         extensions=intent.extensions,
     )
-    # Use the to_dict() form (without digest) for digest computation, then
-    # construct the final NormalizedIntent with the digest filled in.
-    digest_payload = {
-        "intent_id": normalized.intent_id,
-        "requester_node_id": normalized.requester_node_id,
-        "issued_at": normalized.issued_at,
-        "expires_at": normalized.expires_at,
-        "constraints": [c.to_dict() for c in canonical_constraints],
-        "extensions": [dict(e) for e in normalized.extensions],
-    }
+    # Compute the digest from the single source of truth: content_dict().
+    # This MUST be the same representation exposed by
+    # NormalizedIntent.canonical_bytes() (which returns
+    # canonical_json_bytes(content_dict())) so the public invariant
+    # ``sha256(canonical_bytes()) == digest`` holds.
     try:
-        digest = _compute_digest(digest_payload)
+        digest = _compute_digest(normalized.content_dict())
     except IntentError as error:
         return NormalizationResult(
             ok=False,

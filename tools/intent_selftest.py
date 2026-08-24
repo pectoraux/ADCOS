@@ -504,19 +504,28 @@ def case_16_deterministic_digest(results: List[Result]) -> None:
         results.append(fail("case_16_deterministic_digest", "digests differ across runs: %s vs %s" % (r1.intent.digest, r2.intent.digest)))
         return
     ni = r1.intent
-    # Manually reconstruct the digest payload (without the digest field) and
-    # verify the digest matches sha256(canonical_json_bytes(payload)).
-    expected_payload = {
-        "intent_id": ni.intent_id,
-        "requester_node_id": ni.requester_node_id,
-        "issued_at": ni.issued_at,
-        "expires_at": ni.expires_at,
-        "constraints": [c.to_dict() for c in ni.constraints],
-        "extensions": [dict(e) for e in ni.extensions],
-    }
+    # Independently reconstruct the digest content payload (without the
+    # digest field) and verify the digest matches
+    # sha256(canonical_json_bytes(payload)). The content representation
+    # omits empty optional fields (requester_node_id / issued_at /
+    # expires_at / extensions), matching NormalizedIntent.content_dict()
+    # -- the explicit single source of truth for the digest input
+    # (Architect PR #9 blocker fix). This reconstruction is built from
+    # scratch (it does NOT call content_dict()) so it is an independent
+    # cross-check, not a tautology.
+    expected_payload: dict = {"intent_id": ni.intent_id}
+    if ni.requester_node_id:
+        expected_payload["requester_node_id"] = ni.requester_node_id
+    if ni.issued_at:
+        expected_payload["issued_at"] = ni.issued_at
+    if ni.expires_at:
+        expected_payload["expires_at"] = ni.expires_at
+    expected_payload["constraints"] = [c.to_dict() for c in ni.constraints]
+    if ni.extensions:
+        expected_payload["extensions"] = [dict(e) for e in ni.extensions]
     expected = hashlib.sha256(canonical_json_bytes(expected_payload)).hexdigest()
     if ni.digest == expected and not ni.digest.startswith("adcos:node:"):
-        results.append(ok("case_16_deterministic_digest", "digest = sha256(canonical_json(payload)); no second identity authority"))
+        results.append(ok("case_16_deterministic_digest", "digest = sha256(canonical_json(content)); no second identity authority"))
     else:
         results.append(fail("case_16_deterministic_digest", "digest mismatch: stored=%s computed=%s starts_with_node=%r" % (ni.digest, expected, ni.digest.startswith("adcos:node:"))))
 
@@ -1209,6 +1218,207 @@ def case_43_intent_id_required(results: List[Result]) -> None:
     results.append(ok("case_43_intent_id_required", "empty/None/int intent_id rejected"))
 
 
+def case_44_digest_recomputable_from_public_canonical_bytes(results: List[Result]) -> None:
+    """44. PUBLIC digest invariant: ``sha256(canonical_bytes()) == digest``.
+
+    Architect blocker on PR #9: ``normalize_intent()`` computed the digest
+    over a dict that EXCLUDED the ``digest`` field, but
+    ``NormalizedIntent.canonical_bytes()`` returned
+    ``canonical_json_bytes(to_dict())`` which INCLUDED the ``digest`` field.
+    The documented content fingerprint therefore could not be recomputed
+    from the public canonical representation -- a caller using
+    ``canonical_bytes()`` would get a different SHA-256 than ``digest``.
+
+    Fix: ``canonical_bytes()`` now returns ``canonical_json_bytes(
+    content_dict())`` where ``content_dict()`` is the explicit content
+    representation (no ``digest`` field). The public invariant
+    ``sha256(canonical_bytes()) == digest`` MUST hold for every normalized
+    intent -- callers rely on it to recompute the fingerprint without
+    reaching into private normalization internals.
+    """
+    from protocol.canonicalization import canonical_json_bytes
+
+    # Several distinct shapes, to prove the invariant holds generally (not
+    # just for the minimal single-constraint case).
+    c_bw = base_constraint(constraint_id="bw", value=10, unit="Mbps")
+    c_lat = Constraint(
+        constraint_id="lat", dimension=IntentDimension.LATENCY,
+        operator=Operator.LE, value=50, unit="ms", hardness=Hardness.HARD,
+    )
+    c_priv = Constraint(
+        constraint_id="priv", dimension=IntentDimension.PRIVACY,
+        operator=Operator.EQ, value="end-to-end", hardness=Hardness.HARD,
+    )
+    c_serv = Constraint(
+        constraint_id="svc", dimension=IntentDimension.SERVICE,
+        operator=Operator.EQ, value="voice", hardness=Hardness.HARD,
+    )
+    c_loc = Constraint(
+        constraint_id="loc", dimension=IntentDimension.LOCALITY,
+        operator=Operator.EQ, value="GH", hardness=Hardness.SOFT, weight=10,
+    )
+    shapes: List = [
+        ("minimal", base_intent(intent_id="iv-1", constraints=(c_bw,))),
+        ("temporal+requester", ConnectivityIntent(
+            intent_id="iv-2", requester_node_id=_TEST_NODE_ID,
+            issued_at="2026-01-01T00:00:00Z", expires_at="2026-12-31T23:59:59Z",
+            requirements=(c_bw, c_lat),
+        )),
+        ("extensions", base_intent(
+            intent_id="iv-3", constraints=(c_bw,),
+            extensions=({"x-tag": "rt", "profile": "v1"},),
+        )),
+        ("mixed-buckets", ConnectivityIntent(
+            intent_id="iv-4", requirements=(c_bw, c_priv),
+            preferences=(c_loc,), service_constraints=(c_serv,),
+        )),
+    ]
+    for label, i in shapes:
+        r = normalize_intent(i)
+        if not r.ok or r.intent is None:
+            results.append(fail(
+                "case_44_digest_recomputable_from_public_canonical_bytes",
+                "shape %r failed to normalize: ok=%r code=%r" % (label, r.ok, r.code),
+            ))
+            return
+        ni = r.intent
+        cb = ni.canonical_bytes()
+        recomputed = hashlib.sha256(cb).hexdigest()
+        # The core public invariant.
+        if recomputed != ni.digest:
+            results.append(fail(
+                "case_44_digest_recomputable_from_public_canonical_bytes",
+                "shape %r: sha256(canonical_bytes())=%s != digest=%s"
+                % (label, recomputed[:12], ni.digest[:12]),
+            ))
+            return
+        # canonical_bytes() MUST be the content representation (no digest).
+        # to_dict() DOES carry the digest (storage form). Both explicit.
+        content = ni.content_dict()
+        if "digest" in content:
+            results.append(fail(
+                "case_44_digest_recomputable_from_public_canonical_bytes",
+                "shape %r: content_dict() must not carry digest" % label,
+            ))
+            return
+        stored = ni.to_dict()
+        if "digest" not in stored or stored["digest"] != ni.digest:
+            results.append(fail(
+                "case_44_digest_recomputable_from_public_canonical_bytes",
+                "shape %r: to_dict() must carry the digest" % label,
+            ))
+            return
+        # Single source of truth: canonical_bytes() == canonical_json_bytes(content_dict()).
+        if cb != canonical_json_bytes(content):
+            results.append(fail(
+                "case_44_digest_recomputable_from_public_canonical_bytes",
+                "shape %r: canonical_bytes() != canonical_json_bytes(content_dict())"
+                % label,
+            ))
+            return
+    results.append(ok(
+        "case_44_digest_recomputable_from_public_canonical_bytes",
+        "sha256(canonical_bytes())==digest for all %d shapes; content_dict/to_dict explicit"
+        % len(shapes),
+    ))
+
+
+def case_45_equivalent_unit_duplicates_fail_closed(results: List[Result]) -> None:
+    """45. Equivalent-unit duplicates MUST fail closed (Architect PR #9 blocker).
+
+    ``1 Mbps`` and ``1000 kbps`` are distinct during pre-normalization
+    duplicate checks (different raw unit strings), then normalize to the
+    same canonical constraint (``1_000_000 bps``). Without canonicalizing
+    units BEFORE the duplicate-semantic check, the pair slipped through and
+    produced two identical canonical constraints in the NormalizedIntent
+    instead of failing closed.
+
+    Fix: :func:`intent.validation.validate_constraint_set` now computes the
+    semantic key over the *canonical* (base-unit) form, so equivalent-unit
+    pairs collide at validation time and raise ``duplicate-semantic``.
+
+    This case exercises:
+      (a) same hardness, equivalent bandwidth units -> duplicate-semantic;
+      (b) different hardness, equivalent bandwidth units -> duplicate-semantic
+          (the cross-hardness ambiguity branch);
+      (c) intent-native latency units (``1 s`` vs ``1000 ms``) -> same;
+      (d) the canonical-key helper returns identical base-form keys for the
+          equivalent pair (direct contract assertion).
+    """
+    from intent.validation import _canonical_semantic_key
+
+    # (a) bandwidth: 1 Mbps hard + 1000 kbps hard, different ids.
+    c1 = base_constraint(constraint_id="bw1", value=1, unit="Mbps", hardness=Hardness.HARD)
+    c2 = base_constraint(constraint_id="bw2", value=1000, unit="kbps", hardness=Hardness.HARD)
+    i = base_intent(intent_id="dup-bw", constraints=(c1, c2))
+    r = normalize_intent(i)
+    if r.ok or r.code != "duplicate-semantic":
+        results.append(fail(
+            "case_45_equivalent_unit_duplicates_fail_closed",
+            "(a) expected duplicate-semantic, got ok=%r code=%r" % (r.ok, r.code),
+        ))
+        return
+    # The NormalizedIntent MUST NOT have been built with duplicate canonical
+    # constraints. r.intent is None on failure.
+    if r.intent is not None:
+        results.append(fail(
+            "case_45_equivalent_unit_duplicates_fail_closed",
+            "(a) expected intent=None on failure, got constraints=%d"
+            % len(r.intent.constraints),
+        ))
+        return
+    # (b) cross-hardness: 1 Mbps hard + 1000 kbps soft(weight=5).
+    c3 = base_constraint(constraint_id="bw1", value=1, unit="Mbps", hardness=Hardness.HARD)
+    c4 = base_constraint(constraint_id="bw2", value=1000, unit="kbps", hardness=Hardness.SOFT, weight=5)
+    i2 = base_intent(intent_id="dup-xhard", constraints=(c3, c4))
+    r2 = normalize_intent(i2)
+    if r2.ok or r2.code != "duplicate-semantic":
+        results.append(fail(
+            "case_45_equivalent_unit_duplicates_fail_closed",
+            "(b) expected duplicate-semantic, got ok=%r code=%r" % (r2.ok, r2.code),
+        ))
+        return
+    # (c) intent-native latency: 1 s hard + 1000 ms hard.
+    c5 = Constraint(
+        constraint_id="lat1", dimension=IntentDimension.LATENCY,
+        operator=Operator.LE, value=1, unit="s", hardness=Hardness.HARD,
+    )
+    c6 = Constraint(
+        constraint_id="lat2", dimension=IntentDimension.LATENCY,
+        operator=Operator.LE, value=1000, unit="ms", hardness=Hardness.HARD,
+    )
+    i3 = base_intent(intent_id="dup-lat", constraints=(c5, c6))
+    r3 = normalize_intent(i3)
+    if r3.ok or r3.code != "duplicate-semantic":
+        results.append(fail(
+            "case_45_equivalent_unit_duplicates_fail_closed",
+            "(c) expected duplicate-semantic, got ok=%r code=%r" % (r3.ok, r3.code),
+        ))
+        return
+    # (d) Direct contract: the canonical-key helper returns IDENTICAL keys
+    # for the equivalent pair, in BASE form. (Without canonicalization, the
+    # raw keys would differ: (bandwidth, >=, 1, 'Mbps', '') vs
+    # (bandwidth, >=, 1000, 'kbps', '').)
+    k1 = _canonical_semantic_key(c1)
+    k2 = _canonical_semantic_key(c2)
+    if k1 != k2:
+        results.append(fail(
+            "case_45_equivalent_unit_duplicates_fail_closed",
+            "(d) canonical keys differ: %r vs %r" % (k1, k2),
+        ))
+        return
+    if k1 != ("bandwidth", ">=", 1_000_000, "bps", ""):
+        results.append(fail(
+            "case_45_equivalent_unit_duplicates_fail_closed",
+            "(d) canonical key not in base form: %r" % (k1,),
+        ))
+        return
+    results.append(ok(
+        "case_45_equivalent_unit_duplicates_fail_closed",
+        "(a) bw same-hardness, (b) cross-hardness, (c) latency native, (d) key helper -- all fail closed",
+    ))
+
+
 def main() -> int:
     results: List[Result] = []
     # Required adversarial verification cases (1-25)
@@ -1256,6 +1466,9 @@ def main() -> int:
     case_41_normalization_thread_safe(results)
     case_42_constraint_id_must_be_unique_string(results)
     case_43_intent_id_required(results)
+    # Architect PR #9 correction regressions
+    case_44_digest_recomputable_from_public_canonical_bytes(results)
+    case_45_equivalent_unit_duplicates_fail_closed(results)
 
     print("ADCOS intent self-test (WORK-009)")
     print("=" * 72)
