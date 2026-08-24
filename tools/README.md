@@ -702,3 +702,56 @@ python3 tools/session_selftest.py
 | `53-forged-reconnected-event-rejected` | REGRESSION (PR #12 blocker 1): 5 forged-event shapes (no validating decision / mismatched new refs / forged old refs / wrong transition shape / expired route) rejected; `current_route_decision_id`/`current_path_id` byte-identical |
 | `54-terminate-atomicity-fault-injection` | REGRESSION (PR #12 blocker 2): fault-injected second-event failure leaves the active session + history byte-identical; healthy path appends exactly 2 events atomically |
 | `55-mid-history-replay-idempotent` | exact duplicate of ANY already-accepted event replays idempotently; different content at the same sequence still fails closed |
+
+## multipath_selftest.py — multipath session semantics tests (WORK-013)
+
+Deterministic, offline verification of the multipath package against the frozen WORK-013 handoff: the path admission contract (decision/path content binding, endpoints, policy/intent bindings, expiry boundaries), the cross-path-binding security property, the frozen constituent-status table, explicit add/remove lifecycle operations recorded as state-preserving session events, plan ordering/identity determinism, atomicity, replay under WORK-012 semantics with admission validation, and the mechanical prohibitions (no engine invocation, no authority mutation, no scheduler/transport/radio/adapter logic, no wall-clock/randomness/network). Runs in CI after the session suite.
+
+### Invocation
+
+```bash
+python3 tools/multipath_selftest.py
+```
+
+### Case catalog
+
+| Case | Verifies |
+|---|---|
+| `01-valid-path-addition` | path admitted; state-preserving event; provenance (route_decision_id, added_sequence) recorded |
+| `02-reject-non-selected` | non-selected decision → `route-not-selected` |
+| `03-reject-tampered-decision-id` | decision id content binding → `route-tampered` |
+| `04-reject-tampered-path-id` | internally-consistent decision with misbound path id → `path-tampered` (invariant 6) |
+| `05-reject-endpoint-mismatch` | path endpoints ≠ session endpoints (invariant 2) |
+| `06-reject-expired-path` | `now > expires` rejected (add + reactivation); `now == expires` valid |
+| `07-cross-path-binding` | HEADLINE SECURITY TEST: cross-policy + cross-intent injection rejected; legitimate same-binding reuse allowed |
+| `08-duplicate-path-rejected` | `duplicate-path`; store byte-identical; one entry (invariant 4) |
+| `09-deterministic-ordering` | same plan_id + entry order + plan state under reversed adds (invariants 5, 13) |
+| `10-plan-identity-binding` | plan_id content-derived (plan STATE, provenance excluded), tamper-evident, round-trips |
+| `11-legal-status-transitions` | all 4 legal constituent-status edges walk |
+| `12-illegal-status-transitions` | all illegal status edges fail closed, no mutation (incl. FAILED→ACTIVE) |
+| `13-explicit-removal` | removal event; absent-path ops fail closed; re-add is a fresh entry |
+| `14-no-route-redefinition` | authoritative route byte-identical through degrade/fail/**all-paths-failed** (invariants 8, 14) |
+| `15-plan-ops-are-session-events` | 5 plan ops = 5 sequenced session events; plan == fold(history) (invariants 7, 12) |
+| `16-atomic-failure` | admission/construction/status failures leave everything byte-identical |
+| `17-replay-idempotent` | exact duplicates idempotent via multipath AND generic append paths |
+| `18-replay-conflict-gap` | conflicting reuse + sequence gaps fail closed, no mutation |
+| `19-forged-path-added-replay` | forged refs rejected (no decision → `reconnect-validation-required`; mismatch → `event-binding-mismatch`); faithful replay validated + applied |
+| `20-manufactured-events-generic-path` | generic append rejects plan events (`illegal-transition`); `append_plan_event` is the only entry point |
+| `21-no-authority-mutation` | resources/topology/policy/lifecycle/authoritative-route byte-identical across all ops |
+| `22-no-engine-invocation` | AST scan: no engine/topology/resource identifiers or imports in multipath/ |
+| `23-no-clock-random-network` | AST scan: no wall-clock/random/uuid/network |
+| `24-no-scheduler-transport-logic` | AST scan: no scheduler/congestion/transport/radio/adapter/primary-selection logic (invariants 10, 14) |
+| `25-session-state-gating` | fail-closed from terminal/pre-establishment/TERMINATING; allowed from post-establishment states |
+| `26-plan-serialization-roundtrip` | byte-identical round-trips; tampered entry content rejected under a stale plan id |
+| `27-cross-process-determinism` | identical plan_id + store digest across processes (invariant 13) |
+| `28-concurrent-add-determinism` | 20 concurrent identical adds: exactly 1 wins, 19 fail closed, no corruption |
+| `29-faithful-cross-store-replay` | validated event replay reproduces plan + history byte-identically |
+| `30-secret-and-leakage-rejection` | LOCK-023 + access-tech/vendor leakage rejected in actor/reason/extensions |
+| `31-expired-reactivation-only` | expired reactivation fails closed; teardown (fail/remove) unaffected |
+| `32-plan-modifiable-states-constant` | frozen gating set: post-establishment non-terminal states |
+| `33-multipath-vocabulary` | 7 multipath codes + reused session codes; no duplicate vocabulary |
+| `34-frozen-doc-unchanged` | all 4 frozen architecture docs byte-identical vs origin/main |
+| `35-prior-prompts-unchanged` | all prior prompts WORK-001..012 byte-identical vs origin/main |
+| `36-fuzz-never-crashes` | 60 seeded fuzz trials: only fail-closed envelopes, never crashes |
+| `37-interleaved-lifecycle-and-plan-ops` | one contiguous sequence; fold correct across interleaving (invariant 11) |
+| `38-plan-derivation-pure` | pure fold; empty plan deterministic; unknown session → None |

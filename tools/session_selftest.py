@@ -1529,7 +1529,7 @@ def case_45_prior_prompts_unchanged(results: List[Result]) -> None:
     prompts_dir = REPO_ROOT / "spec" / "prompts"
     prompts = sorted(p.name for p in prompts_dir.iterdir()
                      if p.name.startswith("WORK-") and p.name.endswith(".md"))
-    prior = [p for p in prompts if p != "WORK-012.md"]
+    prior = [p for p in prompts if p != "WORK-013.md"]
     problems = []
     for doc in prior:
         try:
@@ -1708,10 +1708,11 @@ def case_50_result_code_vocabulary(results: List[Result]) -> None:
         "terminal-state", "not-reconnecting", "sequence-conflict",
         "sequence-gap", "event-tampered", "event-state-mismatch",
         "reconnect-validation-required", "event-binding-mismatch",
+        "event-appended",
     }
     actual = set(SessionReasonCode.values())
     if actual == expected:
-        results.append(ok("case_50_result_code_vocabulary", "28 frozen reason codes (7 success + 21 failure) present and closed"))
+        results.append(ok("case_50_result_code_vocabulary", "29 frozen reason codes (7 success + 22 failure) present and closed"))
     else:
         results.append(fail("case_50_result_code_vocabulary", "drift: %r" % (actual ^ expected)))
 

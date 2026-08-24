@@ -800,6 +800,130 @@ class SessionStore:
                 % (event.sequence, event.previous_state, event.new_state),
             )
 
+    # -- state-preserving plan events (WORK-013 extension point) -------------
+
+    def append_plan_event(self, session_id: str, event: SessionEvent) -> SessionResult:
+        """Atomically append a PRE-VALIDATED state-preserving event (the
+        WORK-013 multipath extension point).
+
+        A plan event records a multipath plan operation (path added /
+        removed / degraded / failed / reactivated) WITHOUT changing the
+        session's lifecycle state: ``previous_state == new_state ==``
+        the session's CURRENT state, enforced here. The event's plan
+        SEMANTICS (admission binding verification, plan-state legality)
+        MUST have been validated by the CALLER (the multipath store);
+        this method enforces only the session-layer invariants and
+        commits atomically:
+
+        - the session exists (``unknown-session``);
+        - an exact duplicate of ANY already-accepted event (content-
+          derived ``event_id`` match) is idempotent (``replayed``, no
+          mutation);
+        - the sequence must be exactly last+1 (``sequence-conflict`` /
+          ``sequence-gap`` otherwise);
+        - the session is not terminal (``terminal-state``);
+        - the event is state-preserving against the CURRENT session
+          state (``event-state-mismatch``);
+        - the event's ``session_id`` matches the addressed session.
+
+        On success the event and the updated session head (sequence +
+        instant; state and current route unchanged) become visible
+        together. Manufactured plan events CANNOT enter history through
+        the generic :meth:`append_event` (a ``previous_state ==
+        new_state`` event is rejected there as ``illegal-transition``);
+        this is the only entry point."""
+        with self._lock:
+            session = self._require(session_id)
+            if session is None:
+                return self._unknown(session_id)
+            if not isinstance(event, SessionEvent):
+                return SessionResult(
+                    ok=False,
+                    code=SessionReasonCode.INVALID_INPUT,
+                    detail="event must be a SessionEvent instance",
+                )
+            if event.session_id != session_id:
+                return SessionResult(
+                    ok=False,
+                    code=SessionReasonCode.INVALID_INPUT,
+                    detail="event session_id %r does not match the addressed "
+                    "session %r" % (event.session_id[:24], session_id[:24]),
+                )
+            history = self._events.get(session_id, [])
+            if any(e.event_id == event.event_id for e in history):
+                return SessionResult(
+                    ok=True,
+                    code=SessionReasonCode.REPLAYED,
+                    detail="exact duplicate of already-accepted event "
+                    "sequence %d -- idempotent replay (no mutation)"
+                    % event.sequence,
+                    session=session,
+                    event=event,
+                )
+            last = history[-1] if history else None
+            if last is not None:
+                if event.sequence <= last.sequence:
+                    return SessionResult(
+                        ok=False,
+                        code=SessionReasonCode.SEQUENCE_CONFLICT,
+                        detail="event sequence %d conflicts with existing "
+                        "sequence %d (different content) -- conflicting reuse "
+                        "fails closed" % (event.sequence, last.sequence),
+                        session=session,
+                    )
+                if event.sequence != last.sequence + 1:
+                    return SessionResult(
+                        ok=False,
+                        code=SessionReasonCode.SEQUENCE_GAP,
+                        detail="event sequence %d is not the next expected "
+                        "sequence %d -- strictly monotonic per-session "
+                        "sequencing fails closed" % (event.sequence, last.sequence + 1),
+                        session=session,
+                    )
+            else:
+                if event.sequence != 1:
+                    return SessionResult(
+                        ok=False,
+                        code=SessionReasonCode.SEQUENCE_GAP,
+                        detail="first event must have sequence 1 (got %d)"
+                        % event.sequence,
+                        session=session,
+                    )
+            if session.state in SessionState.terminal_values():
+                return SessionResult(
+                    ok=False,
+                    code=SessionReasonCode.TERMINAL_STATE,
+                    detail="session %s is in terminal state %s -- plan events "
+                    "cannot be appended" % (session_id[:24], session.state),
+                    session=session,
+                )
+            if (
+                event.previous_state != session.state
+                or event.new_state != session.state
+            ):
+                return SessionResult(
+                    ok=False,
+                    code=SessionReasonCode.EVENT_STATE_MISMATCH,
+                    detail="a plan event must be state-preserving: "
+                    "previous_state/new_state (%s/%s) must equal the current "
+                    "session state %s" % (event.previous_state, event.new_state,
+                                          session.state),
+                    session=session,
+                )
+            updated = replace(
+                session,
+                last_event_sequence=event.sequence,
+                last_event_instant=event.event_instant,
+            )
+            return self._commit_events(
+                updated,
+                (event,),
+                result_code=SessionReasonCode.EVENT_APPENDED,
+                result_detail="plan event sequence %d appended "
+                "(state-preserving; session state %s unchanged)"
+                % (event.sequence, session.state),
+            )
+
     # -- internals -----------------------------------------------------------
 
     def _require(self, session_id: str) -> Optional[Session]:

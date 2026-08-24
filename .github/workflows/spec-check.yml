@@ -57,3 +57,6 @@ jobs:
 
       - name: Run session lifecycle tests
         run: python3 tools/session_selftest.py
+
+      - name: Run multipath session semantics tests
+        run: python3 tools/multipath_selftest.py
