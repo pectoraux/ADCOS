@@ -42,3 +42,6 @@ jobs:
 
       - name: Run evidence-aware topology tests
         run: python3 tools/topology_selftest.py
+
+      - name: Run resource model/measurement tests
+        run: python3 tools/resource_selftest.py

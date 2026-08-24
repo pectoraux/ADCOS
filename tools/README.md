@@ -328,3 +328,56 @@ python3 tools/topology_selftest.py
 | `frozen-dimensions-present` | identity/advertisement/reachability/link + source-class enums match frozen value sets (LOCK-009) |
 | `no-5g-6g-vendor-sdk-imports` | topology source has no 5G/6G/vendor SDK imports |
 
+## resource_selftest.py — resource model/measurement tests (WORK-008)
+
+Deterministic, offline verification of the resources package against the frozen WORK-008 requirements (`spec/prompts/WORK-008.md`): the 30 required test cases (eight frozen kinds represented; offer ≠ measurement distinct types; offer/measurement unit validation; incompatible units fail closed; negative/float/empty quantities fail closed; offer validity & measurement freshness at injected instants; expired measurement retained historically; exact-duplicate idempotent; insertion-order byte-identical; same-sequence conflict preserved; newer supersedes; offer unchanged by measurement; offer renewal; accounting equations; over-reservation/over-consumption rejected; duplicate-op idempotent; stale-version rejected; energy state independent; energy provenance/freshness; backhaul no routing; coverage no reachability; service-capacity vs capability vocab; future-6G profile as data; malformed NodeID rejected; cross-kind unit + credential mismatch rejected; seeded fuzz no crash; byte-identical determinism) plus 10 mechanical/adversarial cases (serialization round-trip + tamper-evident ID; no forbidden API/fields; no 5G/vendor imports; frozen dimensions present; secret-material never serialized LOCK-023; remote relay not authoritative; remote offer rejected; partition-recovery replay convergence; energy independent from bandwidth; resource availability ≠ topology reachability). The central boundary exercised throughout is the six-dimension separation (RESOURCE OFFER ≠ MEASURED OBSERVATION ≠ ACCOUNTING STATE ≠ ADMISSION ≠ ROUTING ≠ PRICE) and the provenance-collapse prevention (`A relays a measurement about R owned by O` is stored as `source_node_id=A, source_class=REMOTE_RELAY` and never becomes O's self-observation; `get_authoritative_measurements` returns only self-observations). Quantities carry explicit units; authoritative accounting uses integer base-unit math (no float). All key material is TEST-ONLY; all clocks are injected; all PRNGs are seeded; no external network access is required.
+
+```bash
+python3 tools/resource_selftest.py
+```
+
+### Case catalog
+
+| Case | Verifies (required-test numbers) |
+|---|---|
+| `01-all-eight-frozen-kinds-represented` | all 8 §17 kinds constructible (1) |
+| `02-offer-and-measurement-distinct-types` | ResourceOffer ≠ ResourceMeasurement; distinct derived IDs (2) |
+| `03-offer-quantity-unit-validation` | registered unit OK; unknown unit rejected at create_offer (3, 5) |
+| `04-measurement-quantity-unit-validation` | registered unit OK; wrong-kind unit rejected (4, 5) |
+| `05-incompatible-units-fail-closed` | cross-kind units rejected (5) |
+| `06-negative-impossible-quantities-fail-closed` | negative/float/empty rejected (6) |
+| `07-offer-validity-expiry-at-injected-time` | fresh=current, stale=None (7) |
+| `08-measurement-freshness-expiry-at-injected-time` | fresh=current, stale=None (8) |
+| `09-expired-measurement-retained-historical` | stale not current, retained in historical (9) |
+| `10-exact-duplicate-measurement-idempotent` | 2nd insert idempotent (10) |
+| `11-measurement-insertion-order-deterministic` | byte-identical snapshots across 2 insertion orders (11) |
+| `12-same-sequence-conflict-preserved` | both preserved, no arrival-order winner (12) |
+| `13-newer-supersedes-older` | seq2 current, seq1 historical (13) |
+| `14-offer-unchanged-when-measurement-disagrees` | offer=100, measurement=63, both preserved (14) |
+| `15-offer-renewal-newer-sequence` | seq2 current, seq1 historical (15) |
+| `16-accounting-equations-hold` | remaining = offered - reserved - consumed (16) |
+| `17-reservation-cannot-exceed-offered` | over-reservation rejected, account unchanged (17) |
+| `18-consumption-cannot-exceed-available` | over-consumption rejected, valid OK (18) |
+| `19-duplicate-accounting-operation-no-double-count` | replay idempotent, no double-count (19) |
+| `20-stale-accounting-update-rejected` | stale expected_version rejected (20) |
+| `21-energy-state-independent` | level/capacity/draw distinct (21) |
+| `22-energy-measurement-provenance-freshness` | source/method/provenance + expiry (22) |
+| `23-backhaul-no-routing-result` | backhaul stored, no routing API (23) |
+| `24-coverage-no-reachability-truth` | coverage stored, no topology import (24) |
+| `25-service-capacity-distinct-from-capability` | edge-service-capacity modeled, no capability import (25) |
+| `26-future-profile-ids-as-data` | future-6g profile stored as opaque method_ref, no gen-branch (26) |
+| `27-malformed-nodeid-rejected` | malformed source + provider rejected (27) |
+| `28-cross-resource-measurement-mismatch-rejected` | cross-kind unit + credential-mismatch rejected (28) |
+| `29-seeded-fuzz-no-crash` | 200 fuzz iters, 0 crashes (29) |
+| `30-repeated-runs-byte-identical` | md5 stable across 2 builds (30) |
+| `serialization-roundtrip` | offer/measurement round-trip + tamper-evident ID |
+| `no-forbidden-fields-or-methods` | no authorize_reservation/price_resource/settle/choose_best_resource/best_path/route_for/trusted_measurement; no price/settlement/trust/routing fields |
+| `no-5g-vendor-imports` | resources source has no 5G/6G/vendor SDK imports |
+| `frozen-dimensions-present` | 4 distinct types + 8 kinds + 6 availability + 4 source-class |
+| `secret-material-never-serialized` | LOCK-023 enforced (secret-looking condition keys rejected) |
+| `remote-relay-not-authoritative` | relay=200 retained but NOT authoritative; self=63 authoritative |
+| `remote-offer-rejected` | relayed offer rejected at create_offer |
+| `partition-recovery-replay-convergence` | replay idempotent, byte-identical |
+| `energy-independent-from-bandwidth` | energy drain independent of bandwidth ledger |
+| `resource-availability-not-topology-reachability` | no topology import; availability ≠ reachability |
+
