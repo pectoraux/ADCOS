@@ -45,3 +45,6 @@ jobs:
 
       - name: Run resource model/measurement tests
         run: python3 tools/resource_selftest.py
+
+      - name: Run intent/QoS normalization tests
+        run: python3 tools/intent_selftest.py

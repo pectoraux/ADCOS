@@ -76,6 +76,7 @@ GOVERNANCE_ARTIFACTS: List[str] = [
     "tools/discovery_selftest.py",
     "tools/topology_selftest.py",
     "tools/resource_selftest.py",
+    "tools/intent_selftest.py",
     "capabilities/__init__.py",
     "capabilities/model.py",
     "capabilities/classification.py",
@@ -99,6 +100,13 @@ GOVERNANCE_ARTIFACTS: List[str] = [
     "resources/__init__.py",
     "resources/model.py",
     "resources/ingest.py",
+    "intent/__init__.py",
+    "intent/model.py",
+    "intent/constraints.py",
+    "intent/validation.py",
+    "intent/normalization.py",
+    "intent/serialization.py",
+    "intent/README.md",
     "topology/README.md",
     "resources/README.md",
     "identity/__init__.py",
@@ -404,6 +412,7 @@ def check_files_02(report: Report) -> None:
             "discovery_selftest.py",
             "topology_selftest.py",
             "resource_selftest.py",
+            "intent_selftest.py",
         ):
             if required_tool not in workflow_text:
                 problems.append("CI workflow does not invoke tools/%s" % required_tool)

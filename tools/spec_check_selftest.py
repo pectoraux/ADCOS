@@ -36,7 +36,7 @@ from typing import Dict, List, Optional, cast
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 # Tracked tree items required for the checker to be representative.
-COPY_ITEMS: List[str] = ["spec", "tools", ".github", "protocol", "identity", "capabilities", "discovery", "topology", "resources", "README.md", ".gitignore"]
+COPY_ITEMS: List[str] = ["spec", "tools", ".github", "protocol", "identity", "capabilities", "discovery", "topology", "resources", "intent", "README.md", ".gitignore"]
 
 FAIL_LINE_RE = re.compile(r"^\[FAIL    \] (\S+)", re.MULTILINE)
 

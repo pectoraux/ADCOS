@@ -394,3 +394,59 @@ python3 tools/resource_selftest.py
 | `42-stale-offer-cannot-reset-ledger` | stale offer rejected; live ledger preserved (cycle 2) |
 | `43-newer-offer-advances-non-live-account` | non-live account advances offered/offer_sequence; version stays 1 (cycle 2) |
 
+## intent_selftest.py — intent/QoS normalization tests (WORK-009)
+
+Deterministic, offline verification of the intent package against the frozen WORK-009 requirements (`spec/prompts/WORK-009.md`): the 25 required adversarial verification categories (minimal valid intent; all 8 dimensions; hard vs soft buckets; insertion-order-independent normalization; equivalent-unit normalization `1 Mbps == 1000 kbps == 1e6 bps`; incompatible-unit rejection; unsupported operator rejection; unsupported required constraint rejection; optional extension preservation; duplicate constraint ambiguity rejection; malformed NodeID rejection via WORK-004; malformed/naive timestamp rejection via WORK-003; validity/expiry behavior; negative numeric rejection; NaN/Infinity/float rejection; deterministic content-derived digest; 5G/Wi-Fi/vendor implementation leakage rejection; route/resource/trust/policy leakage audit on `NormalizedIntent.to_dict()`; secret-material serialization rejection (LOCK-023); future profile/constraint handling; canonical byte identity across repeated runs; 500-trial seeded fuzz with zero crashes; hard constraints never silently downgraded; soft constraints never silently upgraded; normalization has no side effects on WORK-008/WORK-007 state) plus 18 additional mechanical/adversarial cases (label-dimension unit rejection; reliability basis-point normalization `99% == 9900 basis-points`; energy unit normalization `5 Wh == 18000 joules == 18M millijoules`; cost unit normalization `5k units == 5000 units`; case-insensitive unit aliases `Mbps == mbps == MBPS`; ConnectivityIntent round-trip via `intent_from_mapping`; no forbidden authoritative fields on public classes; no 5G/vendor SDK imports in intent/; all 8 frozen dimensions present; all 6 frozen operators present; deep-nested secret material in extensions rejected; `NormalizedIntent` serialized form has no policy/resource/route/trust fields; `bucket_for` dispatch is correct for privacy/service (any hardness); intent_id is caller-provided (digest is content-derived 64-hex, NOT a NodeID); cross-process byte-identical md5 determinism; thread-safety across 20 threads; constraint_id must be unique non-empty string; intent_id required). The central boundary exercised throughout is the frozen separation: INTENT = desired outcome / requirements; INTENT ≠ policy decision, authorization, topology fact, resource offer, resource measurement, route/path, adapter/access-technology, trust score, or price/settlement. Quantities carry explicit units; normative values are integer-only (no float/NaN/Infinity); unit resolution delegates to the WORK-008 unit registry for bandwidth/energy and uses intent-native integer-base-unit tables for latency/reliability/cost (NOT a duplicate registry). Canonical JSON uses WORK-003 `canonical_json_bytes`. All key material is TEST-ONLY; no wall-clock reads; all PRNGs are seeded; no external network access is required.
+
+```bash
+python3 tools/intent_selftest.py
+```
+
+### Case catalog
+
+| Case | Verifies (required-test numbers) |
+|---|---|
+| `01-minimal-valid-intent` | single hard constraint normalizes; canonical form `10 Mbps → 10000000 bps` (1) |
+| `02-all-eight-dimensions-represented` | bandwidth, latency, reliability, locality, energy, cost, privacy, service all present (2) |
+| `03-hard-vs-soft-constraints` | hard bucket (requirements) sorts before soft bucket (preferences); structural separation (3) |
+| `04-insertion-order-independent-normalization` | two constraint orderings produce byte-identical digest (4) |
+| `05-equivalent-unit-normalization` | `1 Mbps == 1000 kbps == 1e6 bps`; all → `1000000 bps` (5) |
+| `06-incompatible-unit-rejection` | `ms` for bandwidth rejected (`unit-unknown`) (6) |
+| `07-unsupported-operator-rejection` | `~=` rejected at construction (`operator`) (7) |
+| `08-unsupported-required-constraint-rejection` | `5g-bandwidth` and `jitter` rejected (`dimension`/`dimension-leakage`) (8) |
+| `09-optional-extension-preservation` | opaque mapping in `extensions` survives verbatim (9) |
+| `10-duplicate-constraint-ambiguity-rejection` | duplicate `constraint_id` rejected; duplicate semantic rejected (10) |
+| `11-malformed-requester-nodeid-rejection` | 4 malformed NodeIDs rejected via WORK-004; canonical accepted (11) |
+| `12-malformed-naive-timestamp-rejection` | 5 malformed RFC 3339 UTC instants rejected via WORK-003; valid accepted (12) |
+| `13-validity-expiry-behavior` | `expires < issued` rejected; equal accepted; future-dated accepted (no wall-clock) (13) |
+| `14-negative-numeric-rejection` | all 5 numeric dimensions reject `value=-1` at construction (14) |
+| `15-nan-infinity-float-rejection` | `1.5`, `NaN`, `+Inf`, `-Inf`, `bool` all rejected (15) |
+| `16-deterministic-digest` | `digest = sha256(canonical_json(payload))`; 64-hex; not a NodeID (16) |
+| `17-5g-wifi-vendor-implementation-leakage-rejection` | 22 forbidden dimensions rejected (17) |
+| `18-route-resource-trust-policy-leakage-audit` | `NormalizedIntent.to_dict()` has no `authorized`/`trusted`/`admitted`/`selected_resource`/`selected_route`/`next_hop`/`adapter`/`access_technology`/`price`/`settlement` (18) |
+| `19-secret-material-serialization-rejection` | `private_key`/`secret_key`/`password`/`token` rejected in extensions + constraint provenance/scope/value (LOCK-023) (19) |
+| `20-future-profile-constraint-handling` | unknown required `jitter` rejected; future optional extension preserved (20) |
+| `21-canonical-byte-identity-across-runs` | 5 in-process runs byte-identical (21) |
+| `22-fuzz-property-inputs-never-crash` | 500 seeded fuzz trials; 0 crashes (22) |
+| `23-hard-constraints-never-silently-downgraded` | hard stays hard; SOFT weight=0 rejected (23) |
+| `24-soft-constraints-never-silently-upgraded` | soft stays soft; HARD weight=5 rejected (24) |
+| `25-normalization-no-side-effects` | WORK-008 ResourceStore + WORK-007 TopologyGraph byte-identical after 10 normalizations (25) |
+| `26-label-dimension-unit-rejection` | locality/privacy/service reject non-empty `unit` at normalization |
+| `27-reliability-basis-point-normalization` | `99% == 9900 basis-points`; both → `9900 basis-points` |
+| `28-energy-unit-normalization` | `5 Wh == 18000 joules == 18M millijoules`; all → `18M millijoules` |
+| `29-cost-unit-normalization` | `5k units == 5000 units`; both → `5000 units` |
+| `30-case-insensitive-unit-aliases` | `Mbps`/`mbps`/`MBPS`/`MbPs` → byte-identical digest |
+| `31-serialization-roundtrip` | ConnectivityIntent → dict → `intent_from_mapping` → normalize byte-identical |
+| `32-no-forbidden-fields-or-methods` | no authoritative attrs on Constraint/ConnectivityIntent/NormalizedIntent/NormalizationResult |
+| `33-no-5g-vendor-imports` | no 5G/LTE/Wi-Fi/vendor SDK imports in intent/ |
+| `34-frozen-dimensions-present` | all 8 frozen intent dimensions match expected set |
+| `35-frozen-operators-present` | all 6 frozen operators match `{>=, <=, >, <, =, !=}` |
+| `36-extensions-secret-material-deep-nested` | deeply nested `private_key` in extensions rejected |
+| `37-normalized-intent-serialization-no-leak` | canonical bytes have no forbidden authoritative fields |
+| `38-bucket-for-privacy-service` | privacy/service buckets independent of hardness |
+| `39-intent-id-uniqueness-no-second-authority` | intent_id preserved; digest=64hex; not a NodeID |
+| `40-repeated-runs-byte-identical` | md5 of canonical bytes byte-identical across runs |
+| `41-normalization-thread-safe` | 20 concurrent threads all agree on digest |
+| `42-constraint-id-must-be-unique-string` | empty/None/int/list/dict rejected |
+| `43-intent-id-required` | empty/None/int intent_id rejected |
+
