@@ -537,3 +537,88 @@ python3 tools/policy_selftest.py
 | `71-issuer-must-be-canonical-nodeid` | REGRESSION (PR #10 blocker 1): 8 non-canonical issuers (wrong prefix/short/long/uppercase/non-hex/malformed-profile/upper-prefix/extra-segment) rejected at validation; `evaluate()` returns INVALID_POLICY |
 | `72-malformed-intent-digest-cannot-authorize` | REGRESSION (PR #10 blocker 2): 7 malformed digests rejected at construction/deserialization; valid 64-lowercase-hex digest authorizes ALLOW; empty digest does not satisfy intent-present |
 
+
+## routing_selftest.py — path computation/routing tests (WORK-011)
+
+Deterministic, offline verification of the routing package against the frozen WORK-011 handoff: candidate construction from explicit topology/link state, hard-constraint enforcement, policy/resource/evidence integration, deterministic ranking with the frozen 10-level total order, alternate-path retention, snapshot consistency, fail-closed behavior, and the mechanical prohibition of access-generation-specific routing logic. Runs in CI after the policy suite.
+
+### Invocation
+
+```bash
+python3 tools/routing_selftest.py
+```
+
+### Case catalog
+
+| Case | Verifies |
+|---|---|
+| `01-single-link-path` | 1-hop path selected; metrics aggregated from explicit link facts |
+| `02-multi-hop-path` | 3-hop path; latency summed, capacity/reliability minimized, energy summed |
+| `03-disconnected-graph` | no usable-link route -> `topology-disconnected` |
+| `04-cycle-rejection` | simple paths only; triangle yields exactly 2 candidates |
+| `05-max-hop-enforcement` | 3-hop path rejected at `max_hops=2`, allowed at boundary `max_hops=3` |
+| `06-candidate-count-enforcement` | candidate cap enforced deterministically (2/4 of 4 parallel paths) |
+| `07-deterministic-path-id` | content-derived fingerprint; hop order + direction distinguished |
+| `08-deterministic-ranking` | lower latency wins; `link_metrics` dict insertion order irrelevant |
+| `09-rule-order-independence` | identical decision_id regardless of topology claim merge order |
+| `10-topology-snapshot-immutable` | topology snapshot bytes unchanged by evaluation (incl. cached engine) |
+| `11-resource-snapshot-immutable` | resource store bytes unchanged by evaluation |
+| `12-policy-decision-immutability` | consumed WORK-010 decision unchanged; decision_id stable |
+| `13-hard-intent-constraint-satisfied` | bandwidth `>=` satisfied via base-unit comparison |
+| `14-hard-constraint-violated` | violation -> `no-feasible-path`; rejected candidate carries code + unmet constraint id |
+| `15-soft-preference-ranking-only` | soft = ranking only; never authorization (denied policy still denies), never feasibility |
+| `16-unsupported-required-constraint` | label inequality -> explicit `unsupported-constraint` (never silently ignored) |
+| `17-policy-denied-no-route` | denied effect -> `policy-denied`; no selected path |
+| `18-missing-policy-decision-fail-closed` | absent decision -> `policy-denied` (missing permission is denial) |
+| `19-explicit-policy-allow-permits` | explicit ALLOW consumed; decision id referenced on every path |
+| `20-remote-claim-not-promoted` | remote-only link evidence never infers a usable link (LOCK-008) |
+| `21-evidence-class-semantics` | self/direct vs remote vs bootstrap: worst-state + non-remote eligibility + remote reachability never satisfies transit |
+| `22-stale-link-rejected` | stale metric facts -> `stale-input`; stale link claims -> disconnected |
+| `23-expired-resource-measurement-rejected` | expired measurement -> `resource-unavailable` (evidence over assertion) |
+| `24-resource-capacity-shortage` | measured shortage and exhausted account both reject candidates |
+| `25-energy-reserve-rejects` | energy reserve 50 mJ < path cost 100 mJ rejects; 5000 mJ routes |
+| `26-locality-mismatch-rejects` | label membership on EVERY path node; unlabeled nodes fail closed |
+| `27-privacy-property-rejects` | privacy property required on EVERY hop |
+| `28-confidence-threshold-rejects` | explicit evidence-confidence threshold enforced (5000 bp < 8000 bp rejects) |
+| `29-alternate-paths-retained` | selected + ranked alternates + candidate counts retained |
+| `30-alternate-ranking-deterministic` | alternates ordered by the frozen total order; byte-identical re-run |
+| `31-failed-primary-selects-alternate` | failed primary -> deterministic alternate -> deterministic recovery |
+| `32-partition-deterministic-no-path` | partition -> deterministic `topology-disconnected` |
+| `33-partition-recovery-restores-path` | new immutable snapshot restores the identical `path_id` |
+| `34-conflicting-topology-snapshot` | expected topology digest mismatch -> `inconsistent-snapshot` |
+| `35-conflicting-resource-snapshot` | expected resource digest mismatch -> `inconsistent-snapshot` |
+| `36-policy-version-mismatch` | set-id/version/future-instant mismatches fail closed; matching binding routes |
+| `37-intent-digest-mismatch` | digest binding enforced in both directions |
+| `38-evaluation-time-boundary` | freshness inclusive at the exact boundary; intent expiry boundary exact |
+| `39-no-wall-clock` | no wall-clock/time reads in routing package code |
+| `40-no-randomness` | no random-number dependence in routing package |
+| `41-no-access-tech-branching` | no `if`/access-generation branches; no SDK imports; leaked properties rejected |
+| `42-no-route-to-topology-mutation` | topology unchanged across success/failure/inconsistent runs |
+| `43-no-route-to-resource-account-mutation` | selected path reserves nothing; account ledger untouched |
+| `44-no-secrets-in-diagnostics` | LOCK-023: secret-looking material rejected and never echoed |
+| `45-decision-digest-reproducible` | `sha256(canonical_bytes()) == decision_id` for all decision kinds |
+| `46-stable-tie-break` | identical metrics -> lexicographic `path_id`; deterministic |
+| `47-fuzz-never-crashes` | 60 seeded fuzz trials: only fail-closed envelopes, never crashes |
+| `48-concurrent-evaluations` | 20 threads agree on decision_id |
+| `49-cache-hit-miss-identical` | cold == miss == hit == after-clear (byte-identical; cache never authoritative) |
+| `50-provenance-confidence-retained` | usable-link claim ids + evidence refs + confidence + input digests retained |
+| `51-frozen-reason-code-vocabulary` | the 13 frozen reason codes present; candidate subset closed |
+| `52-no-network-imports` | no network-capable imports in routing package |
+| `53-no-duplicate-vocabularies` | no second NodeID/ResourceKind/unit/intent/policy vocabulary; authorities imported |
+| `54-serialization-roundtrip` | byte-identical roundtrips; tamper-evident path/decision ids |
+| `55-policy-tamper-detected` | tampered policy decision -> `conflicting-input` |
+| `56-intent-expired` | expired intent -> `expired-path` (fail closed) |
+| `57-no-dict-iteration-dependence` | identical decisions under reversed input dicts |
+| `58-frozen-doc-unchanged` | all 4 frozen architecture docs byte-identical vs origin/main |
+| `59-prior-prompts-unchanged` | all 10 prior prompts WORK-001..WORK-010 byte-identical vs origin/main |
+| `60-monetary-absence-not-zero` | absent monetary facts never coerced to zero (fail closed) |
+| `61-opaque-properties-pass-through` | opaque adapter/profile refs carried as data; labels matched structurally |
+| `62-transit-reachability-required` | transit needs explicit non-remote reachability; REMOVED identity blocks |
+| `63-aggregate-monetary-partial` | monetary sum only when complete; partial data stays `None` |
+| `64-determinism-two-processes` | cross-process decision_id byte-identical |
+| `65-utility-deterministic-integer` | integer basis-point utility verified arithmetically |
+| `66-rank-by-confidence-explicit` | evidence confidence influences order only when requested |
+| `67-rejected-candidates-stable-codes` | stable codes + detail on every rejected candidate |
+| `68-no-missing-metric-inference` | no-facts link ineligible; distinguished from disconnection |
+| `69-engine-error-envelope` | invalid-input / invalid-node fail closed with stable codes |
+| `70-multi-hop-transit-labels` | locality covers every transit node |

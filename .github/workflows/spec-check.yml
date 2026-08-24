@@ -51,3 +51,6 @@ jobs:
 
       - name: Run policy engine tests
         run: python3 tools/policy_selftest.py
+
+      - name: Run path computation/routing tests
+        run: python3 tools/routing_selftest.py
