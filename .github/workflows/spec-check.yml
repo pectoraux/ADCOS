@@ -54,3 +54,6 @@ jobs:
 
       - name: Run path computation/routing tests
         run: python3 tools/routing_selftest.py
+
+      - name: Run session lifecycle tests
+        run: python3 tools/session_selftest.py

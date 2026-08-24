@@ -632,3 +632,70 @@ python3 tools/routing_selftest.py
 | `78-expected-topology-digest-mismatch-after-cache` | REGRESSION (PR #11 correction 2): expected topology-digest mismatch after a cached success -> `inconsistent-snapshot`, NOT the cached decision |
 | `79-expected-resource-digest-mismatch-after-cache` | REGRESSION (PR #11 correction 2): expected resource-digest mismatch after a cached success -> `inconsistent-snapshot`, NOT the cached decision |
 | `80-expected-intent-digest-mismatch-after-cache` | REGRESSION (PR #11 correction 2): expected intent-digest mismatch after a cached success -> `conflicting-input`; `routing_input_digest` distinguishes the expectations |
+
+## session_selftest.py — session lifecycle tests (WORK-012)
+
+Deterministic, offline verification of the sessions package against the frozen WORK-012 handoff: the creation contract (route/policy/intent binding verification, endpoint/expiry checks), the frozen 9-state transition table with explicit suspend/terminate operations, atomic lifecycle transitions, strictly monotonic event sequencing with idempotent exact-duplicate replay and fail-closed conflicting reuse, content-derived session/event identity with tamper rejection, reconnect semantics (externally supplied selected route; old/new reference recording; immutable creation binding), termination idempotency, canonical serialization round-trips, and the mechanical prohibition of engine invocation, authority mutation, wall-clock/randomness/network access, secret material, and access-technology leakage. Runs in CI after the routing suite.
+
+### Invocation
+
+```bash
+python3 tools/session_selftest.py
+```
+
+### Case catalog
+
+| Case | Verifies |
+|---|---|
+| `01-valid-creation` | REQUESTED session bound to accepted route/policy; creation event sequence 1 |
+| `02-reject-non-selected-route` | non-selected decision → `route-not-selected` |
+| `03-reject-tampered-route-decision-id` | decision id content binding recomputed → `route-tampered` |
+| `04-reject-tampered-path-id` | internally-consistent decision with misbound path id → `path-tampered` |
+| `05-reject-endpoint-mismatch` | requested endpoints ≠ path endpoints → `endpoint-mismatch` |
+| `06-reject-expired-route-at-creation` | creation after path expiry → `route-expired` |
+| `07-deterministic-session-id` | content-derived over binding material; instant/endpoints distinguished; store == pure function |
+| `08-duplicate-creation` | identical material idempotent (no events); misbound same-id conflict fails closed |
+| `09-every-legal-transition` | all 23 legal edges (20 frozen table + 3 suspend entries) walk successfully |
+| `10-every-illegal-transition` | all illegal (state, target) pairs fail closed with no mutation |
+| `11-atomic-transition-failure` | validation + event-construction failures leave state/history byte-identical |
+| `12-monotonic-event-sequence` | sequences 1..N strictly monotonic; session head consistent |
+| `13-duplicate-event-replay` | exact duplicate of head → `replayed`, zero mutation |
+| `14-conflicting-sequence` | same-sequence different-content → `sequence-conflict` (incl. older sequences) |
+| `15-event-id-content-binding` | event ids content-bound at construction + deserialization |
+| `16-session-id-tamper` | tampered session_id / misbound creation material rejected |
+| `17-reconnect-requires-selected-route` | tampered + non-selected new routes rejected |
+| `18-reconnect-endpoint-mismatch` | new route endpoints ≠ session endpoints → `endpoint-mismatch` |
+| `19-reconnect-route-expiry` | new path expired at reconnect instant → `route-expired` |
+| `20-reconnect-event-records-refs` | old+new route refs recorded; current updated; creation binding immutable |
+| `21-termination-idempotent` | terminate once + idempotent re-termination (no events, no mutation) |
+| `22-terminal-cannot-transition` | TERMINATED/FAILED reject transitions/suspend/reconnect; no mutation |
+| `23-no-resource-mutation` | no resource store reference or mutation anywhere in the lifecycle |
+| `24-no-topology-mutation` | topology snapshot byte-identical across full lifecycle |
+| `25-no-policy-mutation` | consumed policy decision byte-identical (frozen dataclass) |
+| `26-no-identity-mutation` | only `identity.node_id` parsing imported; no identity state touched |
+| `27-no-engine-invocation` | AST scan: no RoutingEngine/PolicyEngine/topology/resources identifiers or imports in sessions/ |
+| `28-no-clock-random-network` | no wall-clock/random/uuid/network anywhere in sessions/ |
+| `29-canonical-roundtrip` | session/event/store round-trips byte-identical; lifecycles reproducible |
+| `30-unknown-field-preservation` | opaque extensions survive round-trips verbatim |
+| `31-cross-process-determinism` | identical store snapshot digest across processes |
+| `32-concurrent-transition-determinism` | 20 identical concurrent transitions: exactly 1 wins, 19 fail closed, no corruption |
+| `33-secret-material-rejected` | LOCK-023: secrets rejected in extensions/actor/metadata |
+| `34-access-tech-leakage-rejected` | access-generation/vendor tokens rejected in actor/metadata/extensions |
+| `35-policy-binding-verification` | wrong decision id / tampered id / deny effect rejected at creation |
+| `36-intent-binding-verification` | absent/digest mismatches rejected; matching digest binds; malformed rejected |
+| `37-reconnect-policy-binding` | new route under a different policy decision rejected; forged policy object rejected |
+| `38-reconnect-intent-binding` | new route without the bound intent → `intent-binding-mismatch` |
+| `39-reconnect-state-gate` | reconnect gated to RECONNECTING state |
+| `40-expiry-boundaries` | `now == expires_at` valid (creation + establishment); `now >` rejected |
+| `41-suspend-semantics` | explicit-only SUSPENDED entry; resume/reconnect + terminate chains work |
+| `42-terminate-from-early-states` | frozen table enforced: REQUESTED/AUTHORIZED end via FAILED, not termination |
+| `43-store-snapshot-determinism` | operation order across sessions does not affect snapshot bytes |
+| `44-frozen-doc-unchanged` | all 4 frozen architecture docs byte-identical vs origin/main |
+| `45-prior-prompts-unchanged` | all prior prompts WORK-001..011 byte-identical vs origin/main |
+| `46-fuzz-never-crashes` | 60 seeded fuzz trials: only fail-closed envelopes, never crashes |
+| `47-event-replay-legality` | replay cannot bypass the state machine; gaps/mismatches/wrong-session fail closed |
+| `48-replayed-reconnect-updates-refs` | replayed reconnect event reproduces the binding update byte-identically |
+| `49-transition-function-table` | pure legality function == frozen table + suspend + creation edges |
+| `50-result-code-vocabulary` | 26 frozen reason codes (7 success + 19 failure) present and closed |
+| `51-binding-from-mapping-roundtrip` | binding wire form round-trips; absent fields omitted |
+| `52-create-requires-policy-decision` | absent/malformed policy decision rejected at creation |

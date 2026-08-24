@@ -1627,10 +1627,10 @@ def case_69_prior_prompts_unchanged(results: List[Result]) -> None:
     import subprocess
     prompts_dir = REPO_ROOT / "spec" / "prompts"
     prompts = sorted(p.name for p in prompts_dir.iterdir() if p.name.startswith("WORK-") and p.name.endswith(".md"))
-    # WORK-011.md is new on this branch (the WORK-011 handoff);
-    # WORK-010.md is now merged into main, so it is INCLUDED in the
+    # WORK-012.md is new on this branch (the WORK-012 handoff);
+    # WORK-001..011 prompts are merged into main and INCLUDED in the
     # byte-identity check below.
-    prior = [p for p in prompts if p != "WORK-011.md"]
+    prior = [p for p in prompts if p != "WORK-012.md"]
     problems = []
     for doc in prior:
         try:
