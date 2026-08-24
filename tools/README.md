@@ -242,3 +242,38 @@ python3 tools/capability_selftest.py
 | `cross-node-signature-forgery-rejected` | REGRESSION (cycle-2): Node B's valid signature rejected for a statement naming Node A; positive control verifies; superseded-credential provenance break rejected |
 | `expired-active-credential-rejected` | REGRESSION (cycle-3): an ACTIVE-but-expired credential cannot validate a statement; `verify_statement` is time-aware (injected evaluation instant; no wall clock); expiry checked at that instant (`expires_at <= now`); boundary instant rejected; status still ACTIVE (rejection from the expiry check, not a status flip); naive instant fails closed |
 | `fuzzed-statements-fail-safely` | 306 mutated/garbage inputs handled without crashes (20) |
+
+## discovery_selftest.py — peer discovery tests (WORK-006)
+
+Deterministic, offline verification of the discovery package against the frozen WORK-006 requirements (spec/prompts/WORK-006.md): the 20 required adversarial/convergence/replay/freshness tests plus serialization/envelope round-trip, freshness matrix, and seeded fuzz. The local-discovery transport test uses a real loopback UDP socket (127.0.0.1) only — no external network access.
+
+```bash
+python3 tools/discovery_selftest.py
+```
+
+### Case catalog
+
+| Case | Verifies (required-test numbers) |
+|---|---|
+| `local-loopback-discovery-succeeds` | real UDP loopback exchange; A announces B; B receives & merges (1) |
+| `no-upstream-internet-required` | loopback binds 127.0.0.1; no outbound Internet; non-private bind refused (2) |
+| `authenticated-observation-accepted` | valid signature + provenance + ACTIVE credential -> accepted (3) |
+| `forged-sender-identity-rejected` | B's signature on an observation naming A -> verification-failed (4) |
+| `credential-nodeid-mismatch-rejected` | A's valid signature verified with B's credential -> NodeID mismatch -> rejected (5) |
+| `exact-duplicate-idempotent` | same observation twice -> idempotent; store size unchanged (6) |
+| `arrival-order-invariant-convergence` | two orders converge to byte-identical snapshot (7) |
+| `newer-sequence-replaces-older` | seq=2 replaces seq=1; current reflects the newer observation (8) |
+| `stale-observation-not-current` | freshness_until passed -> not in current_peers; retained for audit (9) |
+| `replay-cannot-refresh-freshness` | replay of seq=1 (below watermark 2) -> replay-stale; freshness NOT refreshed (10) |
+| `conflicting-same-sequence-fails-closed` | same sequence, different content -> rejected; original state preserved (11) |
+| `malformed-envelope-fails-safely` | 206 mutated/garbage inputs handled without crashes (12) |
+| `bootstrap-sourced-marked-distinct` | bootstrap observation carries source_type=bootstrap; does NOT silently overwrite local; conflicting-same-sequence fails closed (13) |
+| `bootstrap-failure-does-not-disable-local` | bootstrap source down -> poll returns empty; local announce/receive still works (14) |
+| `partition-recovery-converges-deterministically` | post-partition replay idempotent; newer replaces; two stores converge byte-identically (15) |
+| `capability-references-opaque-no-second-registry` | future capability id preserved verbatim; discovery never classifies or imports the capability vocabulary (16) |
+| `no-trust-topology-authorization-fields` | DiscoveryObservation/MergeResult carry no trust/route/resource/topology fields (17) |
+| `future-access-profile-as-data` | future 6G/IMT-2030 access profile id preserved verbatim; discovery core unchanged (18) |
+| `fuzzed-observations-fail-safely` | 306 mutated/garbage inputs handled without crashes (19) |
+| `repeated-runs-byte-identical` | two independent builds produce byte-identical snapshot + signature input + observation_id (20) |
+| `envelope-roundtrip-opaque-forward` | canonical round-trip byte-stable; duplicate keys rejected; WORK-003 envelope (unregistered discovery.observe type) forwarded opaquely; compact codec stable (round-trip) |
+| `freshness-matrix-and-local-replay-state` | fresh/stale/future/boundary distinct; replay defense is per-sender watermark, no global anti-replay database |

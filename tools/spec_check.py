@@ -73,6 +73,7 @@ GOVERNANCE_ARTIFACTS: List[str] = [
     "tools/envelope_selftest.py",
     "tools/identity_selftest.py",
     "tools/capability_selftest.py",
+    "tools/discovery_selftest.py",
     "capabilities/__init__.py",
     "capabilities/model.py",
     "capabilities/classification.py",
@@ -81,6 +82,15 @@ GOVERNANCE_ARTIFACTS: List[str] = [
     "capabilities/negotiation.py",
     "capabilities/signing.py",
     "capabilities/serialization.py",
+    "discovery/__init__.py",
+    "discovery/model.py",
+    "discovery/validation.py",
+    "discovery/signing.py",
+    "discovery/serialization.py",
+    "discovery/convergence.py",
+    "discovery/transport.py",
+    "discovery/bootstrap.py",
+    "discovery/service.py",
     "identity/__init__.py",
     "identity/node_id.py",
     "identity/profiles.py",
@@ -381,6 +391,7 @@ def check_files_02(report: Report) -> None:
             "envelope_selftest.py",
             "identity_selftest.py",
             "capability_selftest.py",
+            "discovery_selftest.py",
         ):
             if required_tool not in workflow_text:
                 problems.append("CI workflow does not invoke tools/%s" % required_tool)

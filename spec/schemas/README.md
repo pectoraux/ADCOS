@@ -65,6 +65,7 @@ python3 tools/schema_selftest.py  # WORK-002/003 registry compatibility + protoc
 python3 tools/envelope_selftest.py  # WORK-003 envelope/serialization compatibility matrix, golden vectors, property/fuzz
 python3 tools/identity_selftest.py   # WORK-004 identity lifecycle, rotation, revocation, secret isolation
 python3 tools/capability_selftest.py  # WORK-005 capability statements, negotiation, open-world semantics
+python3 tools/discovery_selftest.py   # WORK-006 peer discovery, convergence, replay defense, freshness
 ```
 
 All are zero-dependency (Python 3 standard library), fully offline, deterministic (byte-identical repeat output), and run in CI on every push and pull request. The check catalogs and test case lists are documented in `tools/README.md`. The envelope implementation itself lives in the `protocol/` package (see `protocol/README.md`), including the provisional compact codec — the production canonicalization profile remains unfrozen until later conformance work.

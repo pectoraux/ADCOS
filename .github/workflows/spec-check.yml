@@ -36,3 +36,6 @@ jobs:
 
       - name: Run capability statement/negotiation tests
         run: python3 tools/capability_selftest.py
+
+      - name: Run peer discovery tests
+        run: python3 tools/discovery_selftest.py
