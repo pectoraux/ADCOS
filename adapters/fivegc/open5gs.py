@@ -42,7 +42,17 @@ Docker/mongod).  The conformance evidence runs against
 :class:`adapters.fivegc.conformance.Reference5GCoreConformanceServer`,
 a real 3GPP-SBi-over-HTTP NF peer that runs as user ``z`` (real
 sockets, real 3GPP JSON, real bytes) -- the W018 ``::1`` echo analog.
-This is transparently disclosed in the PR.
+
+The B1 real-Open5GS interop gate
+(:mod:`adapters.fivegc.open5gs_interop`) is environment-gated by
+``OPEN5GS_INTEROP=1``: when a real Open5GS is reachable at
+``OPEN5GS_SBI_URL`` (and optionally a DN echo peer at
+``OPEN5GS_DATA_PEER``), the gate exercises the full byte-path against
+the REAL Open5GS (real SBI + real PDU session establishment + real
+user-plane path).  When Open5GS is not reachable, the gate SKIPS with
+a transparent verification-environment blocker disclosure -- it does
+NOT fake success with the in-repo conformance server (the Architect's
+B1 correction).  See the B1 correction in the PR #20 body.
 
 No vendor SDK, no 5G Core state machine import, no SCTP/NGAP (the
 conformance peer speaks SBi-over-HTTP, which IS real 3GPP SBi -- HTTP/2
@@ -80,9 +90,27 @@ class Open5GSAdapter(Reference5GCoreEngine):
 
     label = "open5gs-adapter"
 
-    def __init__(self, *, nf_endpoint: NfEndpoint) -> None:
+    def __init__(
+        self,
+        *,
+        nf_endpoint: NfEndpoint,
+        data_peer: Optional[Tuple[str, int]] = None,
+    ) -> None:
         super().__init__()
         self._nf_endpoint = nf_endpoint
+        # Optional override for the user-plane data peer (host, port) --
+        # the DN echo host the real Open5GS UPF routes to.  When None
+        # (the conformance case), the adapter uses the dataEndpoint the
+        # SMF returns in the Nsmf_PduSession response (the conformance
+        # server supplies one).  When set (the real-Open5GS interop
+        # case), the adapter uses the configured peer -- because a real
+        # Open5GS SMF response does NOT carry a dataEndpoint field (3GPP
+        # TS 29.502 Nsmf_PDUSession_CreateServiceOperation does not
+        # standardize a data-plane endpoint; the user plane is the UPF
+        # GTP-U tunnel on N3, not an SBi-returned socket).  The B1
+        # real-Open5GS interop gate (adapters/fivegc/open5gs_interop.py)
+        # sets this from the OPEN5GS_DATA_PEER env var.
+        self._data_peer = data_peer
         # binding_id (pdu_session_ref) -> real data socket (the adapter
         # owns the write side; the AppSession owns the read side -- same
         # object reference, never exposed as a public attribute).
@@ -150,6 +178,17 @@ class Open5GSAdapter(Reference5GCoreEngine):
             host, port = resp["dataEndpoint"]
             if isinstance(host, str) and isinstance(port, int):
                 data_endpoint = (host, port)
+        # B1 real-Open5GS interop: when the adapter is configured with a
+        # data_peer override (the DN echo host the UPF routes to), use
+        # it INSTEAD OF the SMF-provided dataEndpoint.  A real Open5GS
+        # SMF response does not carry dataEndpoint (3GPP TS 29.502 does
+        # not standardize a data-plane endpoint in
+        # Nsmf_PDUSession_CreateServiceOperation); the conformance
+        # server supplies one as a test convenience.  When the override
+        # is set, it dominates so the adapter targets the configured
+        # user-plane peer regardless of the SMF response shape.
+        if self._data_peer is not None:
+            data_endpoint = self._data_peer
         # Replace the local view with one carrying the REAL data
         # endpoint (the reference view's data_endpoint was None).
         new_view = PduSessionView(

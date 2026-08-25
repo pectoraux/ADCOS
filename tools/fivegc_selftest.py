@@ -12,6 +12,17 @@ determinism + cross-impl byte-identical canonical state, and failure
 isolation.  The B3 analog (case_29) proves bytes traverse the
 AppSession -> FiveGCoreManager -> SandboxedFiveGCore -> Open5GSAdapter
 -> real 5G Core NF peer (real HTTP SBi + real TCP data socket) path.
+
+The B1 real-Open5GS interop gate (case_30) is environment-gated by
+``OPEN5GS_INTEROP=1``: when a real Open5GS is reachable at
+``OPEN5GS_SBI_URL`` (and optionally a DN echo peer at
+``OPEN5GS_DATA_PEER``), case_30 exercises the full byte-path against
+the REAL Open5GS (real SBI + real PDU session establishment + real
+user-plane path -> ordinary IP traffic).  When the gate is disabled OR
+Open5GS is not reachable, case_30 SKIPS with a transparent verification-
+environment blocker disclosure -- it does NOT fake success with the
+in-repo conformance server (the Architect's B1 correction).  case_29
+remains the strongest honest evidence achievable in this sandbox.
 """
 
 from __future__ import annotations
@@ -38,6 +49,8 @@ from adapters.fivegc import (  # noqa: E402
     FiveGCoreError,
     FiveGCoreManager,
     FiveGCoreReasonCode,
+    InteropConfig,
+    InteropOutcome,
     NfEndpoint,
     Open5GSAdapter,
     PduSessionBinding,
@@ -51,6 +64,8 @@ from adapters.fivegc import (  # noqa: E402
     SubscriberReader,
     SubscriberProfileView,
     Supi,
+    gate_enabled,
+    run_open5gs_interop,
 )
 from adapters.fivegc.sandbox import DEFAULT_STEP_BUDGET  # noqa: E402
 
@@ -565,9 +580,18 @@ def case_18_r4_default_swap_preserves_live_binding() -> Result:
 def case_19_r5_standards_boundary_audit() -> Result:
     name = "case_19_r5_standards_boundary_audit"
     pkg_dir = os.path.join(_ROOT, "adapters", "fivegc")
-    forbidden_import_roots = ("ssl", "cryptography", "crypto", "random", "secrets", "os")
-    # open5gs.py + conformance.py may use real-network stdlib (http/socket/urllib).
-    real_network_allowed = {"open5gs.py", "conformance.py"}
+    forbidden_import_roots = ("ssl", "cryptography", "crypto", "random", "secrets")
+    # open5gs.py + conformance.py + open5gs_interop.py may use real-
+    # network stdlib (http/socket/urllib).  open5gs_interop.py is the
+    # B1 real-Open5GS interop gate -- it legitimately probes a real
+    # Open5GS SBI peer over a real TCP socket (no in-repo simulator
+    # fallback).  It also needs `os` for the env-var-driven gate
+    # config (OPEN5GS_INTEROP/OPEN5GS_SBI_URL/OPEN5GS_DATA_PEER); the
+    # sub-scan below rejects os.urandom/system/popen/fork/exec so the
+    # `os` import cannot smuggle non-determinism or sandbox escape.
+    real_network_allowed = {"open5gs.py", "conformance.py", "open5gs_interop.py"}
+    env_aware_allowed = {"open5gs_interop.py"}
+    forbidden_os_calls = ("os.urandom", "os.system", "os.popen", "os.fork", "os.exec", "os.spawn")
     real_network_modules = ("http", "socket", "urllib", "json")
     # Secret-MATERIAL-looking tokens (not credential NAMES cited in
     # docstrings to explain LOCK-023 -- those are legitimate; the
@@ -601,19 +625,34 @@ def case_19_r5_standards_boundary_audit() -> Result:
             if isinstance(node, ast.Import):
                 for alias in node.names:
                     root = alias.name.split(".")[0]
+                    # `os` is forbidden everywhere EXCEPT the env-aware
+                    # gate files (which need os.environ for the
+                    # OPEN5GS_INTEROP/OPEN5GS_SBI_URL/OPEN5GS_DATA_PEER
+                    # env-var-driven config; the sub-scan below rejects
+                    # os.urandom/system/popen/fork/exec).
                     if root in forbidden_import_roots:
                         return fail(name, "%s: forbidden import root %r" % (fname, root))
+                    if root == "os" and fname not in env_aware_allowed:
+                        return fail(name, "%s: forbidden import root %r (only %s may import os for env-var config)" % (fname, root, sorted(env_aware_allowed)))
             elif isinstance(node, ast.ImportFrom):
                 root = (node.module or "").split(".")[0]
                 if root in forbidden_import_roots:
                     return fail(name, "%s: forbidden import-from root %r" % (fname, root))
+                if root == "os" and fname not in env_aware_allowed:
+                    return fail(name, "%s: forbidden import-from root %r (only %s may import os for env-var config)" % (fname, root, sorted(env_aware_allowed)))
         # Non-real-network files must NOT use http/socket/urllib.
         if fname not in real_network_allowed:
             for node in ast.walk(tree):
                 if isinstance(node, (ast.Import, ast.ImportFrom)):
                     root = (node.module if isinstance(node, ast.ImportFrom) else node.names[0].name).split(".")[0] if isinstance(node, ast.ImportFrom) else node.names[0].name.split(".")[0]
                     if root in real_network_modules:
-                        return fail(name, "%s: real-network import %r forbidden outside open5gs.py/conformance.py" % (fname, root))
+                        return fail(name, "%s: real-network import %r forbidden outside open5gs.py/conformance.py/open5gs_interop.py" % (fname, root))
+        # Env-aware files must NOT call os.urandom/system/popen/fork/exec
+        # (the `os` import is for os.environ config ONLY).
+        if fname in env_aware_allowed:
+            for bad_call in forbidden_os_calls:
+                if bad_call in source:
+                    return fail(name, "%s: forbidden os call %r (env-aware files may use os.environ only)" % (fname, bad_call))
     # 3GPP TS citations.
     engine_src = open(os.path.join(pkg_dir, "engine.py"), encoding="utf-8").read().lower()
     if "ts 23.501" not in engine_src and "23.501" not in engine_src:
@@ -624,7 +663,10 @@ def case_19_r5_standards_boundary_audit() -> Result:
     conf_src = open(os.path.join(pkg_dir, "conformance.py"), encoding="utf-8").read().lower()
     if "29.510" not in conf_src:
         return fail(name, "conformance.py missing TS 29.510 citation")
-    return ok(name, "no forbidden imports; no secret tokens; 3GPP TS cited; real-network stdlib only in open5gs/conformance")
+    interop_src = open(os.path.join(pkg_dir, "open5gs_interop.py"), encoding="utf-8").read().lower()
+    if "29.500" not in interop_src:
+        return fail(name, "open5gs_interop.py missing TS 29.500 citation")
+    return ok(name, "no forbidden imports; no secret tokens; 3GPP TS cited; real-network stdlib only in open5gs/conformance/open5gs_interop; os.environ-only in env-aware gate")
 
 
 def case_20_r5_frozen_spec_intact() -> Result:
@@ -889,6 +931,71 @@ def case_29_b3_real_5gc_interop_conformance() -> Result:
         server.close()
 
 
+def case_30_b1_real_open5gs_interop_gate() -> Result:
+    """B1 real-Open5GS interop gate (environment-gated).
+
+    The Architect's PR #20 review identified one acceptance-critical
+    blocker: the frozen WORK-019 acceptance requires interoperation
+    with an INDEPENDENT standards-compliant 5G Core implementation,
+    not the in-repo :class:`Reference5GCoreConformanceServer`.  This
+    case is the required correction: an environment-gated real-Open5GS
+    interop suite.
+
+    Gate behavior:
+
+    * ``OPEN5GS_INTEROP`` unset -> SKIP with a transparent gate-
+      disabled disclosure (the conformance suite case_29 remains the
+      strongest evidence in this run; the gate does NOT run).
+    * ``OPEN5GS_INTEROP=1`` + Open5GS unreachable at
+      ``OPEN5GS_SBI_URL`` -> SKIP with a transparent verification-
+      environment blocker disclosure (the gate does NOT fake success
+      with the in-repo conformance server; the Architect's B1
+      correction is explicit on this point).
+    * ``OPEN5GS_INTEROP=1`` + Open5GS reachable + bytes traverse the
+      real Open5GS SBI + real user-plane path -> PASS with real-bytes-
+      evidence detail (this is the outcome that closes B1).
+    * ``OPEN5GS_INTEROP=1`` + Open5GS reachable + SBI failure /
+      data-peer unreachable / byte mismatch -> FAIL with the specific
+      reason (the gate does NOT mask real failures as SKIP).
+    """
+    name = "case_30_b1_real_open5gs_interop_gate"
+    # Phase 1: gate-enabled probe.  When OPEN5GS_INTEROP is not "1",
+    # the gate is OFF -- SKIP with a transparent disclosure.  This is
+    # NOT a FAIL: the conformance suite (case_29) is the strongest
+    # evidence in this run; the gate is the B1 closure path, not a
+    # conformance-suite replacement.
+    if not gate_enabled():
+        return ok(
+            name,
+            "SKIP (environment-gated OPEN5GS_INTEROP!=1): the B1 real-Open5GS "
+            "interop suite is not run; the conformance suite (case_29) covers "
+            "the deterministic reference peer.  Set OPEN5GS_INTEROP=1 with a "
+            "reachable Open5GS SBI endpoint (OPEN5GS_SBI_URL) + a DN echo peer "
+            "(OPEN5GS_DATA_PEER=host:port) to close B1; see PR #20 B1 correction.",
+        )
+    # Phase 2: run the real-Open5GS interop gate.  The gate probes
+    # SBI reachability; if Open5GS is not reachable, it returns
+    # UNREACHABLE (a SKIP, not a FAIL -- the verification-environment
+    # blocker is honest, not an architecture failure).  If Open5GS is
+    # reachable, the gate exercises the full byte-path; PASSED closes
+    # B1, SBI_FAILED/DATA_PEER_UNREACHABLE/BYTE_MISMATCH fail.
+    cfg = InteropConfig.from_env()
+    outcome = run_open5gs_interop(cfg)
+    if outcome.status == "PASSED":
+        return ok(name, "REAL Open5GS interop PASSED -- B1 closed: %s" % outcome.detail)
+    if outcome.status == "UNREACHABLE":
+        return ok(
+            name,
+            "SKIP (verification-environment blocker): OPEN5GS_INTEROP=1 set but "
+            "%s -- the gate does NOT fake success with the in-repo conformance "
+            "server (Architect B1 correction); expand the environment (root/Docker "
+            "to run Open5GS) to close B1." % outcome.detail,
+        )
+    # Genuinely unexpected failures (the gate ran, Open5GS was
+    # reachable, but the interop failed) are FAILs, not SKIPs.
+    return fail(name, "Open5GS interop %s: %s" % (outcome.status, outcome.detail))
+
+
 # ==========================================================================
 # Main
 # ==========================================================================
@@ -925,6 +1032,7 @@ def main() -> int:
         case_27_failure_isolation_budget_exhaustion,
         case_28_failure_isolation_no_secret_leak,
         case_29_b3_real_5gc_interop_conformance,
+        case_30_b1_real_open5gs_interop_gate,
     ]
     results: List[Result] = []
     for case in cases:

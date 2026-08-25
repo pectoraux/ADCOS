@@ -46,6 +46,12 @@ Package (adapters/fivegc/):
                  targeting real Open5GS SBi (TS 29.503/29.509/29.502)
                  + NGAP (SCTP) endpoints; subclasses the reference
                  engine + overrides only the real-network ops
+- open5gs_interop.py  The B1 real-Open5GS interop gate -- environment-
+                 gated (OPEN5GS_INTEROP=1); exercises real Open5GS SBI
+                 + real PDU session establishment + real user-plane
+                 path against a REAL Open5GS; SKIPS with a transparent
+                 verification-environment blocker when Open5GS is not
+                 reachable (no in-repo simulator fallback)
 - conformance.py Reference5GCoreConformanceServer -- a REAL 3GPP
                  SBi-over-HTTP NF peer that runs as user z (no root,
                  no Docker); the WORK-018 LoopbackIPv6ConformanceEngine
@@ -101,6 +107,14 @@ from .model import (
     Supi,
 )
 from .open5gs import Open5GSAdapter
+from .open5gs_interop import (
+    DEFAULT_OPEN5GS_INTEROP_PAYLOAD,
+    DEFAULT_OPEN5GS_SBI_URL,
+    InteropConfig,
+    InteropOutcome,
+    gate_enabled,
+    run_open5gs_interop,
+)
 from .sandbox import (
     DEFAULT_STEP_BUDGET,
     FiveGCoreOpResult,
@@ -123,6 +137,13 @@ __all__ = [
     "Reference5GCoreEngine",
     "Open5GSAdapter",
     "Reference5GCoreConformanceServer",
+    # B1 real-Open5GS interop gate
+    "DEFAULT_OPEN5GS_SBI_URL",
+    "DEFAULT_OPEN5GS_INTEROP_PAYLOAD",
+    "InteropConfig",
+    "InteropOutcome",
+    "gate_enabled",
+    "run_open5gs_interop",
     # Runtime
     "FiveGCoreManager",
     "SandboxedFiveGCore",
