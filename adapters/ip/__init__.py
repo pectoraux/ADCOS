@@ -72,6 +72,7 @@ from .errors import (
     IPIntegrationReasonCode,
 )
 from .gateway import GatewayResolver
+from .loopback import LoopbackIPv6ConformanceEngine
 from .manager import DEFAULT_INTEGRATION_ID, IPIntegrationManager, IPIntegrationOpResult
 from .model import (
     FlowLabel,
@@ -122,6 +123,8 @@ __all__ = [
     "NAT_CONTRACT_OPERATIONS",
     # Reference engine
     "ReferenceIPIntegrationEngine",
+    # Loopback IPv6 conformance engine (B3 real-network conformance)
+    "LoopbackIPv6ConformanceEngine",
     # Sandbox / failure isolation
     "SandboxedIPIntegration",
     "SandboxedNatAdapter",

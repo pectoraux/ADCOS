@@ -402,7 +402,7 @@ class IPIntegrationManager:
     def close(self, *, now: str) -> IPIntegrationOpResult:
         """Close the manager.  Fails CLOSED while bindings are outstanding."""
         validate_instant(now, "now")
-        outstanding = [b.binding_id for b in self._bindings.values() if not b.binding.closed]
+        outstanding = [b.binding.binding_id for b in self._bindings.values() if not b.binding.closed]
         if outstanding:
             raise IPIntegrationError(
                 IPIntegrationReasonCode.NOT_OPEN,

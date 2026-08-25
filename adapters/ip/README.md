@@ -129,13 +129,54 @@ sandboxed NAT seam.
 ## Real IPv6 interoperability (B3, frozen W018 acceptance)
 
 The frozen WORK-018 acceptance criterion requires that "standard IPv6
-connectivity works end to end" at the application-facing boundary.
-`case_42_b3_real_ipv6_loopback_conformance` proves this directly: an
-ordinary application using ONLY stdlib `AF_INET6` sockets over the OS
-`::1` loopback round-trips bytes end-to-end, with NO ADCOS-specific
-application API in the app path. No TUN/TAP, netfilter, FRR, or
-vendor integration is exercised (those remain behind the adapter
-boundary).
+connectivity works end to end" at the application-facing boundary, and
+that "apps need not understand ADCOS internals." `case_42_b3_real_ipv6_loopback_conformance`
+proves this directly: an ordinary application using ONLY standard
+socket semantics (`connect` / `send` / `recv` / `close`) on an
+`AppSocket` round-trips bytes end-to-end over a REAL `AF_INET6` `::1`
+loopback, with NO ADCOS-specific application API in the app path.
+
+The bytes literally traverse the WORK-018 contract/AppSocket path
+(the Architect's B3 regression requirement):
+
+```text
+ordinary application
+      |  standard socket semantics (connect/send/recv/close)
+      v
+AppSocket                                              (adapters/ip/socket.py)
+      |  send() -> manager.egress()
+      v
+IPIntegrationManager                                   (adapters/ip/manager.py)
+      |  routes through the binding's owning sandbox (B2)
+      v
+IPIntegrationContract                                  (adapters/ip/contract.py)
+      |  engine.egress() writes payload bytes to the real AF_INET6 socket
+      v
+LoopbackIPv6ConformanceEngine                          (adapters/ip/loopback.py)
+      |  real AF_INET6 socket
+      v
+AF_INET6 ::1 peer  (an ordinary echo server)
+```
+
+The `LoopbackIPv6ConformanceEngine` is a concrete
+`IPIntegrationContract` implementation (a "real IPv6 loopback adapter
+/ test implementation" beneath the contract) whose `app_socket()`
+attaches a real `AF_INET6` socket to the `AppSocket` and whose
+`egress()` writes `packet_view.payload_bytes` to that socket. The
+bytes therefore traverse `AppSocket.send` -> `manager.egress` ->
+`sandbox.egress` -> `engine.egress` -> real `AF_INET6` socket -> `::1`
+peer, and the echoed bytes come back through the same real socket via
+`AppSocket.recv()`. The application sees ONLY `connect/send/recv/close`
+and imports NO ADCOS symbol (LOCK-019 application transparency).
+
+The same roundtrip also works after swapping the implementation via
+`register_implementation` (criterion 6: the replaceable IP seam), with
+a fresh session and a fresh `AppSocket` routed to the new engine.
+
+No TUN/TAP, netfilter, FRR, or vendor integration is exercised (those
+remain behind the adapter boundary; LOCK-018 standards leverage -- the
+conformance engine uses the Python stdlib `socket` module, not a
+reinvented IPv6 primitive).
 
 ## Route/session identity separation
 

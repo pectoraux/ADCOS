@@ -37,9 +37,12 @@ All instants are injected; no wall clock, no randomness, no EXTERNAL
 network.  The ONE exception is case_42 (B3): a real Linux IPv6
 loopback conformance test mandated by the frozen WORK-018 acceptance
 criterion ("standard IPv6 connectivity works end to end") -- it uses
-ONLY the OS ::1 loopback with ordinary AF_INET6 sockets (no TUN/TAP,
-netfilter, FRR, or vendor integration, which all remain behind the
-adapter boundary), and the app path imports NO ADCOS symbol.
+ONLY the OS ::1 loopback, and the bytes traverse the actual
+WORK-018 contract/AppSocket path (AppSocket -> IPIntegrationManager
+-> IPIntegrationContract -> LoopbackIPv6ConformanceEngine -> real
+AF_INET6 ::1 peer), with NO ADCOS-specific application API in the
+app path.  No TUN/TAP, netfilter, FRR, or vendor integration is
+exercised (those remain behind the adapter boundary).
 The in-memory SessionReader/TopologyReader test doubles implement
 the real interfaces (the import-lock rule for test doubles).
 """
@@ -81,6 +84,7 @@ from adapters.ip import (  # noqa: E402
     FlowLabel,
     HopLimit,
     IPProtocol,
+    LoopbackIPv6ConformanceEngine,
     NAT_CONTRACT_OPERATIONS,
     NAT_TRANSLATE_STEP_CHARGE,
     NatAdapterContract,
@@ -1596,87 +1600,182 @@ def case_41_failure_isolation_no_secret_leak(results: List[Result]) -> None:
 
 
 def case_42_b3_real_ipv6_loopback_conformance(results: List[Result]) -> None:
-    """42. B3: ordinary AF_INET6 sockets over ::1 carry bytes end-to-end.
+    """42. B3: bytes traverse the AppSocket -> Manager -> Contract -> real AF_INET6 ::1 path.
 
-    A standard application (NO ADCOS import in the app path) binds ::1,
-    connects, and round-trips a payload over the real Linux IPv6
-    loopback.  This is the packet-path / interoperability evidence the
-    frozen WORK-018 acceptance criterion requires: standard IPv6
-    connectivity works end to end at the application-facing boundary,
-    with NO ADCOS-specific application API.  This is the ONE real-network
-    conformance case; it uses only the OS ::1 loopback -- no TUN/TAP,
-    netfilter, FRR, or vendor integration, which all remain behind the
-    adapter boundary.
+    The frozen WORK-018 acceptance criterion requires that "standard
+    IPv6 connectivity works end to end" at the application-facing
+    boundary and that "apps need not understand ADCOS internals."  The
+    Architect's B3 regression requirement is that the bytes in the
+    conformance test actually traverse the WORK-018 contract/AppSocket
+    path, NOT a separately-tested OS socket API.  This case proves
+    that directly: an ordinary application using ONLY standard socket
+    semantics (connect/send/recv/close) on an AppSocket round-trips
+    bytes end-to-end over a REAL AF_INET6 ::1 loopback, and the bytes
+    literally traverse::
+
+        app -> AppSocket.send -> manager.egress -> sandbox ->
+            engine.egress (LoopbackIPv6ConformanceEngine) ->
+            real AF_INET6 socket -> ::1 echo server ->
+            real AF_INET6 socket -> AppSocket.recv -> app
+
+    Criteria exercised (the Architect's six):
+      1. ordinary app code only knows connect/send/recv/close;
+      2. AppSocket.connect("::1") reaches the real IPv6 loopback endpoint;
+      3. bytes sent through AppSocket.send() arrive at the real IPv6 peer;
+      4. bytes returned by that peer arrive through AppSocket.recv();
+      5. no ADCOS-specific API is required by the application;
+      6. the same test still works through the replaceable IP
+         implementation seam (a register_implementation swap, a fresh
+         session, and a fresh AppSocket routed to the new engine).
+
+    This is the ONE real-network conformance case; it uses only the
+    OS ::1 loopback -- no TUN/TAP, netfilter, FRR, or vendor
+    integration, which all remain behind the adapter boundary.
     """
-    payload = b"adcospktpath-ipv6-loopback-conformance"
-    received: Dict[str, Any] = {}
+    name = "case_42_b3_real_ipv6_loopback_conformance"
+    payload = b"adcospktpath-ipv6-loopback-conformance-v2"
+
+    # ---- Ordinary AF_INET6 echo server on ::1 (the real IPv6 peer) ----
     srv = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
     srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     try:
         srv.bind(("::1", 0))
     except OSError as exc:
-        results.append(fail(
-            "case_42_b3_real_ipv6_loopback_conformance",
-            "could not bind ::1 (IPv6 loopback unavailable): %s" % exc,
-        ))
+        results.append(fail(name, "could not bind ::1 (IPv6 loopback unavailable): %s" % exc))
         return
-    srv.listen(1)
+    srv.listen(4)
     port = srv.getsockname()[1]
-    srv.settimeout(5)
+    srv.settimeout(10)
+    server_state: Dict[str, Any] = {"leg1": None, "leg2": None, "error": None}
 
-    def _server_thread() -> None:
+    def _echo_server() -> None:
+        """Accept two connections (leg 1 + criterion-6 swap leg), echo each."""
         try:
-            conn, _ = srv.accept()
-            with conn:
-                data = conn.recv(len(payload))
-                conn.sendall(data)  # echo
-            received["data"] = data
-        except Exception:  # pragma: no cover -- best-effort server
-            received["data"] = None
+            for leg in ("leg1", "leg2"):
+                conn, _ = srv.accept()
+                with conn:
+                    data = conn.recv(len(payload))
+                    conn.sendall(data)
+                    server_state[leg] = data
+        except Exception as exc:  # pragma: no cover -- best-effort server
+            server_state["error"] = str(exc)
 
-    t = threading.Thread(target=_server_thread)
+    t = threading.Thread(target=_echo_server)
     t.start()
-    # Ordinary client: AF_INET6 over ::1 -- NO ADCOS API in the app path.
-    cli = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
-    cli.settimeout(5)
-    echo = b""
+
+    mgr: Optional[IPIntegrationManager] = None
+    binding_a: Optional[SessionIPBinding] = None
+    binding_b: Optional[SessionIPBinding] = None
     try:
-        cli.connect(("::1", port))
-        cli.sendall(payload)
-        while len(echo) < len(payload):
-            chunk = cli.recv(len(payload) - len(echo))
-            if not chunk:
-                break
-            echo += chunk
-    except OSError as exc:
-        results.append(fail(
-            "case_42_b3_real_ipv6_loopback_conformance",
-            "client could not complete the ::1 round-trip: %s" % exc,
+        # ---- Leg 1: LoopbackIPv6ConformanceEngine as the initial impl ----
+        engine1 = LoopbackIPv6ConformanceEngine(peer_endpoint=("::1", port))
+        mgr = _new_manager(
+            implementation=engine1, integration_id="adcos:ipint:b3",
+        )
+        binding_a = _open_and_bind(
+            mgr, session_id=_SESSION_ID, route_ref=_ROUTE_REF,
+        )
+        r = mgr.app_socket(session_id=_SESSION_ID, now=_NOW)
+        if not r.ok:
+            results.append(fail(name, "app_socket(leg1) failed: %s" % r.detail))
+            return
+        sock_a = r.value
+        # Criterion 1 + 5: the app path uses ONLY connect/send/recv/close
+        # and imports NO ADCOS symbol.  The AppSocket's public surface
+        # is connect/send/recv/close; the test exercises only those.
+        try:
+            # Criterion 2: connect("::1") reaches the real IPv6 loopback endpoint.
+            sock_a.connect("::1")
+            # Criterion 3: bytes sent through AppSocket.send() traverse
+            # manager.egress -> sandbox -> engine.egress -> real AF_INET6
+            # socket -> ::1 peer.
+            n = sock_a.send(payload)
+            if n != len(payload):
+                results.append(fail(name, "send(leg1) returned %d, expected %d" % (n, len(payload))))
+                return
+            # Criterion 4: bytes returned by the peer arrive through AppSocket.recv().
+            echo_a = b""
+            while len(echo_a) < len(payload):
+                chunk = sock_a.recv()
+                if not chunk:
+                    break
+                echo_a += chunk
+            sock_a.close()
+        except IPIntegrationError as exc:
+            results.append(fail(name, "leg1 round-trip failed at the contract boundary: %s %s" % (exc.reason, exc)))
+            return
+        if server_state.get("leg1") != payload:
+            results.append(fail(name, "peer did not receive the payload via the contract path (leg1)"))
+            return
+        if echo_a != payload:
+            results.append(fail(name, "echoed payload mismatch via the contract path (leg1)"))
+            return
+
+        # ---- Leg 2 (criterion 6): swap the implementation via the
+        # replaceable IP seam (register_implementation); a fresh session
+        # + fresh AppSocket routed to the new engine round-trips again. ----
+        engine2 = LoopbackIPv6ConformanceEngine(peer_endpoint=("::1", port))
+        r = mgr.register_implementation(engine2, now=_NOW)
+        if not r.ok:
+            results.append(fail(name, "register_implementation (criterion 6) failed: %s" % r.detail))
+            return
+        # Bind a NEW session (session_id_2) on the new default engine.
+        binding_b = _open_and_bind(
+            mgr, session_id=_SESSION_ID_2, route_ref=_ROUTE_REF,
+        )
+        r = mgr.app_socket(session_id=_SESSION_ID_2, now=_NOW)
+        if not r.ok:
+            results.append(fail(name, "app_socket(leg2) failed: %s" % r.detail))
+            return
+        sock_b = r.value
+        try:
+            sock_b.connect("::1")
+            sock_b.send(payload)
+            echo_b = b""
+            while len(echo_b) < len(payload):
+                chunk = sock_b.recv()
+                if not chunk:
+                    break
+                echo_b += chunk
+            sock_b.close()
+        except IPIntegrationError as exc:
+            results.append(fail(name, "leg2 round-trip failed at the contract boundary: %s %s" % (exc.reason, exc)))
+            return
+        if server_state.get("leg2") != payload:
+            results.append(fail(name, "peer did not receive the payload via the swapped impl (leg2)"))
+            return
+        if echo_b != payload:
+            results.append(fail(name, "echoed payload mismatch via the swapped impl (leg2)"))
+            return
+
+        results.append(ok(
+            name,
+            "AppSocket->Manager->Contract->real AF_INET6 ::1 round-trip (leg1); "
+            "register_implementation swap -> fresh session/AppSocket round-trip (leg2); "
+            "no ADCOS API in the app path",
         ))
-        cli.close()
-        t.join()
-        srv.close()
-        return
     finally:
-        cli.close()
-    t.join()
-    srv.close()
-    if received.get("data") != payload:
-        results.append(fail(
-            "case_42_b3_real_ipv6_loopback_conformance",
-            "server did not receive the payload over ::1",
-        ))
-        return
-    if echo != payload:
-        results.append(fail(
-            "case_42_b3_real_ipv6_loopback_conformance",
-            "echoed payload mismatch over ::1",
-        ))
-        return
-    results.append(ok(
-        "case_42_b3_real_ipv6_loopback_conformance",
-        "AF_INET6 ::1 loopback round-trip; standard IPv6 path end-to-end",
-    ))
+        # Cleanup bindings + manager + server.
+        if mgr is not None:
+            if binding_a is not None:
+                try:
+                    mgr.close_binding(ip_binding_ref=binding_a.binding_id, now=_NOW)
+                except Exception:
+                    pass
+            if binding_b is not None:
+                try:
+                    mgr.close_binding(ip_binding_ref=binding_b.binding_id, now=_NOW)
+                except Exception:
+                    pass
+            try:
+                mgr.close(now=_NOW)
+            except Exception:
+                pass
+        try:
+            srv.close()
+        except OSError:
+            pass
+        t.join(timeout=5)
 
 
 # --------------------------------------------------------------------------

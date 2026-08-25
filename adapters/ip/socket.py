@@ -72,6 +72,15 @@ class AppSocket:
         self._inbound: list = []  # inbound bytes buffer (deterministic)
         self._closed = False
         self._now = "2026-06-01T12:00:00Z"  # injected instant (deterministic)
+        # B3: an OPTIONAL real AF_INET6 socket the engine may attach so
+        # bytes sent through send() traverse the contract path
+        # (manager.egress -> engine.egress) and land on a real ::1 peer,
+        # and bytes the peer echoes come back through recv().  When
+        # None, the socket is the in-memory reference model (no real
+        # network).  The field is PRIVATE and never appears in the
+        # public surface.
+        self._real_socket: Optional[Any] = None
+        self._peer_endpoint: Optional[Any] = None
 
     # ------------------------------------------------------------------
     # Public surface (LOCK-019): standard IPv6 socket semantics only.
@@ -90,9 +99,28 @@ class AppSocket:
                 IPIntegrationReasonCode.NOT_OPEN,
                 "socket is closed",
             )
-        # In the reference model the socket is pre-bound to a binding;
-        # connect() re-targets the remote address (deterministic).
         self._remote_ipv6 = canonical
+        # B3: when a real AF_INET6 socket is attached (by a conformance
+        # engine), connect() opens the real TCP connection to the
+        # configured peer endpoint so bytes later sent through send()
+        # traverse the contract path and land on the real ::1 peer.
+        # The app supplies ONLY a standard IPv6 address; the port is
+        # private routing metadata attached by the engine.
+        if self._real_socket is not None and self._peer_endpoint is not None:
+            peer_addr, peer_port = self._peer_endpoint
+            if canonical != peer_addr:
+                raise IPIntegrationError(
+                    IPIntegrationReasonCode.INVALID_INPUT,
+                    "configured peer is %s; application requested %s"
+                    % (peer_addr, canonical),
+                )
+            try:
+                self._real_socket.connect((peer_addr, peer_port))
+            except OSError as exc:
+                raise IPIntegrationError(
+                    IPIntegrationReasonCode.IPINTEGRATION_FAILURE,
+                    "real AF_INET6 connect failed: %s" % exc,
+                )
 
     def send(self, data: bytes) -> int:
         """Send bytes to the connected remote IPv6 address."""
@@ -136,6 +164,18 @@ class AppSocket:
                 IPIntegrationReasonCode.NOT_OPEN,
                 "socket is closed",
             )
+        # B3: when a real AF_INET6 socket is attached, bytes the peer
+        # returned come back through the same real socket.  The recv
+        # traverses NO ADCOS API; the application sees standard socket
+        # semantics only.
+        if self._real_socket is not None:
+            try:
+                return self._real_socket.recv(65536)
+            except OSError as exc:
+                raise IPIntegrationError(
+                    IPIntegrationReasonCode.IPINTEGRATION_FAILURE,
+                    "real AF_INET6 recv failed: %s" % exc,
+                )
         if self._inbound:
             return self._inbound.pop(0)
         # In the reference model an empty recv is permitted (the
@@ -145,6 +185,12 @@ class AppSocket:
 
     def close(self) -> None:
         """Close the socket."""
+        # B3: release the real AF_INET6 socket if one is attached.
+        if self._real_socket is not None:
+            try:
+                self._real_socket.close()
+            except OSError:
+                pass
         self._closed = True
 
     # ------------------------------------------------------------------
@@ -156,6 +202,16 @@ class AppSocket:
         """Internal: the manager injects itself so the socket can route
         egress to the binding's owning sandbox (B2)."""
         self._manager = manager
+
+    def _bind_real_socket(self, sock: Any, peer_endpoint: Any) -> None:
+        """Internal (B3): a conformance engine attaches a real AF_INET6
+        socket and its configured peer endpoint so the application's
+        standard connect/send/recv/close carry bytes over a real IPv6
+        path.  The socket and endpoint are PRIVATE routing metadata;
+        they never appear in the public surface, and the app path
+        imports NO ADCOS symbol."""
+        self._real_socket = sock
+        self._peer_endpoint = peer_endpoint
 
     def _deliver(self, data: bytes) -> None:
         """Internal: deliver inbound bytes (called by the test harness
