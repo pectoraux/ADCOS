@@ -17,51 +17,68 @@ jobs:
       # standard library and run fully offline — no package installation,
       # no network access, no external services).
       - name: Run specification consistency checks
+        if: always()
         run: python3 tools/spec_check.py
 
       - name: Run specification checker negative tests
+        if: always()
         run: python3 tools/spec_check_selftest.py
 
       - name: Run schema/registry consistency checks
+        if: always()
         run: python3 tools/schema_check.py
 
       - name: Run schema/registry compatibility tests
+        if: always()
         run: python3 tools/schema_selftest.py
 
       - name: Run envelope/serialization tests
+        if: always()
         run: python3 tools/envelope_selftest.py
 
       - name: Run identity lifecycle/security tests
+        if: always()
         run: python3 tools/identity_selftest.py
 
       - name: Run capability statement/negotiation tests
+        if: always()
         run: python3 tools/capability_selftest.py
 
       - name: Run peer discovery tests
+        if: always()
         run: python3 tools/discovery_selftest.py
 
       - name: Run evidence-aware topology tests
+        if: always()
         run: python3 tools/topology_selftest.py
 
       - name: Run resource model/measurement tests
+        if: always()
         run: python3 tools/resource_selftest.py
 
       - name: Run intent/QoS normalization tests
+        if: always()
         run: python3 tools/intent_selftest.py
 
       - name: Run policy engine tests
+        if: always()
         run: python3 tools/policy_selftest.py
 
       - name: Run path computation/routing tests
+        if: always()
         run: python3 tools/routing_selftest.py
 
       - name: Run session lifecycle tests
+        if: always()
         run: python3 tools/session_selftest.py
 
       - name: Run multipath session semantics tests
+        if: always()
         run: python3 tools/multipath_selftest.py
 
       - name: Run mobility and handover tests
+        if: always()
         run: python3 tools/mobility_selftest.py
       - name: Run federation protocol tests
+        if: always()
         run: python3 tools/federation_selftest.py
