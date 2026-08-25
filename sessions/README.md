@@ -212,26 +212,36 @@ API — `append_event` rejects state-preserving events as
 `illegal-transition`, and there is no public or registration-based
 plan-event append surface at all.
 
-**Call-frame identity gate** (Architect review of PR #13, correction
-cycle 6): the primitive verifies that its DIRECT CALLER is literally
-executing the registered extension commit capability
-(`sys._getframe(1).f_code` against the constructor-time-registered
-code objects). A direct call —
+**Call-frame identity gate with closure-captured trust state**
+(Architect reviews of PR #13, corrections 6-8): the primitive verifies
+that its DIRECT CALLER is literally executing the registered extension
+commit capability (`sys._getframe(1).f_code`). A direct call —
 `store._append_state_preserving_event(forged)` — fails closed with
 `extension-authority-required` even after a legitimate extension
 authority exists: holding references to the store, the capability,
-or the registry cannot satisfy a frame check. Registration
-(`_register_extension_commit_capability`) is a generic
-constructor-time handshake: first registration wins, and — the
-correction-7 fix — the registering frame's code object must BE a
-**declared genuine extension constructor**: extension packages pin
-their constructor code objects at **import time** via
+or the registry cannot satisfy a frame check.
+
+**The trust state is closure-captured, never an ordinary attribute**
+(correction 8): the declared-constructor set lives in the closure
+shared by `_declare_extension_constructor` / `_is_declared_constructor`
+(there is NO `_DECLARED_CONSTRUCTORS` module attribute to mutate), and
+the per-store trusted capability codes live in the closure shared by
+the per-store registration and commit gates created by the factory
+`__init__` (there is NO `_extension_commit_codes` instance attribute
+to mutate). The genuine checker is bound into the class's `__init__`
+at CLASS-DEFINITION time, so later module-attribute replacement cannot
+redirect it. Mutating store or module attributes (or `setattr`-ing new
+ones) cannot alter what the gates trust: the trust decision depends on
+no mutable Python collection reachable through ordinary references.
+Registration is a generic constructor-time handshake: first
+registration wins, and the registering frame's code object must BE a
+**declared genuine extension constructor** (correction 7): extension
+packages pin their constructor code objects at **import time** via
 `_declare_extension_constructor` (module-level frame + filename
 binding — only the module that owns the constructor can declare it).
 A function merely named `__init__` proves nothing: runtime-forged
 classes, forged same-named classes, and ordinary functions named
-`__init__` were never import-declared and are rejected, so the trusted
-code-object registry cannot be poisoned at registration.## Store semantics
+`__init__` were never import-declared and are rejected.## Store semantics
 
 Atomic `create` / `transition` / `append_event` (replay) / `reconnect`
 (binding update) / `suspend` / `terminate`. A failed transition leaves

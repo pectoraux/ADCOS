@@ -73,75 +73,274 @@ _WRAPPED_AS_INVALID_INPUT = frozenset({"invalid-input", "invalid-node"})
 
 
 # --------------------------------------------------------------------------
-# Extension constructor declarations (import-time trust anchoring)
+# Extension constructor declarations + trust state (closure-captured)
 #
-# Architect review of PR #13, correction cycle 7: checking that the
-# registering frame is a function NAMED "__init__" proves only the name,
-# not the genuine constructor -- a runtime-forged class satisfies it and
-# poisons the trusted code-object registry. The registration proof must
-# instead establish that the caller IS the genuine extension constructor
-# EXECUTION, while this layer stays free of any extension import.
+# Architect review of PR #13, correction cycle 8: the trust decision
+# must NOT depend on mutable Python data reachable through ordinary
+# object/module references. Corrections 6-7 kept the trusted frames in
+# an instance set (``store._extension_commit_codes``) and a module
+# global (``_DECLARED_CONSTRUCTORS``) -- an attacker could simply add
+# their own code object to either collection and satisfy every frame
+# check. All trust state therefore lives in CLOSURES now:
 #
-# The anchor: extension packages DECLARE their genuine constructor code
-# objects at IMPORT TIME, from their own module-level frame, bound to
-# their own file (filename identity between the declaring frame and the
-# declared constructor -- only the module that owns the constructor can
-# declare it). Per-store registration then verifies the registering
-# frame's code object against this pinned set. Runtime-defined classes,
-# forged same-named classes, and ordinary functions named "__init__"
-# were never import-declared and are rejected.
+# - the declared-constructor set lives in the closure shared by
+#   ``_declare_extension_constructor`` and ``_is_declared_constructor``
+#   (there is NO ``_DECLARED_CONSTRUCTORS`` module attribute to mutate;
+#   setattr on the module creates an unrelated name nothing consults);
+# - the per-store trusted capability codes live in the closure shared
+#   by the per-store registration and commit gates created by
+#   ``_make_session_init`` (there is NO ``_extension_commit_codes``
+#   instance attribute to mutate);
+# - the genuine declared-constructor CHECKER is bound into the class's
+#   ``__init__`` at CLASS-DEFINITION time (``SessionStore.__init__`` is
+#   produced by a factory), so later module-attribute replacement
+#   cannot redirect it.
+#
+# Threat model (documented, consistent with corrections 5-7): runtime
+# code that REPLACES functions/methods (module attributes, class
+# attributes, instance attributes holding the gate closures) is
+# monkeypatching -- equivalent to replacing the class itself and out of
+# scope; such replacement cannot grant commit authority anyway (a
+# replacement function has no access to the closure trust state or the
+# atomic-commit machinery beyond ordinary store internals, whose direct
+# mutation is full store compromise). Deep introspection (closure
+# cells) remains the documented boundary, and even possessing the
+# capability does not allow exercising it from attacker code (the
+# correction-6 caller-frame checks).
 # --------------------------------------------------------------------------
 
-#: Module-level set of DECLARED genuine extension constructor code
-#: objects (populated only by :func:`_declare_extension_constructor`
-#: at import time). The substrate never knows WHICH extension declared.
-_DECLARED_CONSTRUCTORS: set = set()
+
+def _build_extension_trust() -> Tuple[Any, Any]:
+    """Create the shared extension-constructor trust anchor in a closure.
+
+    Returns ``(declare, is_declared)``. The declared set is captured in
+    the closure -- reachable only through the returned functions (deep
+    ``__closure__`` introspection is outside the ordinary-mutation
+    threat model), never as a module attribute."""
+
+    declared_constructors: set = set()
+
+    def _declare(constructor_code: Any) -> None:
+        """Import-time declaration of a genuine extension constructor
+        (the trust anchor for per-store capability registration).
+
+        Constraints (mechanically enforced):
+
+        - the declaration MUST be made from a MODULE-LEVEL frame
+          (``co_name == "<module>"`` -- i.e., while the extension module
+          is being imported), never from runtime code;
+        - the declared constructor MUST be defined in the SAME FILE as
+          the declaring module (``co_filename`` identity);
+        - the declared code object MUST itself be an ``__init__``
+          (checked on the DECLARED code, where it is sound).
+        """
+        frame = sys._getframe(1)
+        declaring = frame.f_code
+        if declaring.co_name != "<module>":
+            raise SessionError(
+                "extension-authority",
+                "extension constructors are declared at IMPORT TIME from the "
+                "extension module's top level, not from runtime code",
+            )
+        if getattr(constructor_code, "co_filename", None) != declaring.co_filename:
+            raise SessionError(
+                "extension-authority",
+                "the declared constructor is not defined in the declaring "
+                "module's file -- only the module that owns the constructor "
+                "can declare it",
+            )
+        if getattr(constructor_code, "co_name", None) != "__init__":
+            raise SessionError(
+                "extension-authority",
+                "the declared code object is not a constructor "
+                "(co_name %r != '__init__')"
+                % getattr(constructor_code, "co_name", None),
+            )
+        declared_constructors.add(constructor_code)
+
+    def _is_declared(code: Any) -> bool:
+        return code in declared_constructors
+
+    return _declare, _is_declared
 
 
-def _declare_extension_constructor(constructor_code: Any) -> None:
-    """Import-time declaration of a genuine extension constructor (the
-    trust anchor for per-store capability registration).
+_declare_extension_constructor, _is_declared_constructor = _build_extension_trust()
 
-    Constraints (mechanically enforced):
 
-    - the declaration MUST be made from a MODULE-LEVEL frame
-      (``co_name == "<module>"`` -- i.e., while the extension module is
-      being imported), never from runtime code;
-    - the declared constructor MUST be defined in the SAME FILE as the
-      declaring module (``co_filename`` identity): only the module
-      that owns the constructor can declare it;
-    - the declared code object MUST be an ``__init__`` (``co_name``
-      check on the DECLARED code, not on the caller -- the weak
-      correction-6 check inverted).
+def _make_session_init(declared_checker: Any) -> Any:
+    """Produce the ``SessionStore.__init__`` with the extension trust
+    machinery bound at CLASS-DEFINITION time.
 
-    Threat model honesty: an adversary that can execute module-level
-    code in the process (i.e., controls imports) can equally monkeypatch
-    any Python boundary; this anchor defends against RUNTIME code
-    holding references -- the class of attack under review -- and pins
-    trust to import time, which precedes runtime code."""
-    frame = sys._getframe(1)
-    declaring = frame.f_code
-    if declaring.co_name != "<module>":
-        raise SessionError(
-            "extension-authority",
-            "extension constructors are declared at IMPORT TIME from the "
-            "extension module's top level, not from runtime code",
-        )
-    if getattr(constructor_code, "co_filename", None) != declaring.co_filename:
-        raise SessionError(
-            "extension-authority",
-            "the declared constructor is not defined in the declaring "
-            "module's file -- only the module that owns the constructor "
-            "can declare it",
-        )
-    if getattr(constructor_code, "co_name", None) != "__init__":
-        raise SessionError(
-            "extension-authority",
-            "the declared code object is not a constructor "
-            "(co_name %r != '__init__')"
-            % getattr(constructor_code, "co_name", None),
-        )
-    _DECLARED_CONSTRUCTORS.add(constructor_code)
+    The genuine declared-constructor checker is captured in this
+    factory's closure when the class body executes (module import) --
+    later module-attribute replacement cannot redirect it. Each store
+    instance gets its own closure-captured trusted-capability list
+    (shared between the registration gate and the commit gate), never
+    an ordinary instance attribute: mutating store attributes cannot
+    alter what the gates trust.
+
+    The per-store gates are exposed as instance attributes holding the
+    closures: replacing them is code monkeypatching (out of the
+    data-mutation threat model) and cannot grant commit authority -- a
+    replacement function has no access to the closure trust state or
+    the atomic-commit machinery beyond ordinary store internals."""
+
+    def __init__(self) -> None:
+        self._sessions = {}
+        self._events = {}
+        self._lock = threading.RLock()
+        # Per-store extension trust: closure-captured, NEVER an ordinary
+        # attribute (Architect review of PR #13, correction cycle 8).
+        trusted_extension_codes: List[Any] = []
+
+        def _register_extension_commit_capability(code_object: Any) -> None:
+            """Register THE extension commit capability code object for
+            this store -- the generic constructor-time handshake.
+
+            Gates: first registration only; the registering frame's code
+            object must BE a DECLARED genuine extension constructor
+            (import-time declaration via
+            ``sessions._declare_extension_constructor`` -- the checker is
+            closure-bound at class-definition time). A function merely
+            named ``__init__`` proves nothing."""
+            if trusted_extension_codes:
+                raise SessionError(
+                    "extension-authority",
+                    "this session store already has a registered extension "
+                    "commit capability; exactly one capability may own the "
+                    "extension-event seam",
+                )
+            frame = sys._getframe(1)
+            if not declared_checker(frame.f_code):
+                raise SessionError(
+                    "extension-authority",
+                    "extension commit capabilities are registered only by a "
+                    "DECLARED genuine extension constructor (import-time "
+                    "declaration via sessions._declare_extension_constructor; "
+                    "the registering frame's code object is not in the "
+                    "declared set) -- a function merely named '__init__' "
+                    "does not establish constructor genuineness",
+                )
+            trusted_extension_codes.append(code_object)
+
+        def _append_state_preserving_event(event: SessionEvent) -> SessionResult:
+            """Atomically append a PRE-VALIDATED state-preserving event
+            (the GENERIC internal substrate primitive for extension
+            events).
+
+            The extension authority gate verifies CALL-FRAME
+            CODE-OBJECT identity against the CLOSURE-captured trusted
+            capability list (not a mutable attribute): direct calls,
+            forged callbacks, and callers whose code was never
+            registered fail closed with ``extension-authority-required``.
+
+            Generic session-layer invariants: the event is a
+            :class:`SessionEvent` and its session exists; an exact
+            duplicate of any already-accepted event is idempotent
+            (``replayed``); the sequence must be exactly last+1; the
+            session is not terminal; the event is state-preserving
+            (extension events never change the lifecycle state or the
+            authoritative route)."""
+            with self._lock:
+                frame = sys._getframe(1)
+                if frame.f_code not in trusted_extension_codes:
+                    return SessionResult(
+                        ok=False,
+                        code=SessionReasonCode.EXTENSION_AUTHORITY_REQUIRED,
+                        detail="extension events can only be committed by the "
+                        "registered extension commit capability (call-frame "
+                        "code-identity check failed) -- direct calls to the "
+                        "internal substrate primitive fail closed",
+                    )
+                if not isinstance(event, SessionEvent):
+                    return SessionResult(
+                        ok=False,
+                        code=SessionReasonCode.INVALID_INPUT,
+                        detail="event must be a SessionEvent instance",
+                    )
+                session_id = event.session_id
+                session = self._require(session_id)
+                if session is None:
+                    return self._unknown(session_id)
+                history = self._events.get(session_id, [])
+                if any(e.event_id == event.event_id for e in history):
+                    return SessionResult(
+                        ok=True,
+                        code=SessionReasonCode.REPLAYED,
+                        detail="exact duplicate of already-accepted event "
+                        "sequence %d -- idempotent replay (no mutation)"
+                        % event.sequence,
+                        session=session,
+                        event=event,
+                    )
+                last = history[-1] if history else None
+                if last is not None:
+                    if event.sequence <= last.sequence:
+                        return SessionResult(
+                            ok=False,
+                            code=SessionReasonCode.SEQUENCE_CONFLICT,
+                            detail="event sequence %d conflicts with existing "
+                            "sequence %d (different content) -- conflicting reuse "
+                            "fails closed" % (event.sequence, last.sequence),
+                            session=session,
+                        )
+                    if event.sequence != last.sequence + 1:
+                        return SessionResult(
+                            ok=False,
+                            code=SessionReasonCode.SEQUENCE_GAP,
+                            detail="event sequence %d is not the next expected "
+                            "sequence %d -- strictly monotonic per-session "
+                            "sequencing fails closed" % (event.sequence, last.sequence + 1),
+                            session=session,
+                        )
+                else:
+                    if event.sequence != 1:
+                        return SessionResult(
+                            ok=False,
+                            code=SessionReasonCode.SEQUENCE_GAP,
+                            detail="first event must have sequence 1 (got %d)"
+                            % event.sequence,
+                            session=session,
+                        )
+                if session.state in SessionState.terminal_values():
+                    return SessionResult(
+                        ok=False,
+                        code=SessionReasonCode.TERMINAL_STATE,
+                        detail="session %s is in terminal state %s -- plan events "
+                        "cannot be appended" % (session_id[:24], session.state),
+                        session=session,
+                    )
+                if (
+                    event.previous_state != session.state
+                    or event.new_state != session.state
+                ):
+                    return SessionResult(
+                        ok=False,
+                        code=SessionReasonCode.EVENT_STATE_MISMATCH,
+                        detail="a plan event must be state-preserving: "
+                        "previous_state/new_state (%s/%s) must equal the current "
+                        "session state %s" % (event.previous_state, event.new_state,
+                                              session.state),
+                        session=session,
+                    )
+                updated = replace(
+                    session,
+                    last_event_sequence=event.sequence,
+                    last_event_instant=event.event_instant,
+                )
+                return self._commit_events(
+                    updated,
+                    (event,),
+                    result_code=SessionReasonCode.EVENT_APPENDED,
+                    result_detail="plan event sequence %d appended "
+                    "(state-preserving; session state %s unchanged)"
+                    % (event.sequence, session.state),
+                )
+
+        self._register_extension_commit_capability = _register_extension_commit_capability
+        self._append_state_preserving_event = _append_state_preserving_event
+
+    return __init__
 
 
 def _envelope_error(error: SessionError) -> SessionResult:
@@ -159,17 +358,23 @@ class SessionStore:
     """In-memory deterministic session lifecycle store (WORK-012 scope:
     no persistence protocol, no global replay database)."""
 
-    def __init__(self) -> None:
-        self._sessions: Dict[str, Session] = {}
-        self._events: Dict[str, List[SessionEvent]] = {}
-        self._lock = threading.RLock()
-        # The registered extension commit capability code objects
-        # (generic: the substrate never knows which extension). The
-        # commit primitive verifies CALL-FRAME CODE-OBJECT identity
-        # against this set, so the capability cannot be exercised by
-        # holding references -- only by literally executing the
-        # registered capability function.
-        self._extension_commit_codes: set = set()
+    # Instance attributes (initialized by the factory __init__; typed
+    # here for static checkers).
+    _sessions: Dict[str, Session]
+    _events: Dict[str, List[SessionEvent]]
+    _lock: Any
+
+    # Extension seam closures (assigned per-instance by the factory
+    # __init__; typed here for static checkers). They are NOT methods
+    # and are NOT backed by any mutable trust attribute -- all trust
+    # state is closure-captured (see _make_session_init).
+    _register_extension_commit_capability: Any
+    _append_state_preserving_event: Any
+
+    # Factory-produced __init__: binds the genuine declared-constructor
+    # checker at CLASS-DEFINITION time and installs the per-store
+    # closure-captured extension trust gates.
+    __init__: Any = _make_session_init(_is_declared_constructor)
 
     # -- queries --------------------------------------------------------
 
@@ -883,183 +1088,6 @@ class SessionStore:
     # -- state-preserving plan events (WORK-013 extension point) -------------
 
     # -- extension-event seam (generic internal substrate) ----------------
-
-    def _register_extension_commit_capability(self, code_object: Any) -> None:
-        """Register THE extension commit capability code object for this
-        store -- the generic constructor-time handshake (called by an
-        extension constructor; the substrate never knows which one).
-
-        GENERIC + FRAME-GUARDED (Architect reviews of PR #13,
-        corrections 6-7): exactly one capability may own a store's
-        extension-event seam (first registration wins; later
-        registrations fail closed), and -- the correction-7 fix -- the
-        registering frame's code object must BE a DECLARED genuine
-        extension constructor (pinned at import time via
-        :func:`_declare_extension_constructor`, module-level frame +
-        filename binding). A function merely NAMED "__init__" proves
-        nothing: runtime-forged classes, forged same-named classes, and
-        ordinary functions named "__init__" were never import-declared
-        and are rejected here, so the trusted code-object registry
-        cannot be poisoned at registration. The security boundary at
-        COMMIT time is unchanged: the primitive verifies CALL-FRAME
-        CODE-OBJECT identity, so even a registered code object cannot
-        be exercised by a caller that is not literally executing it."""
-        if self._extension_commit_codes:
-            raise SessionError(
-                "extension-authority",
-                "this session store already has a registered extension "
-                "commit capability; exactly one capability may own the "
-                "extension-event seam",
-            )
-        frame = sys._getframe(1)
-        if frame.f_code not in _DECLARED_CONSTRUCTORS:
-            raise SessionError(
-                "extension-authority",
-                "extension commit capabilities are registered only by a "
-                "DECLARED genuine extension constructor (import-time "
-                "declaration via sessions._declare_extension_constructor; "
-                "the registering frame's code object is not in the "
-                "declared set) -- a function merely named '__init__' "
-                "does not establish constructor genuineness",
-            )
-        self._extension_commit_codes.add(code_object)
-
-    def _append_state_preserving_event(self, event: SessionEvent) -> SessionResult:
-        """Atomically append a PRE-VALIDATED state-preserving event (the
-        GENERIC internal substrate primitive for extension events).
-
-        ARCHITECTURE (Architect review of PR #13, correction cycle 3 --
-        layering): WORK-012 provides a GENERIC lifecycle/session
-        substrate. This primitive is deliberately extension-agnostic:
-        it knows NOTHING about any extension (no imports, no
-        registration, no capability issuance, no extension types); it
-        performs ONLY the generic atomic session commit. The SEMANTIC
-        validation of extension events belongs entirely to the owning
-        extension layer, which validates and then invokes this internal
-        primitive. Extensions depend on
-        WORK-012; WORK-012 never depends on any extension.
-
-        Enforced here (generic session-layer invariants):
-
-        - the event is a :class:`SessionEvent` and its session exists;
-        - an exact duplicate of ANY already-accepted event (content-
-          derived ``event_id`` match) is idempotent (``replayed``, no
-          mutation);
-        - the sequence must be exactly last+1 (``sequence-conflict`` /
-          ``sequence-gap`` otherwise);
-        - the session is not terminal (``terminal-state``);
-        - the event is state-preserving against the CURRENT session
-          state (``event-state-mismatch``) -- extension events never
-          change the lifecycle state or the authoritative route.
-
-        On success the event and the updated session head (sequence +
-        instant; state and current route unchanged) become visible
-        together."""
-        with self._lock:
-            # AUTHORITY GATE (Architect review of PR #13, correction
-            # cycle 6): the DIRECT CALLER must literally be executing
-            # the registered extension commit capability. Verification
-            # is by CALL-FRAME CODE-OBJECT identity -- it cannot be
-            # satisfied by holding references to the capability, the
-            # authority instance, the registry, or this primitive: a
-            # caller that is not the registered capability code itself
-            # fails closed. Direct calls to this internal primitive
-            # (e.g. ``store._append_state_preserving_event(forged)``)
-            # therefore fail closed with ``extension-authority-required``.
-            frame = sys._getframe(1)
-            if frame.f_code not in self._extension_commit_codes:
-                return SessionResult(
-                    ok=False,
-                    code=SessionReasonCode.EXTENSION_AUTHORITY_REQUIRED,
-                    detail="extension events can only be committed by the "
-                    "registered extension commit capability (call-frame "
-                    "code-identity check failed) -- direct calls to the "
-                    "internal substrate primitive fail closed",
-                )
-            if not isinstance(event, SessionEvent):
-                return SessionResult(
-                    ok=False,
-                    code=SessionReasonCode.INVALID_INPUT,
-                    detail="event must be a SessionEvent instance",
-                )
-            session_id = event.session_id
-            session = self._require(session_id)
-            if session is None:
-                return self._unknown(session_id)
-            history = self._events.get(session_id, [])
-            if any(e.event_id == event.event_id for e in history):
-                return SessionResult(
-                    ok=True,
-                    code=SessionReasonCode.REPLAYED,
-                    detail="exact duplicate of already-accepted event "
-                    "sequence %d -- idempotent replay (no mutation)"
-                    % event.sequence,
-                    session=session,
-                    event=event,
-                )
-            last = history[-1] if history else None
-            if last is not None:
-                if event.sequence <= last.sequence:
-                    return SessionResult(
-                        ok=False,
-                        code=SessionReasonCode.SEQUENCE_CONFLICT,
-                        detail="event sequence %d conflicts with existing "
-                        "sequence %d (different content) -- conflicting reuse "
-                        "fails closed" % (event.sequence, last.sequence),
-                        session=session,
-                    )
-                if event.sequence != last.sequence + 1:
-                    return SessionResult(
-                        ok=False,
-                        code=SessionReasonCode.SEQUENCE_GAP,
-                        detail="event sequence %d is not the next expected "
-                        "sequence %d -- strictly monotonic per-session "
-                        "sequencing fails closed" % (event.sequence, last.sequence + 1),
-                        session=session,
-                    )
-            else:
-                if event.sequence != 1:
-                    return SessionResult(
-                        ok=False,
-                        code=SessionReasonCode.SEQUENCE_GAP,
-                        detail="first event must have sequence 1 (got %d)"
-                        % event.sequence,
-                        session=session,
-                    )
-            if session.state in SessionState.terminal_values():
-                return SessionResult(
-                    ok=False,
-                    code=SessionReasonCode.TERMINAL_STATE,
-                    detail="session %s is in terminal state %s -- plan events "
-                    "cannot be appended" % (session_id[:24], session.state),
-                    session=session,
-                )
-            if (
-                event.previous_state != session.state
-                or event.new_state != session.state
-            ):
-                return SessionResult(
-                    ok=False,
-                    code=SessionReasonCode.EVENT_STATE_MISMATCH,
-                    detail="a plan event must be state-preserving: "
-                    "previous_state/new_state (%s/%s) must equal the current "
-                    "session state %s" % (event.previous_state, event.new_state,
-                                          session.state),
-                    session=session,
-                )
-            updated = replace(
-                session,
-                last_event_sequence=event.sequence,
-                last_event_instant=event.event_instant,
-            )
-            return self._commit_events(
-                updated,
-                (event,),
-                result_code=SessionReasonCode.EVENT_APPENDED,
-                result_detail="plan event sequence %d appended "
-                "(state-preserving; session state %s unchanged)"
-                % (event.sequence, session.state),
-            )
 
     # -- internals -----------------------------------------------------------
 

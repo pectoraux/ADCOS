@@ -223,6 +223,14 @@ def _define_multipath_store() -> type:
             # this instance, or to any registry does not satisfy either
             # frame check -- only literally executing a validated operation
             # can commit.
+            # Capture the GENUINE substrate primitive at construction so a
+            # later replacement of the store attribute cannot redirect
+            # genuine commits (replacement is code monkeypatching -- out
+            # of the data-mutation threat model -- and cannot grant
+            # authority anyway; capturing simply keeps the legitimate
+            # path stable).
+            commit_primitive = session_store._append_state_preserving_event
+
             def _commit_capability(event: Any) -> SessionResult:
                 frame = sys._getframe(1)
                 if frame.f_code not in _operation_codes:
@@ -235,7 +243,7 @@ def _define_multipath_store() -> type:
                         "other than add_path/remove_path/change_path_status/"
                         "replay_event executing on the authority instance",
                     )
-                return session_store._append_state_preserving_event(event)
+                return commit_primitive(event)
 
             _authorities[session_store] = self
             _capabilities[self] = _commit_capability

@@ -117,7 +117,15 @@ The authority registry, the per-instance capabilities, and the
 operation-code set all live in the class-factory closure — **not**
 module globals, class attributes, or instance attributes. There is no
 token object, no accessor, no module-level commit function, and no
-registry a caller can look a credential up in. Exactly one
+registry a caller can look a credential up in. **The substrate's trust
+state is likewise closure-captured** (correction 8): neither
+`store._extension_commit_codes` nor
+`sessions.store._DECLARED_CONSTRUCTORS` exists as a mutable attribute
+— mutating store or module attributes (or `setattr`-ing new ones)
+cannot alter what the gates trust, so an attacker cannot add their own
+code to the trusted sets. The capability also CAPTURES the genuine
+substrate primitive at construction, so a later replacement of the
+store attribute cannot redirect genuine commits. Exactly one
 `MultipathStore` may own a given `SessionStore`'s plan-event seam
 (enforced at construction, in this layer). Only the application's own
 constructed authority can commit, and only its validated operations

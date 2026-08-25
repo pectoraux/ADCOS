@@ -2070,6 +2070,25 @@ def case_43_direct_primitive_attack(results: List[Result]) -> None:
 # constructor (declared at multipath import) -> accepted.
 # --------------------------------------------------------------------------
 
+def _capability_installed(ss: SessionStore) -> bool:
+    """Behavioral registration probe (no trust attributes exist to
+    introspect): attempt a registration from THIS frame -- which is
+    never a declared constructor. An INSTALLED store rejects with the
+    first-only guard ("already has a registered"); an UNINSTALLED store
+    rejects with the declared-set failure. Neither attempt can succeed
+    or mutate anything."""
+    from sessions import SessionError
+
+    def _probe_sentinel():  # never registered successfully
+        pass
+
+    try:
+        ss._register_extension_commit_capability(_probe_sentinel.__code__)
+        return True  # unreachable: this frame is not a declared constructor
+    except SessionError as error:
+        return "already has a registered" in str(error)
+
+
 def case_44_registration_forgery(results: List[Result]) -> None:
     """REGRESSION (PR #13 correction 7): the exact Architect attack --
     a runtime-forged class registering its own __init__ code object --
@@ -2121,7 +2140,7 @@ def case_44_registration_forgery(results: List[Result]) -> None:
     except Exception as error:
         if getattr(error, "code", "") != "extension-authority":
             problems.append("(1) wrong code %r" % getattr(error, "code", ""))
-    if ss._extension_commit_codes:
+    if _capability_installed(ss):
         problems.append("(1) capability installed by rejected registration")
     r_prim = ss._append_state_preserving_event(_forged_event(ss, sid))
     if r_prim.ok or r_prim.code != SessionReasonCode.EXTENSION_AUTHORITY_REQUIRED:
@@ -2142,7 +2161,7 @@ def case_44_registration_forgery(results: List[Result]) -> None:
     except Exception as error:
         if getattr(error, "code", "") != "extension-authority":
             problems.append("(2) wrong code %r" % getattr(error, "code", ""))
-    if ss._extension_commit_codes:
+    if _capability_installed(ss):
         problems.append("(2) capability installed")
 
     # (3) An ordinary function NAMED __init__ (the weak correction-6
@@ -2156,24 +2175,38 @@ def case_44_registration_forgery(results: List[Result]) -> None:
     except Exception as error:
         if getattr(error, "code", "") != "extension-authority":
             problems.append("(3) wrong code %r" % getattr(error, "code", ""))
-    if ss._extension_commit_codes:
+    if _capability_installed(ss):
         problems.append("(3) capability installed")
 
     # (4) The genuine constructor IS import-declared (the anchor exists),
     #     and registering from NON-constructor runtime code fails even
     #     when presenting the GENUINE constructor's code object (the
     #     frame itself must be the genuine constructor execution).
-    declared = _sessions_store._DECLARED_CONSTRUCTORS
+    # The genuine constructor IS import-declared: prove behaviorally by
+    # constructing a genuine authority over a FRESH store (registration
+    # raises unless the registering frame is a declared constructor).
+    try:
+        ss_probe = SessionStore()
+        res_probe = ss_probe.create(r_direct, policy, source_node_id=_NODE_A,
+                                    destination_node_id=_NODE_B,
+                                    creation_instant=_NOW)
+        sid_probe = res_probe.session.session_id
+        ss_probe.transition(sid_probe, SessionState.AUTHORIZED, event_instant=_NOW)
+        ss_probe.transition(sid_probe, SessionState.ESTABLISHED, event_instant=_NOW)
+        ms_probe = MultipathStore(ss_probe)
+        if not _capability_installed(ss_probe):
+            problems.append("(4) genuine constructor not import-declared")
+        _ = ms_probe
+    except Exception as error:
+        problems.append("(4) genuine construction failed: %r" % error)
     genuine_ctor = MultipathStore.__init__.__code__
-    if genuine_ctor not in declared:
-        problems.append("(4) genuine constructor not import-declared")
     try:
         ss._register_extension_commit_capability(genuine_ctor)
         problems.append("(4) runtime call presenting genuine code accepted")
     except Exception as error:
         if getattr(error, "code", "") != "extension-authority":
             problems.append("(4) wrong code %r" % getattr(error, "code", ""))
-    if ss._extension_commit_codes:
+    if _capability_installed(ss):
         problems.append("(4) capability installed")
 
     # (5) Import-time declaration itself is frame-gated: a runtime call
@@ -2184,14 +2217,14 @@ def case_44_registration_forgery(results: List[Result]) -> None:
     except Exception as error:
         if getattr(error, "code", "") != "extension-authority":
             problems.append("(5) wrong code %r" % getattr(error, "code", ""))
-    if _forged_init.__code__ in _sessions_store._DECLARED_CONSTRUCTORS:
-        problems.append("(5) forged code declared")
+    if _capability_installed(ss):
+        problems.append("(5) forged code became trusted")
 
     # (6) The GENUINE flow is unaffected: constructing the real
     #     MultipathStore over the SAME store registers cleanly and
     #     validated operations commit.
     ms = MultipathStore(ss)
-    if not ss._extension_commit_codes:
+    if not _capability_installed(ss):
         problems.append("(6) genuine registration failed")
     route_alt = _route((_AC, _CB), reach=(_NODE_C,), instant="2026-06-01T12:00:01Z")
     r_add = ms.add_path(sid, route_alt, event_instant=_NOW)
@@ -2208,6 +2241,161 @@ def case_44_registration_forgery(results: List[Result]) -> None:
         results.append(fail("case_44_registration_forgery", "; ".join(problems[:5])))
     else:
         results.append(ok("case_44_registration_forgery", "exact attack / forged same-named class / ordinary __init__ / runtime-presented genuine code / runtime declaration all rejected with no capability and no mutation; genuine flow unaffected"))
+
+
+# --------------------------------------------------------------------------
+# Architect-review regression case (PR #13 correction cycle 8)
+#
+# Blockers: BOTH trust stores were ordinary mutable Python collections.
+# (1) store._extension_commit_codes was an instance set -- an attacker
+# could add their own code object and satisfy the commit gate.
+# (2) sessions.store._DECLARED_CONSTRUCTORS was a module-global set --
+# an attacker could add their code and register it as a trusted
+# constructor. The trust decision depended on mutable data reachable
+# through ordinary references, undermining corrections 1-7: an attacker
+# never needs to forge a frame, just the collection defining which
+# frames are trusted.
+#
+# Fix: ALL trust state is closure-captured (never an instance or module
+# attribute): the declared-constructor set lives in the closure shared
+# by _declare_extension_constructor/_is_declared_constructor; the
+# per-store trusted codes live in the closure shared by the per-store
+# gates created by the factory __init__ (bound at class-definition
+# time). The multipath capability also captures the genuine primitive
+# at construction so attribute replacement cannot redirect genuine
+# commits.
+# --------------------------------------------------------------------------
+
+def case_45_trust_store_mutation(results: List[Result]) -> None:
+    """REGRESSION (PR #13 correction 8 -- the Architect's exact matrix,
+    after a legitimate MultipathStore exists): mutating the trust stores
+    through ordinary references cannot grant authority; the direct
+# primitive is rejected; forged callbacks are rejected; the legitimate
+    operation succeeds."""
+    import sessions.store as _sessions_store
+    from sessions import SessionError, SessionResult
+    problems = []
+
+    # Fixture: legitimate authority + ESTABLISHED session + admitted path.
+    r_direct = _route((_AB,))
+    policy = _policy_decision()
+    ss = SessionStore()
+    res = ss.create(r_direct, policy, source_node_id=_NODE_A,
+                    destination_node_id=_NODE_B, creation_instant=_NOW)
+    sid = res.session.session_id
+    ss.transition(sid, SessionState.AUTHORIZED, event_instant=_NOW)
+    ss.transition(sid, SessionState.ESTABLISHED, event_instant=_NOW)
+    ms = MultipathStore(ss)
+    route_alt = _route((_AC, _CB), reach=(_NODE_C,), instant="2026-06-01T12:00:01Z")
+    add = ms.add_path(sid, route_alt, event_instant=_NOW)
+    assert add.ok, "fixture add failed: %s" % add.detail
+
+    def forged_event():
+        return SessionEvent(
+            event_id="", session_id=sid,
+            sequence=ss.get(sid).last_event_sequence + 1,
+            previous_state=SessionState.ESTABLISHED,
+            new_state=SessionState.ESTABLISHED,
+            event_type=MP_EVENT_PATH_FAILED, event_instant=_NOW,
+            metadata=((META_PATH_ID, route_alt.selected.path_id),),
+        )
+
+    def attacker_commit(event):
+        return ss._append_state_preserving_event(event)
+
+    # ---- (1) mutate the INSTANCE trust attribute ----------------------
+    # The attribute no longer exists; setattr creates an UNRELATED
+    # attribute the genuine gate never consults.
+    if hasattr(ss, "_extension_commit_codes"):
+        problems.append("(1) mutable trust attribute still on the instance")
+    try:
+        ss._extension_commit_codes.add(attacker_commit.__code__)
+        problems.append("(1) instance trust set is reachable/mutable")
+    except AttributeError:
+        pass  # the attribute does not exist -- correct
+    ss._extension_commit_codes = {attacker_commit.__code__}  # unrelated
+    before = ss.to_canonical_bytes()
+    r1 = attacker_commit(forged_event())
+    if r1.ok or r1.code != SessionReasonCode.EXTENSION_AUTHORITY_REQUIRED:
+        problems.append("(1) setattr on trust attribute granted authority: %s/%s"
+                        % (r1.ok, r1.code))
+    if ss.to_canonical_bytes() != before:
+        problems.append("(1) store mutated")
+    del ss._extension_commit_codes
+
+    # ---- (2) mutate the MODULE trust set ------------------------------
+    if hasattr(_sessions_store, "_DECLARED_CONSTRUCTORS"):
+        problems.append("(2) module trust set still exists")
+    _sessions_store._DECLARED_CONSTRUCTORS = {attacker_commit.__code__}
+    try:
+        class AttackerReg:
+            def __init__(self, store):
+                store._register_extension_commit_capability(
+                    AttackerReg.__init__.__code__
+                )
+
+        ss2 = SessionStore()
+        res2 = ss2.create(r_direct, policy, source_node_id=_NODE_A,
+                          destination_node_id=_NODE_B, creation_instant=_NOW)
+        sid2 = res2.session.session_id
+        ss2.transition(sid2, SessionState.AUTHORIZED, event_instant=_NOW)
+        ss2.transition(sid2, SessionState.ESTABLISHED, event_instant=_NOW)
+        AttackerReg(ss2)
+        problems.append("(2) registration via mutated module set succeeded")
+    except SessionError:
+        pass  # rejected: the gate consults the closure, not the module attr
+    except Exception as error:
+        problems.append("(2) wrong error: %r" % error)
+    del _sessions_store._DECLARED_CONSTRUCTORS
+
+    # ---- (3) REPLACE the primitive attribute with a fake ---------------
+    # The fake cannot commit (no access to the atomic-commit machinery);
+    # the genuine capability holds the CAPTURED genuine primitive, so
+    # legitimate operations are unaffected by the replacement.
+    genuine = ss._append_state_preserving_event
+    events_before = len(ss.get_events(sid))
+
+    def fake_primitive(event):
+        return SessionResult(ok=True, code="faked", detail="fake")
+
+    ss._append_state_preserving_event = fake_primitive
+    rf = fake_primitive(forged_event())
+    if not rf.ok:
+        problems.append("(3) fake probe misconfigured")
+    if len(ss.get_events(sid)) != events_before:
+        problems.append("(3) fake primitive committed an event")
+    r3 = ms.change_path_status(sid, route_alt.selected.path_id,
+                               PathStatus.DEGRADED, event_instant=_NOW)
+    if not (r3.ok and r3.plan.get(route_alt.selected.path_id).status == PathStatus.DEGRADED):
+        problems.append("(3) genuine op broken by attribute replacement: %s/%s"
+                        % (r3.ok, r3.code))
+    ss._append_state_preserving_event = genuine  # restore
+    before = ss.to_canonical_bytes()
+    events_before = len(ss.get_events(sid))
+
+    # ---- (4) direct primitive call -> rejected -------------------------
+    r4 = ss._append_state_preserving_event(forged_event())
+    if r4.ok or r4.code != SessionReasonCode.EXTENSION_AUTHORITY_REQUIRED:
+        problems.append("(4) direct primitive: %s/%s" % (r4.ok, r4.code))
+
+    # ---- (5) forged callback -> rejected -------------------------------
+    r5 = attacker_commit(forged_event())
+    if r5.ok or r5.code != SessionReasonCode.EXTENSION_AUTHORITY_REQUIRED:
+        problems.append("(5) forged callback: %s/%s" % (r5.ok, r5.code))
+
+    if ss.to_canonical_bytes() != before or len(ss.get_events(sid)) != events_before:
+        problems.append("(4/5) rejections mutated the store")
+
+    # ---- (6) legitimate MultipathStore operation -> succeeds -----------
+    r6 = ms.change_path_status(sid, route_alt.selected.path_id,
+                               PathStatus.FAILED, event_instant=_NOW)
+    if not (r6.ok and r6.plan.get(route_alt.selected.path_id).status == PathStatus.FAILED):
+        problems.append("(6) legitimate op failed: %s/%s" % (r6.ok, r6.code))
+
+    if problems:
+        results.append(fail("case_45_trust_store_mutation", "; ".join(problems[:5])))
+    else:
+        results.append(ok("case_45_trust_store_mutation", "instance/module trust attrs gone (setattr grants nothing); primitive replacement commits nothing and cannot redirect genuine ops; direct + forged callback rejected; legitimate op succeeds"))
 
 
 # --------------------------------------------------------------------------
@@ -2265,6 +2453,8 @@ def main() -> int:
     case_43_direct_primitive_attack(results)
     # Architect-review regression case (PR #13 correction cycle 7).
     case_44_registration_forgery(results)
+    # Architect-review regression case (PR #13 correction cycle 8).
+    case_45_trust_store_mutation(results)
 
     print("ADCOS multipath self-test (WORK-013)")
     print("=" * 72)
