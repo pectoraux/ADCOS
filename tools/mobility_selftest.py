@@ -1194,7 +1194,8 @@ def case_33_transaction_vocabulary(results: List[Result]) -> None:
         "candidate-unavailable", "path-binding-mismatch", "old-path-mismatch",
         "policy-denied", "intent-violation", "sequence-conflict",
         "sequence-gap", "replay-conflict", "replay-provenance",
-        "reservation-failure",
+        "reservation-failure", "cleanup-failure",
+        "rolled-back-cleanup-failed",
         "commit-failure", "rollback-failure", "concurrent-transition",
         "unsupported-operation", "transaction-terminal",
     }
@@ -1215,7 +1216,7 @@ def case_33_transaction_vocabulary(results: List[Result]) -> None:
     if problems:
         results.append(fail("case_33_transaction_vocabulary", "; ".join(problems)))
     else:
-        results.append(ok("case_33_transaction_vocabulary", "26 frozen reason codes incl. all handoff section-16 codes + replay-provenance"))
+        results.append(ok("case_33_transaction_vocabulary", "28 frozen reason codes incl. all handoff section-16 codes + replay-provenance + cleanup-failure + rolled-back-cleanup-failed"))
 
 
 def case_34_session_state_gating(results: List[Result]) -> None:
@@ -1516,6 +1517,272 @@ def case_41_fabricated_event_replay(results: List[Result]) -> None:
 
 
 # --------------------------------------------------------------------------
+# Architect-review regression cases (PR #14 correction cycle 2)
+#
+# Blocker: the MBB rollback path could leave the candidate path ACTIVE.
+# _mbb_remove was best-effort and its failure was IGNORED by the
+# callers, so this state was possible:
+#
+#     MobilityTransaction = ROLLED_BACK
+#     Session = old binding restored
+#     MultipathPlan = STILL CONTAINS the candidate
+#
+# a genuine half-handover: mobility claimed rollback completed while
+# the candidate remained active in the session's multipath state.
+#
+# Fix: rollback treats the MBB cleanup as part of the transaction's
+# correctness boundary. _mbb_remove now PROVES the removal (removed /
+# already-absent / nothing-to-remove are all provable success); when
+# the removal cannot be proven, the transaction records the explicit
+# degraded terminal outcome CLEANUP_FAILED (code
+# rolled-back-cleanup-failed) with the stale candidate explicitly
+# recorded -- never an ordinary ROLLED_BACK. The session remains
+# authoritative on the old binding either way. A post-commit retire
+# failure (the OLD constituent cannot be removed after the new binding
+# committed) keeps the transaction COMMITTED (the handover completed;
+# the new path is authoritative) but records the unresolved stale old
+# entry with the structurally distinct cleanup-failure code.
+# --------------------------------------------------------------------------
+
+def case_42_mbb_cleanup_failure(results: List[Result]) -> None:
+    """REGRESSION (PR #14 correction 2): a fault-injected MBB candidate
+    removal failure after a failed reconnect produces the explicit
+    CLEANUP_FAILED outcome -- the old session binding remains
+    authoritative, the candidate is NOT silently considered removed,
+    the outcome and history explicitly record the unresolved candidate,
+    and no new session is created."""
+    r_old = _route()
+    policy = _policy_decision()
+    ss, mp, ms, sid = _setup(route=r_old, policy=policy, multipath=True)
+    cand = _distinct_route(policy=policy)
+    pr = _prepare(ms, sid, cand, old_decision=r_old)
+    tid = pr.transaction.transaction_id
+
+    # Fault-inject the SESSION reconnect: the FIRST call (the commit's
+    # candidate reconnect) fails; later calls (the rollback's
+    # restore-old reconnect) pass through so the session rollback
+    # succeeds independently of the cleanup failure.
+    call_count = [0]
+    orig_reconnect = ss.reconnect
+
+    def selective_reconnect(session_id, new_route_decision, **kwargs):
+        call_count[0] += 1
+        if call_count[0] == 1:
+            return type("R", (), {
+                "ok": False, "code": "policy-binding-mismatch",
+                "detail": "fault-injected candidate reconnect failure",
+                "session": None, "event": None,
+            })()
+        return orig_reconnect(session_id, new_route_decision, **kwargs)
+
+    ss.reconnect = selective_reconnect
+
+    # Fault-inject the multipath remove_path with a NON-unknown-path
+    # code (unknown-path is a provable already-absent success).
+    removal_calls: List[str] = []
+    orig_remove = mp.remove_path
+
+    def failing_remove(session_id, path_id, **kwargs):
+        removal_calls.append(path_id)
+        return type("R", (), {
+            "ok": False, "code": "plan-state-illegal",
+            "detail": "fault-injected removal failure",
+            "plan": None, "session": None, "event": None,
+        })()
+
+    mp.remove_path = failing_remove
+
+    try:
+        co = ms.commit_handover(tid, event_instant=_LATER)
+    finally:
+        ss.reconnect = orig_reconnect
+        mp.remove_path = orig_remove
+
+    problems = []
+    if co.ok:
+        problems.append("commit unexpectedly succeeded")
+    else:
+        tx = co.transaction
+        if tx.state != TransactionState.CLEANUP_FAILED:
+            problems.append("state %r (expected CLEANUP_FAILED)" % tx.state)
+        if co.code != MobilityReasonCode.ROLLED_BACK_CLEANUP_FAILED:
+            problems.append("code %r" % co.code)
+        if "could not be proven successful" not in co.detail:
+            problems.append("cleanup failure not explicit in the outcome")
+        # The session remains authoritative on the OLD binding.
+        sess = ss.get(sid)
+        if sess.session_id != sid:
+            problems.append("a new session was created")
+        if sess.current_path_id != r_old.selected.path_id:
+            problems.append("old binding not authoritative")
+        # The candidate is NOT silently considered removed.
+        if not removal_calls:
+            problems.append("removal was never attempted")
+        if cand.selected.path_id not in [e.path_id for e in mp.get_plan(sid).entries]:
+            problems.append("candidate silently removed")
+        # The event history records the unresolved candidate.
+        ev = ms.get_events(tid)[-1]
+        if ev.event_type != "cleanup-failed":
+            problems.append("event type %r" % ev.event_type)
+        if ev.new_state != TransactionState.CLEANUP_FAILED:
+            problems.append("event new_state %r" % ev.new_state)
+        if sess.state != SessionState.ESTABLISHED:
+            problems.append("session state %s (expected ESTABLISHED after restore)" % sess.state)
+    if problems:
+        results.append(fail("case_42_mbb_cleanup_failure", "; ".join(problems)))
+    else:
+        results.append(ok("case_42_mbb_cleanup_failure", "fault-injected cleanup failure -> CLEANUP_FAILED; old binding authoritative; candidate explicitly unresolved; no new session"))
+
+
+def case_43_rollback_variants_independent(results: List[Result]) -> None:
+    """The old-route session rollback (restore the old binding) and the
+    MBB candidate cleanup are INDEPENDENT axes, each proven separately:
+
+    - (a) session rollback SUCCEEDS + cleanup SUCCEEDS -> ROLLED_BACK;
+    - (b) session rollback SUCCEEDS + cleanup FAILS -> CLEANUP_FAILED
+      (session authoritative on the old binding; candidate unresolved);
+    - (c) session rollback UNAVAILABLE (no retained old decision) +
+      cleanup SUCCEEDS -> ROLLED_BACK with the session in its explicit
+      RECONNECTING state (identity preserved);
+    - (d) post-commit retire failure (the OLD constituent cannot be
+      removed after a successful commit) -> COMMITTED with the distinct
+      cleanup-failure code; the new path is authoritative; the stale
+      old entry is explicitly recorded."""
+    problems = []
+    r_old = _route()
+    policy = _policy_decision()
+    cand = _distinct_route(policy=policy)
+
+    def inject_first_reconnect_failure(ss, code="policy-binding-mismatch"):
+        """Fail the FIRST session reconnect (the commit's candidate
+        reconnect); later calls (rollback restores) pass through."""
+        call_count = [0]
+        orig = ss.reconnect
+
+        def selective(session_id, new_route_decision, **kwargs):
+            call_count[0] += 1
+            if call_count[0] == 1:
+                return type("R", (), {
+                    "ok": False, "code": code,
+                    "detail": "fault-injected candidate reconnect failure",
+                    "session": None, "event": None,
+                })()
+            return orig(session_id, new_route_decision, **kwargs)
+
+        ss.reconnect = selective
+        return orig
+
+    def inject_remove_failure(mp):
+        """Fail every multipath remove_path with a non-unknown-path code."""
+        orig = mp.remove_path
+
+        def failing(session_id, path_id, **kwargs):
+            return type("R", (), {
+                "ok": False, "code": "plan-state-illegal",
+                "detail": "fault-injected removal failure",
+                "plan": None, "session": None, "event": None,
+            })()
+
+        mp.remove_path = failing
+        return orig
+
+    # ---- (a) both succeed ------------------------------------------------
+    ss, mp, ms, sid = _setup(route=r_old, policy=policy, multipath=True)
+    pr = _prepare(ms, sid, cand, old_decision=r_old)
+    orig_rec = inject_first_reconnect_failure(ss)
+    try:
+        co = ms.commit_handover(pr.transaction.transaction_id, event_instant=_LATER)
+    finally:
+        ss.reconnect = orig_rec
+    if not (not co.ok and co.transaction.state == TransactionState.ROLLED_BACK):
+        problems.append("(a) state %r" % co.transaction.state)
+    elif ss.get(sid).current_path_id != r_old.selected.path_id:
+        problems.append("(a) old binding not restored")
+    elif cand.selected.path_id in [e.path_id for e in mp.get_plan(sid).entries]:
+        problems.append("(a) candidate lingered")
+    elif ss.get(sid).state != SessionState.ESTABLISHED:
+        problems.append("(a) session state %s" % ss.get(sid).state)
+
+    # ---- (b) session rollback succeeds, cleanup fails --------------------
+    ss2, mp2, ms2, sid2 = _setup(route=r_old, policy=policy, multipath=True)
+    pr2 = _prepare(ms2, sid2, cand, old_decision=r_old)
+    orig_rec2 = inject_first_reconnect_failure(ss2)
+    orig_rem2 = inject_remove_failure(mp2)
+    try:
+        co2 = ms2.commit_handover(pr2.transaction.transaction_id, event_instant=_LATER)
+    finally:
+        ss2.reconnect = orig_rec2
+        mp2.remove_path = orig_rem2
+    if not (not co2.ok and co2.transaction.state == TransactionState.CLEANUP_FAILED):
+        problems.append("(b) state %r" % co2.transaction.state)
+    elif co2.code != MobilityReasonCode.ROLLED_BACK_CLEANUP_FAILED:
+        problems.append("(b) code %r" % co2.code)
+    elif ss2.get(sid2).current_path_id != r_old.selected.path_id:
+        problems.append("(b) old binding not authoritative")
+    elif cand.selected.path_id not in [e.path_id for e in mp2.get_plan(sid2).entries]:
+        problems.append("(b) candidate silently removed")
+    elif ss2.get(sid2).state != SessionState.ESTABLISHED:
+        problems.append("(b) session state %s" % ss2.get(sid2).state)
+
+    # ---- (c) session rollback unavailable, cleanup succeeds ---------------
+    ss3, mp3, ms3, sid3 = _setup(route=r_old, policy=policy, multipath=True)
+    # Prepare WITHOUT retaining the old decision: the rollback cannot
+    # restore the old binding, so the session stays RECONNECTING.
+    pr3 = _prepare(ms3, sid3, cand)
+    # Corrupt the retained candidate decision so the reconnect fails:
+    # use a decision whose reconnect fails via policy binding while the
+    # MBB add still succeeds — inject the first-reconnect failure and
+    # drop the old decision from the retained pair.
+    ms3._decisions[pr3.transaction.transaction_id] = (
+        ms3._decisions[pr3.transaction.transaction_id][0], None
+    )
+    orig_rec3 = inject_first_reconnect_failure(ss3)
+    try:
+        co3 = ms3.commit_handover(pr3.transaction.transaction_id, event_instant=_LATER)
+    finally:
+        ss3.reconnect = orig_rec3
+    if not (not co3.ok and co3.transaction.state == TransactionState.ROLLED_BACK):
+        problems.append("(c) state %r" % co3.transaction.state)
+    else:
+        sess3 = ss3.get(sid3)
+        if sess3.session_id != sid3:
+            problems.append("(c) identity changed")
+        if sess3.state != SessionState.RECONNECTING:
+            problems.append("(c) session state %s (expected RECONNECTING)" % sess3.state)
+        if cand.selected.path_id in [e.path_id for e in mp3.get_plan(sid3).entries]:
+            problems.append("(c) candidate lingered")
+        if "remains in its explicit RECONNECTING" not in co3.detail:
+            problems.append("(c) degraded outcome not explicit")
+
+    # ---- (d) post-commit retire failure ------------------------------------
+    ss4, mp4, ms4, sid4 = _setup(route=r_old, policy=policy, multipath=True)
+    add_old = mp4.add_path(sid4, r_old, event_instant=_NOW)
+    assert add_old.ok
+    pr4 = _prepare(ms4, sid4, cand, old_decision=r_old)
+    orig_rem4 = inject_remove_failure(mp4)
+    try:
+        co4 = ms4.commit_handover(pr4.transaction.transaction_id, event_instant=_LATER)
+    finally:
+        mp4.remove_path = orig_rem4
+    if not co4.ok:
+        problems.append("(d) commit failed: %s" % co4.code)
+    else:
+        if co4.transaction.state != TransactionState.COMMITTED:
+            problems.append("(d) state %r" % co4.transaction.state)
+        if co4.code != MobilityReasonCode.CLEANUP_FAILURE:
+            problems.append("(d) code %r (expected cleanup-failure)" % co4.code)
+        if ss4.get(sid4).current_path_id != cand.selected.path_id:
+            problems.append("(d) new path not authoritative")
+        if "UNRESOLVED" not in co4.detail:
+            problems.append("(d) stale old entry not explicit")
+
+    if problems:
+        results.append(fail("case_43_rollback_variants_independent", "; ".join(problems[:5])))
+    else:
+        results.append(ok("case_43_rollback_variants_independent", "4 independent variants: RB/RB+cleanup-failed/RB-degraded-reconnecting/COMMITTED+cleanup-failure"))
+
+
+# --------------------------------------------------------------------------
 # Main
 # --------------------------------------------------------------------------
 
@@ -1563,6 +1830,9 @@ def main() -> int:
     case_40_prior_prompts_unchanged(results)
     # Architect-review regression case (PR #14 correction cycle 1).
     case_41_fabricated_event_replay(results)
+    # Architect-review regression cases (PR #14 correction cycle 2).
+    case_42_mbb_cleanup_failure(results)
+    case_43_rollback_variants_independent(results)
 
     print("ADCOS mobility self-test (WORK-014)")
     print("=" * 72)

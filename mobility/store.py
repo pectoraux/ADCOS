@@ -101,6 +101,7 @@ EVENT_ROLLED_BACK = "rolled-back"
 EVENT_FAILED = "failed"
 EVENT_SUPERSEDED = "superseded"
 EVENT_CANCELLED = "cancelled"
+EVENT_CLEANUP_FAILED = "cleanup-failed"
 EVENT_EXPIRED = "expired"
 
 #: Session-reason codes that mean "the candidate/binding was invalid at
@@ -547,9 +548,9 @@ class MobilityStore:
                     event_instant=event_instant,
                 )
                 if not add.ok and add.code not in ("duplicate-path",):
-                    # Duplicate is fine (idempotent re-commit path).
-                    rollback_add = self._mbb_remove(mb_added=False, transaction=transaction)
-                    _ = rollback_add
+                    # Duplicate is fine (idempotent re-commit path). A
+                    # failed add mutated no plan state, so no cleanup is
+                    # needed (the helper confirms this trivially).
                     return self._transition_transaction(
                         transaction, event_instant, TransactionState.FAILED,
                         EVENT_FAILED, MobilityReasonCode.COMMIT_FAILURE,
@@ -567,9 +568,15 @@ class MobilityStore:
                 )
                 if not tr.ok:
                     # No session mutation happened (transition failed
-                    # atomically). Undo the MBB add if it happened.
-                    if mb_added:
-                        self._mbb_remove(mb_added=True, transaction=transaction)
+                    # atomically). Undo the MBB add if it happened -- and
+                    # PROVE the undo: an unprovable candidate removal is
+                    # an explicit degraded outcome, never a silent
+                    # ROLLED_BACK (no-half-handover extends to the
+                    # multipath side effect).
+                    cleanup_ok, cleanup_detail = self._mbb_remove(
+                        mb_added=mb_added, transaction=transaction,
+                        event_instant=event_instant,
+                    )
                     code = tr.code
                     if code == SessionReasonCode.ROUTE_EXPIRED:
                         mapped = MobilityReasonCode.CANDIDATE_EXPIRED
@@ -577,11 +584,23 @@ class MobilityStore:
                         mapped = MobilityReasonCode.SESSION_NOT_HANDOVER_CAPABLE
                     else:
                         mapped = MobilityReasonCode.COMMIT_FAILURE
+                    if cleanup_ok:
+                        return self._transition_transaction(
+                            transaction, event_instant, TransactionState.ROLLED_BACK,
+                            EVENT_ROLLED_BACK, mapped,
+                            "session transition to RECONNECTING failed: %s -- "
+                            "rolled back with no session mutation; %s"
+                            % (tr.detail, cleanup_detail),
+                        )
                     return self._transition_transaction(
-                        transaction, event_instant, TransactionState.ROLLED_BACK,
-                        EVENT_ROLLED_BACK, mapped,
-                        "session transition to RECONNECTING failed: %s -- "
-                        "rolled back with no session mutation" % tr.detail,
+                        transaction, event_instant, TransactionState.CLEANUP_FAILED,
+                        EVENT_CLEANUP_FAILED,
+                        MobilityReasonCode.ROLLED_BACK_CLEANUP_FAILED,
+                        "session transition to RECONNECTING failed: %s; the "
+                        "session remains authoritative on the old binding, "
+                        "BUT %s -- the stale candidate is explicitly recorded; "
+                        "administrative cleanup is required"
+                        % (tr.detail, cleanup_detail),
                     )
             # ---- Session reconnect onto the candidate --------------------
             rec = self._sessions.reconnect(
@@ -597,19 +616,38 @@ class MobilityStore:
                 rollback_detail = self._rollback_session(
                     transaction, event_instant, actor_reference
                 )
-                if mb_added:
-                    self._mbb_remove(mb_added=True, transaction=transaction)
+                # Undo the MBB add -- and PROVE the undo: an unprovable
+                # candidate removal is an explicit degraded outcome
+                # (CLEANUP_FAILED), never a silent ROLLED_BACK
+                # (no-half-handover extends to the multipath side
+                # effect; the session remains authoritative on the old
+                # binding either way).
+                cleanup_ok, cleanup_detail = self._mbb_remove(
+                    mb_added=mb_added, transaction=transaction,
+                    event_instant=event_instant,
+                )
                 mapped = rec.code if rec.code in MobilityReasonCode.values() else (
                     MobilityReasonCode.COMMIT_FAILURE
                 )
+                if cleanup_ok:
+                    return self._transition_transaction(
+                        transaction, event_instant, TransactionState.ROLLED_BACK,
+                        EVENT_ROLLED_BACK, mapped,
+                        "session reconnect onto the candidate failed: %s. %s; %s"
+                        % (rec.detail, rollback_detail, cleanup_detail),
+                    )
                 return self._transition_transaction(
-                    transaction, event_instant, TransactionState.ROLLED_BACK,
-                    EVENT_ROLLED_BACK, mapped,
-                    "session reconnect onto the candidate failed: %s. %s"
-                    % (rec.detail, rollback_detail),
+                    transaction, event_instant, TransactionState.CLEANUP_FAILED,
+                    EVENT_CLEANUP_FAILED,
+                    MobilityReasonCode.ROLLED_BACK_CLEANUP_FAILED,
+                    "session reconnect onto the candidate failed: %s. %s BUT "
+                    "%s -- the stale candidate is explicitly recorded in the "
+                    "transaction outcome; administrative cleanup is required"
+                    % (rec.detail, rollback_detail, cleanup_detail),
                 )
             # ---- MBB step 4: retire the old constituent ------------------
             retire_detail = ""
+            retire_unresolved = False
             if (
                 transaction.mode == "make-before-break"
                 and self._multipath is not None
@@ -624,18 +662,32 @@ class MobilityStore:
                 elif rem.code == "unknown-path":
                     retire_detail = "old constituent already absent (retired)"
                 else:
-                    # The authoritative binding HAS committed; the stale
-                    # plan entry is recorded, not silently dropped.
+                    # The authoritative binding HAS committed (the new path
+                    # is authoritative regardless), so the transaction
+                    # stays COMMITTED -- but the unresolved OLD constituent
+                    # is stale plan state that is EXPLICITLY recorded (a
+                    # structurally distinct commit code + the event
+                    # metadata carries the unresolved reference), never a
+                    # silently dropped warning.
+                    retire_unresolved = True
                     retire_detail = (
-                        "WARNING: old constituent retirement returned %s "
-                        "(%s); the new path is authoritative regardless"
-                        % (rem.code, rem.detail)
+                        "UNRESOLVED: old constituent retirement returned %s "
+                        "(%s); the new path is authoritative; the stale old "
+                        "entry %s remains in the multipath plan and requires "
+                        "administrative cleanup"
+                        % (rem.code, rem.detail,
+                           transaction.old_binding.path_id[:24])
                     )
             # ---- Commit the transaction ---------------------------------
             session_after = self._sessions.get(transaction.session_id)
+            commit_code = (
+                MobilityReasonCode.CLEANUP_FAILURE
+                if retire_unresolved
+                else MobilityReasonCode.COMMITTED
+            )
             return self._transition_transaction(
                 transaction, event_instant, TransactionState.COMMITTED,
-                EVENT_COMMITTED, MobilityReasonCode.COMMITTED,
+                EVENT_COMMITTED, commit_code,
                 "handover committed: session %s (identity preserved) moved "
                 "from path %s to path %s (mode %s); %s"
                 % (transaction.session_id[:16],
@@ -814,17 +866,37 @@ class MobilityStore:
 
     # -- internals -----------------------------------------------------------
 
-    def _mbb_remove(self, *, mb_added: bool, transaction: MobilityTransaction) -> bool:
-        """Best-effort removal of a just-added MBB candidate (rollback of
-        step 1). Returns True when a removal was attempted and succeeded."""
+    def _mbb_remove(self, *, mb_added: bool, transaction: MobilityTransaction,
+                    event_instant: str = "") -> Tuple[bool, str]:
+        """Remove a just-added MBB candidate (rollback of step 1) and
+        PROVE the removal. Returns ``(removed, detail)``:
+
+        - ``(True, ...)``: no candidate had been added, OR the removal
+          succeeded, OR the plan reports the candidate already absent
+          (``unknown-path``) -- in every case the plan verifiably no
+          longer contains the candidate;
+        - ``(False, detail)``: a removal was needed but could NOT be
+          proven successful -- the detail explains why. The caller MUST
+          NOT record an ordinary ROLLED_BACK in this case (Architect
+          review of PR #14, correction cycle 2: the no-half-handover
+          contract extends to the multipath side effect)."""
         if not mb_added or self._multipath is None:
-            return False
+            return True, "no make-before-break candidate to remove"
         rem = self._multipath.remove_path(
             transaction.session_id,
             transaction.candidate_binding.path_id,
-            event_instant=transaction.last_event_instant or transaction.creation_instant,
+            event_instant=event_instant or transaction.last_event_instant
+            or transaction.creation_instant,
         )
-        return rem.ok
+        if rem.ok:
+            return True, "make-before-break candidate removed"
+        if rem.code == "unknown-path":
+            return True, "make-before-break candidate already absent"
+        return False, (
+            "make-before-break candidate removal could not be proven "
+            "successful (%s: %s) -- the candidate may remain active in "
+            "the session's multipath plan" % (rem.code, rem.detail)
+        )
 
     def _rollback_session(
         self, transaction: MobilityTransaction, event_instant: str,

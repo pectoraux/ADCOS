@@ -105,7 +105,9 @@ scheduling authority and never introduces a `primary_route` concept.
 
 Every transaction ends in `COMMITTED`, `ROLLED_BACK`, `FAILED`, or an
 explicitly represented transitional outcome, with deterministic
-evidence. A failed commit rolls back:
+evidence. A failed commit rolls back — and the make-before-break cleanup is
+part of the transaction's correctness boundary (Architect review of
+PR #14, correction 2):
 
 - transition-to-RECONNECTING failure → ROLLED_BACK, zero session
   mutation (the failed transition mutated nothing);
@@ -113,8 +115,23 @@ evidence. A failed commit rolls back:
   the old path is still valid at the rollback instant); when it is
   not, the session remains in its explicit RECONNECTING state —
   identity and history preserved — and the transaction records
-  ROLLED_BACK with the degraded outcome. A make-before-break
-  candidate added to the plan is removed again on rollback.
+  ROLLED_BACK with the degraded outcome;
+- **MBB candidate cleanup is PROVEN, not best-effort**: when a
+  candidate was added to the plan, its removal is attempted and the
+  outcome is verified. A provable removal (removed / already-absent /
+  nothing-to-remove) → ordinary `ROLLED_BACK`. A removal that cannot
+  be proven successful → the **explicit degraded terminal outcome
+  `CLEANUP_FAILED`** (code `rolled-back-cleanup-failed`): the session
+  remains authoritative on the old binding, the stale candidate is
+  explicitly recorded in the outcome and the `cleanup-failed` event,
+  and administrative cleanup is required. Rollback never silently
+  claims completion while the candidate remains active in the
+  session's multipath plan;
+- a post-commit retire failure (the OLD constituent cannot be removed
+  after the new binding committed) keeps the transaction COMMITTED
+  (the handover completed; the new path is authoritative) but records
+  the unresolved stale old entry with the structurally distinct
+  `cleanup-failure` code — never a silently dropped warning.
 - candidate expired at commit → EXPIRED (fail closed);
 - session moved on since preparation (old-path mismatch) → SUPERSEDED
   (zero mutation);

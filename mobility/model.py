@@ -110,6 +110,7 @@ class TransactionState:
     PREPARED = "PREPARED"
     COMMITTED = "COMMITTED"
     ROLLED_BACK = "ROLLED_BACK"
+    CLEANUP_FAILED = "CLEANUP_FAILED"
     FAILED = "FAILED"
     SUPERSEDED = "SUPERSEDED"
     EXPIRED = "EXPIRED"
@@ -121,6 +122,7 @@ class TransactionState:
             cls.PREPARED,
             cls.COMMITTED,
             cls.ROLLED_BACK,
+            cls.CLEANUP_FAILED,
             cls.FAILED,
             cls.SUPERSEDED,
             cls.EXPIRED,
@@ -132,6 +134,7 @@ class TransactionState:
         return (
             cls.COMMITTED,
             cls.ROLLED_BACK,
+            cls.CLEANUP_FAILED,
             cls.FAILED,
             cls.SUPERSEDED,
             cls.EXPIRED,
@@ -141,12 +144,18 @@ class TransactionState:
 
 #: The frozen transaction-state transition table. PREPARED is the only
 #: non-terminal state; every terminal state stays terminal (replayed
-#: terminal transitions fail closed).
+#: terminal transitions fail closed). CLEANUP_FAILED is the explicit
+#: degraded terminal outcome for a rollback whose make-before-break
+#: candidate removal could not be proven successful (Architect review
+#: of PR #14, correction cycle 2: rollback must never silently claim
+#: completion while the candidate remains active in the session's
+#: multipath plan).
 TRANSACTION_TRANSITIONS: Dict[str, FrozenSet[str]] = {
     TransactionState.PREPARED: frozenset(
         {
             TransactionState.COMMITTED,
             TransactionState.ROLLED_BACK,
+            TransactionState.CLEANUP_FAILED,
             TransactionState.FAILED,
             TransactionState.SUPERSEDED,
             TransactionState.EXPIRED,
@@ -183,6 +192,7 @@ class MobilityReasonCode:
     PREPARED = "prepared"
     COMMITTED = "committed"
     ROLLED_BACK = "rolled-back"
+    ROLLED_BACK_CLEANUP_FAILED = "rolled-back-cleanup-failed"
     CANCELLED = "cancelled"
     REPLAYED = "replayed"
 
@@ -203,6 +213,7 @@ class MobilityReasonCode:
     REPLAY_CONFLICT = "replay-conflict"
     REPLAY_PROVENANCE = "replay-provenance"
     RESERVATION_FAILURE = "reservation-failure"
+    CLEANUP_FAILURE = "cleanup-failure"
     COMMIT_FAILURE = "commit-failure"
     ROLLBACK_FAILURE = "rollback-failure"
     CONCURRENT_TRANSITION = "concurrent-transition"
@@ -215,6 +226,7 @@ class MobilityReasonCode:
             cls.PREPARED,
             cls.COMMITTED,
             cls.ROLLED_BACK,
+            cls.ROLLED_BACK_CLEANUP_FAILED,
             cls.CANCELLED,
             cls.REPLAYED,
             cls.INVALID_INPUT,
@@ -233,6 +245,7 @@ class MobilityReasonCode:
             cls.REPLAY_CONFLICT,
             cls.REPLAY_PROVENANCE,
             cls.RESERVATION_FAILURE,
+            cls.CLEANUP_FAILURE,
             cls.COMMIT_FAILURE,
             cls.ROLLBACK_FAILURE,
             cls.CONCURRENT_TRANSITION,
