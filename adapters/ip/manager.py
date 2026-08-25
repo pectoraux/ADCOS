@@ -25,8 +25,12 @@ Authority boundary (frozen):
   enforces this: ``rebind_route`` never mutates session_id and rejects
   any path that would collapse them.
 - NAT containment (R2): the manager is IPv6-only.  IPv4 reachability
-  appears ONLY through a registered NAT64 adapter; without it
-  ``translate_v4`` fails closed with ``NAT_UNAVAILABLE``.
+  appears ONLY through a registered NAT64 adapter behind the ONE
+  explicit NAT seam (:class:`adapters.ip.sandbox.SandboxedNatAdapter`);
+  the manager's ``translate_v4`` routes ONLY through that sandboxed
+  seam (B1 -- no NAT adapter is ever invoked directly by core code).
+  Without a registered adapter ``translate_v4`` fails closed with
+  ``NAT_UNAVAILABLE``.
 - B2 per-binding ownership (mirrors W017): ``register_implementation``
   reassigns ONLY the manager's DEFAULT sandbox for FUTURE
   establishments; each live binding retains the sandbox/impl it was
@@ -47,6 +51,7 @@ from .contract import (
     GatewayClaim,
     IPIntegrationContext,
     IPIntegrationContract,
+    NatAdapterContract,
     SessionReader,
     SessionView,
     TopologyReader,
@@ -68,6 +73,7 @@ from .sandbox import (
     IPIntegrationHealth,
     OperationOutcome,
     SandboxedIPIntegration,
+    SandboxedNatAdapter,
 )
 
 
@@ -169,7 +175,10 @@ class IPIntegrationManager:
         self._bindings: Dict[str, _BindingRecord] = {}
         self._flow_index: Dict[str, str] = {}  # flow_id -> binding_id
         self._session_index: Dict[str, str] = {}  # session_id -> binding_id (active)
-        self._nat_adapter: Optional[Any] = None  # NAT64Adapter
+        # B1: the ONE explicit NAT seam.  The manager holds a SANDBOXED
+        # NAT adapter (never a raw adapter); translate_v4 routes ONLY
+        # through this seam.  No NAT adapter is ever invoked directly.
+        self._nat_sandbox: Optional[SandboxedNatAdapter] = None
         self._closed = False
         self._opened = False
         self._sequence = 0
@@ -238,23 +247,51 @@ class IPIntegrationManager:
                         detail="could not open the new implementation",
                         failure=open_outcome.failure,
                     )
-        self._record_event("implementation-registered", instant, {
-            "implementation_label": getattr(implementation, "label", "") or type(implementation).__name__,
-        })
-        return IPIntegrationOpResult(ok=True, value={"label": getattr(implementation, "label", "")})
+        # Record the swap as an audit event.  B2: the event carries NO
+        # implementation identity (the label is diagnostic, exposed via
+        # diagnostic_state(); canonical public state must be impl-independent).
+        self._record_event("implementation-registered", instant, {})
+        return IPIntegrationOpResult(ok=True)
 
-    def register_nat_adapter(self, nat_adapter: Any) -> IPIntegrationOpResult:
-        """Register a NAT64/464XLAT adapter (R2 NAT containment).
+    def register_nat_adapter(
+        self, nat_adapter: NatAdapterContract, *, now: Optional[str] = None,
+    ) -> IPIntegrationOpResult:
+        """Register a NAT64/464XLAT adapter behind the ONE NAT seam (B1).
 
-        Without a registered NAT adapter, ``translate_v4`` fails closed
+        The adapter is validated against the explicit
+        :class:`NatAdapterContract` (contract-shape validation at
+        registration -- NOT a structural ``hasattr`` check), then wrapped
+        in :class:`SandboxedNatAdapter` so EVERY later ``translate_v4``
+        call is mediated (IPIntegrationContext, deterministic step
+        budget, BaseException isolation, contract-shape validation of
+        the return).  No NAT adapter is ever invoked directly by core
+        code; ``translate_v4`` routes ONLY through this seam.
+
+        Without a registered adapter, ``translate_v4`` fails closed
         with ``NAT_UNAVAILABLE`` (honest fail-closed, not silent).
         """
-        if not hasattr(nat_adapter, "translate") or not callable(nat_adapter.translate):
+        if not isinstance(nat_adapter, NatAdapterContract):
             raise IPIntegrationError(
                 IPIntegrationReasonCode.INVALID_INPUT,
-                "nat adapter must expose a callable translate(context, packet, policy)",
+                "nat adapter must satisfy the NatAdapterContract ABC "
+                "(B1: one explicit sandboxed seam; no arbitrary objects)",
             )
-        self._nat_adapter = nat_adapter
+        instant = now or "1970-01-01T00:00:00Z"
+        nat_sandbox = SandboxedNatAdapter(
+            nat_adapter,
+            integration_id=self._integration_id + ":nat64",
+        )
+        # Probe health so the adapter can produce a contract-shaped
+        # health value before being installed (mirrors register_implementation).
+        probe = nat_sandbox.health(instant)
+        if not probe.ok:
+            return IPIntegrationOpResult(
+                ok=False,
+                reason=probe.failure.reason_code if probe.failure else IPIntegrationReasonCode.IPINTEGRATION_FAILURE,
+                detail="nat adapter health probe failed",
+                failure=probe.failure,
+            )
+        self._nat_sandbox = nat_sandbox
         return IPIntegrationOpResult(ok=True)
 
     @property
@@ -275,7 +312,15 @@ class IPIntegrationManager:
 
     @property
     def nat_registered(self) -> bool:
-        return self._nat_adapter is not None
+        # B1: a NAT adapter is registered iff a SANDBOXED seam exists.
+        return self._nat_sandbox is not None
+
+    @property
+    def nat_health(self) -> str:
+        """Effective health of the registered NAT seam (diagnostic)."""
+        if self._nat_sandbox is None:
+            return IPIntegrationHealth.FAILED
+        return self._nat_sandbox.effective_health()
 
     def bindings(self) -> Tuple[str, ...]:
         return tuple(sorted(self._bindings))
@@ -548,43 +593,40 @@ class IPIntegrationManager:
     def translate_v4(
         self, *, packet_view: PacketView, nat_policy: NATPolicy, now: str,
     ) -> IPIntegrationOpResult:
-        """Translate a packet through the NAT64/464XLAT adapter (R2)."""
+        """Translate a packet through the ONE sandboxed NAT64 seam (B1).
+
+        The manager routes ONLY through :class:`SandboxedNatAdapter`
+        (the single authoritative NAT invocation path).  The sandbox
+        builds a least-authority :class:`IPIntegrationContext` (no
+        session/topology reachability), enforces the deterministic step
+        budget, isolates any ``BaseException``, and validates the
+        returned :class:`PacketView`.  No NAT adapter is ever invoked
+        directly here (B1 -- no escape hatch around the sandbox).
+        """
         validate_instant(now, "now")
-        if self._nat_adapter is None:
+        if self._nat_sandbox is None:
             return IPIntegrationOpResult(
                 ok=False,
                 reason=IPIntegrationReasonCode.NAT_UNAVAILABLE,
-                detail="no NAT64 adapter registered; translate_v4 fails "
-                "closed (IPv4 reachable ONLY through a NAT adapter -- "
-                "R2 NAT containment)",
+                detail="no NAT64 adapter registered behind the NAT seam; "
+                "translate_v4 fails closed (IPv4 reachable ONLY through a "
+                "registered sandboxed NAT adapter -- R2 NAT containment, "
+                "B1 one NAT seam)",
             )
-        # Delegate to the NAT adapter (R2 containment: the core engine
-        # does no IPv4; IPv4 is purely the adapter's concern).
-        try:
-            translated = self._nat_adapter.translate(
-                None,  # context-less adapter call (the adapter is stateless)
-                packet_view, nat_policy,
-            )
-        except IPIntegrationError as exc:
-            return IPIntegrationOpResult(
-                ok=False, reason=exc.reason, detail=exc.detail,
-            )
-        except BaseException as exc:  # isolation
+        # B1: the ONE authoritative NAT invocation path -- mediated by
+        # the sandbox (context + budget + BaseException isolation +
+        # contract-shape validation of the return).
+        outcome = self._nat_sandbox.translate(
+            now, packet_view=packet_view, nat_policy=nat_policy,
+        )
+        if not outcome.ok:
             return IPIntegrationOpResult(
                 ok=False,
-                reason=IPIntegrationReasonCode.IPINTEGRATION_FAILURE,
-                detail="NAT adapter raised %s (isolated)" % type(exc).__name__,
+                reason=outcome.failure.reason_code if outcome.failure else IPIntegrationReasonCode.IPINTEGRATION_FAILURE,
+                detail="nat seam translate failed",
+                failure=outcome.failure,
             )
-        # Validate the returned packet shape.
-        from .validation import validate_packet_view
-        ok_flag, reason = validate_packet_view(translated)
-        if not ok_flag:
-            return IPIntegrationOpResult(
-                ok=False,
-                reason=IPIntegrationReasonCode.CONTRACT_VIOLATION,
-                detail="NAT adapter returned non-contract packet: %s" % reason,
-            )
-        return IPIntegrationOpResult(ok=True, value=translated)
+        return IPIntegrationOpResult(ok=True, value=outcome.value)
 
     def app_socket(self, *, session_id: str, now: str) -> IPIntegrationOpResult:
         """Return an ordinary-IPv6 application socket facade.
@@ -761,12 +803,17 @@ class IPIntegrationManager:
 
     def snapshot(self) -> Dict[str, Any]:
         """A structurally secret-free, byte-stable snapshot of the
-        manager's public state.
+        manager's PUBLIC state.
 
         Byte-stable for a given operation history AND byte-identical
         across different implementations behind the same contract --
-        the public contract is independent of the impl (mirrors
-        transport case_65).
+        the PUBLIC contract is independent of the impl (mirrors
+        transport case_65).  B2: implementation identity is NOT part
+        of canonical public state (no ``implementation_label`` field);
+        it is exposed through the separate :meth:`diagnostic_state`
+        API.  This makes the cross-impl byte-identity property
+        verifiable by a DIRECT canonical-bytes comparison with no
+        normalization.
         """
         bindings = sorted(
             (record.binding.to_dict() for record in self._bindings.values()),
@@ -775,7 +822,6 @@ class IPIntegrationManager:
         events = list(self._events)
         return {
             "integration_id": self._integration_id,
-            "implementation_label": self.implementation_label,
             "closed": self._closed,
             "nat_registered": self.nat_registered,
             "binding_count": len(self._bindings),
@@ -786,8 +832,40 @@ class IPIntegrationManager:
     def to_canonical_bytes(self) -> bytes:
         """Canonical bytes of the snapshot (byte-stable for a given
         operation history; byte-identical across impls behind the
-        same contract)."""
+        same contract -- B2: the canonical public state carries no
+        implementation identity)."""
         return canonical_json_bytes(self.snapshot())
+
+    def diagnostic_state(self) -> Dict[str, Any]:
+        """Diagnostic-only state (NOT canonical public state; B2).
+
+        Implementation identity and sandbox failure accounting live
+        here -- separate from :meth:`snapshot` so canonical public
+        state stays implementation-independent.  Operations/debugging
+        may consult this; it is never serialized into
+        :meth:`to_canonical_bytes`.
+        """
+        return {
+            "integration_id": self._integration_id,
+            "implementation_label": self.implementation_label,
+            "nat_registered": self.nat_registered,
+            "nat_health": self.nat_health,
+            "engine_consecutive_failures": self.engine_consecutive_failures,
+            "engine_total_failures": self.engine_total_failures,
+            "engine_total_contract_violations": self._default_sandbox.total_contract_violations,
+            "nat_consecutive_failures": (
+                self._nat_sandbox.consecutive_failures
+                if self._nat_sandbox is not None else 0
+            ),
+            "nat_total_failures": (
+                self._nat_sandbox.total_failures
+                if self._nat_sandbox is not None else 0
+            ),
+            "nat_total_contract_violations": (
+                self._nat_sandbox.total_contract_violations
+                if self._nat_sandbox is not None else 0
+            ),
+        }
 
     # ------------------------------------------------------------------
     # Audit events (append-only)

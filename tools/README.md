@@ -1061,7 +1061,7 @@ Exit codes: `0` all cases pass; `1` at least one case fails.
 
 | Case | Verifies |
 |---|---|
-| `01-contract-surface-frozen` | the 11 IP integration operations in order on the ABC; context surface exact (6 members) |
+| `01-contract-surface-frozen` | 10 IP engine operations + 2 NAT adapter operations; the engine is IPv6-only (no translate_v4); NAT is a separate seam; context surface exact (6 members) |
 | `02-context-least-authority` | immutable 6-member context facade; no store/identity/policy/topology/manager reachability |
 | `03-context-injected-instant-and-budget` | injected instants; bounded step budget is the hang model (negative/bool charges rejected; over-budget exhausts) |
 | `04-provision-prefix-happy` | provision_prefix deterministically yields a /48 ULA prefix (RFC 4193); per-node content-derived |
@@ -1082,7 +1082,7 @@ Exit codes: `0` all cases pass; `1` at least one case fails.
 | `19-r1-route-session-collapse-rejected` | a rogue engine that mutates session_id on rebind is rejected at the manager seam with ROUTE_SESSION_COLLAPSE |
 | `20-r1-flow-id-reuse-across-sessions-rejected` | distinct sessions with the same route_ref yield distinct flow_ids; ingress cannot misclassify |
 | `21-r2-nat-unavailable-fail-closed` | without a NAT adapter, translate_v4 fails closed NAT_UNAVAILABLE (honest, not silent) |
-| `22-r2-engine-no-ipv4-path` | static audit: the core engine has no IPv4 path; NAT is delegated to an adapter behind the seam |
+| `22-r2-engine-no-ipv4-path` | static audit: the core engine has NO IPv4 path and NO _nat_adapter; NAT is a SEPARATE sandboxed seam (NatAdapterContract + SandboxedNatAdapter); the manager routes translate_v4 ONLY through that sandbox (B1: one authoritative path) |
 | `23-r3-gateway-evidence-green` | gateway claim WITH evidence → authoritative=True |
 | `24-r3-gateway-unevidenced-fail-closed` | gateway claim WITHOUT evidence → GATEWAY_UNEVIDENCED |
 | `25-r3-gateway-role-not-identity` | two nodes can both be gateways; gateway-ness is a role, not an identity |
@@ -1097,8 +1097,12 @@ Exit codes: `0` all cases pass; `1` at least one case fails.
 | `34-authority-no-session-mutation` | the IP integration never mutates session state — the SessionReader snapshot is byte-identical across bind_session |
 | `35-authority-id-grammar-disjoint` | the adcos:ipint prefix is disjoint from adcos:node / adcos:adapter / adcos:transport / sha256: grammars |
 | `36-determinism-byte-identical-snapshot` | byte-identical manager.to_canonical_bytes() across two repeat runs of the same operation sequence |
-| `37-determinism-cross-impl-byte-identical` | a second impl behind the same contract produces the SAME binding/flow digests for the same inputs (excl. implementation_label) |
+| `37-determinism-cross-impl-byte-identical` | a second impl behind the same contract produces byte-identical canonical PUBLIC state DIRECTLY (no normalization); implementation_label is NOT in canonical state (B2: diagnostic-only via diagnostic_state) |
 | `38-failure-isolation-base-exception` | impl raising SystemExit → typed IPIntegrationFailure value; never propagates; class name only |
 | `39-failure-isolation-contract-violation` | non-contract return shape → CONTRACT_VIOLATION discarded; manager state unchanged |
 | `40-failure-isolation-budget-exhaustion` | step budget exhaustion → BUDGET_EXHAUSTED (hang model; no wall clock) |
 | `41-failure-isolation-no-secret-leak` | failure diagnostics never carry exception message text (LOCK-023) |
+| `42-b3-real-ipv6-loopback-conformance` | B3: ordinary AF_INET6 sockets over the OS ::1 loopback round-trip bytes end-to-end with NO ADCOS app API (frozen W018 acceptance: standard IPv6 connectivity works end to end) |
+| `43-b1-nat-base-exception-isolated` | B1: a NAT adapter raising SystemExit is isolated to a typed value; it never crosses the seam (no escape hatch) |
+| `44-b1-nat-malformed-return-rejected` | B1: a NAT adapter returning a non-contract value is rejected (CONTRACT_VIOLATION); the malformed value never enters state |
+| `45-b1-nat-budget-exhaustion` | B1: NAT translation step-budget exhaustion → BUDGET_EXHAUSTED (the deterministic hang model; no wall clock in the NAT seam) |

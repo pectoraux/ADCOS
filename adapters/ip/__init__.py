@@ -58,6 +58,8 @@ from .contract import (
     GatewayClaim,
     IPIntegrationContext,
     IPIntegrationContract,
+    NatAdapterContract,
+    NAT_CONTRACT_OPERATIONS,
     SessionReader,
     SessionView,
     TopologyReader,
@@ -90,8 +92,10 @@ from .sandbox import (
     FAILURE_THRESHOLD_DEGRADED,
     FAILURE_THRESHOLD_FAILED,
     IPIntegrationHealth,
+    NAT_TRANSLATE_STEP_CHARGE,
     OperationOutcome,
     SandboxedIPIntegration,
+    SandboxedNatAdapter,
 )
 from .socket import AppSocket
 from .validation import (
@@ -104,7 +108,7 @@ from .validation import (
 )
 
 __all__ = [
-    # Contract (the replaceable seam)
+    # Contract (the replaceable IP engine seam)
     "IPIntegrationContract",
     "IPIntegrationContext",
     "SessionReader",
@@ -113,14 +117,19 @@ __all__ = [
     "GatewayClaim",
     "CONTRACT_OPERATIONS",
     "CONTEXT_SURFACE",
+    # NAT adapter contract (the explicit IPv4 reachability seam -- B1)
+    "NatAdapterContract",
+    "NAT_CONTRACT_OPERATIONS",
     # Reference engine
     "ReferenceIPIntegrationEngine",
     # Sandbox / failure isolation
     "SandboxedIPIntegration",
+    "SandboxedNatAdapter",
     "IPIntegrationFailure",
     "IPIntegrationHealth",
     "OperationOutcome",
     "DEFAULT_STEP_BUDGET",
+    "NAT_TRANSLATE_STEP_CHARGE",
     "FAILURE_THRESHOLD_DEGRADED",
     "FAILURE_THRESHOLD_FAILED",
     # Manager (Agent service)

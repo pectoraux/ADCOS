@@ -20,11 +20,16 @@ The contract defines the IP integration boundary:
    invariant: a route change produces a NEW ``flow_id`` bound to the
    SAME ``session_id``; the boundary NEVER collapses them.
 
-2. The boundary is IPv6-FIRST: the core never speaks IPv4.  IPv4
-   reachability appears ONLY through a NAT64/464XLAT adapter
-   (:class:`adapters.ip.nat.NAT64Adapter`) registered behind the seam;
-   without it, :meth:`translate_v4` fails closed with
-   ``NAT_UNAVAILABLE`` (honest fail-closed, not silent).
+2. The boundary is IPv6-FIRST: the core engine
+   (:class:`IPIntegrationContract`) never speaks IPv4.  IPv4
+   reachability appears ONLY through a SEPARATE sandboxed NAT adapter
+   seam (:class:`NatAdapterContract` / :class:`adapters.ip.nat.NAT64Adapter`)
+   registered behind the seam; the manager's :meth:`translate_v4` is the
+   ONE authoritative invocation path for that seam, mediated by
+   :class:`adapters.ip.sandbox.SandboxedNatAdapter` (no NAT adapter is
+   ever invoked directly by core code).  Without a registered adapter,
+   :meth:`translate_v4` fails closed with ``NAT_UNAVAILABLE`` (honest
+   fail-closed, not silent).
 
 3. The boundary is application-TRANSPARENT: ordinary applications use
    standard IPv6 socket semantics (:class:`adapters.ip.socket.AppSocket`)
@@ -399,22 +404,6 @@ class IPIntegrationContract(abc.ABC):
         """
 
     @abc.abstractmethod
-    def translate_v4(
-        self,
-        context: IPIntegrationContext,
-        *,
-        packet_view: PacketView,
-        nat_policy: NATPolicy,
-    ) -> PacketView:
-        """Translate a packet through a NAT64/464XLAT adapter.
-
-        ADAPTER behavior (the core is IPv6-only): the boundary delegates
-        to a registered :class:`adapters.ip.nat.NAT64Adapter`.  Raises
-        ``NAT_UNAVAILABLE`` when no NAT adapter is registered (honest
-        fail-closed, not silent).
-        """
-
-    @abc.abstractmethod
     def app_socket(
         self,
         context: IPIntegrationContext,
@@ -457,7 +446,12 @@ class IPIntegrationContract(abc.ABC):
         """Release a binding; fails closed while outstanding."""
 
 
-#: The frozen contract operations, in interface order.
+#: The frozen engine-contract operations, in interface order.  The IP
+#: engine is IPv6-ONLY (R2): it has NO ``translate_v4`` / NO
+#: ``_nat_adapter``.  IPv4 reachability is a SEPARATE sandboxed seam
+#: (:class:`NatAdapterContract` / :class:`adapters.ip.sandbox.SandboxedNatAdapter`);
+#: the manager's ``translate_v4`` is the single authoritative invocation
+#: path for that seam (B1 -- one NAT authority, no escape hatch).
 CONTRACT_OPERATIONS: Tuple[str, ...] = (
     "open",
     "provision_prefix",
@@ -465,7 +459,6 @@ CONTRACT_OPERATIONS: Tuple[str, ...] = (
     "resolve_gateway",
     "egress",
     "ingress",
-    "translate_v4",
     "app_socket",
     "rebind_route",
     "health",
@@ -473,13 +466,76 @@ CONTRACT_OPERATIONS: Tuple[str, ...] = (
 )
 
 
+# --------------------------------------------------------------------------
+# The stable NAT adapter contract (the explicit IPv4 reachability seam)
+# --------------------------------------------------------------------------
+
+
+class NatAdapterContract(abc.ABC):
+    """The stable interface every NAT64/464XLAT adapter satisfies.
+
+    This is the ONE explicit NAT adapter seam (B1).  Adapters are
+    untrusted: :class:`adapters.ip.sandbox.SandboxedNatAdapter` mediates
+    every call -- it builds a least-authority
+    :class:`IPIntegrationContext` (deterministic step budget, injected
+    instant, NO session/topology reachability for the stateless
+    translation), converts any exception (including ``BaseException``)
+    into an isolated failure value, and validates every return value
+    against the contract shape.  A contract method must never be called
+    directly by core code -- only through ``SandboxedNatAdapter``.
+
+    The core :class:`IPIntegrationContract` engine is IPv6-only and has
+    NO reference to a NAT adapter; the engine never invokes this seam.
+    Only :class:`adapters.ip.manager.IPIntegrationManager.translate_v4`
+    routes to ``SandboxedNatAdapter`` (the single authoritative path).
+    """
+
+    __slots__ = ()
+
+    #: Optional human label.  Diagnostic only -- never parsed, never
+    #: branched on, and NEVER part of canonical public state (B2).
+    label: str = ""
+
+    @abc.abstractmethod
+    def translate(
+        self,
+        context: IPIntegrationContext,
+        *,
+        packet_view: PacketView,
+        nat_policy: NATPolicy,
+    ) -> PacketView:
+        """Translate a packet per the NAT policy.
+
+        Returns a deterministic translated :class:`PacketView` with
+        ``translated=True``.  Raises ``NAT_UNAVAILABLE`` for a disabled
+        policy (honest fail-closed, not silent).
+        """
+
+    @abc.abstractmethod
+    def health(self) -> str:
+        """Adapter-local health: HEALTHY, DEGRADED, or FAILED.
+
+        Reported, never authoritative alone (LOCK-017 in the NAT
+        direction).
+        """
+
+
+#: The frozen NAT adapter contract operations, in interface order.
+NAT_CONTRACT_OPERATIONS: Tuple[str, ...] = (
+    "translate",
+    "health",
+)
+
+
 __all__ = [
     "IPIntegrationContext",
     "IPIntegrationContract",
+    "NatAdapterContract",
     "SessionReader",
     "SessionView",
     "TopologyReader",
     "GatewayClaim",
     "CONTRACT_OPERATIONS",
+    "NAT_CONTRACT_OPERATIONS",
     "CONTEXT_SURFACE",
 ]

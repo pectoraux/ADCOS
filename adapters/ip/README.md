@@ -97,23 +97,45 @@ Three consequences, stated plainly:
 2. **The reference packet model is honestly non-confidential.** The
    packet view carries the visible payload bytes (mirrors the W017
    transport "reference record model" honesty discipline). No real
-   network packets are produced or carried; no wall clock, no
-   randomness, no network access anywhere.
+   network packets are produced or carried IN THE REFERENCE MODEL; no
+   wall clock, no randomness, no EXTERNAL network access anywhere.
+   (A separate real-IPv6-loopback conformance test -- case_42 -- proves
+   the OS application-facing path end-to-end; see "Real IPv6
+   interoperability" below.)
 
 3. **The IP integration contract is structural and IPv6-first.** The
-   core engine is IPv6-ONLY; IPv4 reachability appears ONLY through a
-   registered NAT64 adapter (`NAT64Adapter`) behind the seam. Without
-   the adapter, `translate_v4` fails closed `NAT_UNAVAILABLE` (honest
-   fail-closed, not silent — R2 NAT containment).
+   core engine (`IPIntegrationContract`) is IPv6-ONLY and holds NO NAT
+   adapter; IPv4 reachability appears ONLY through a SEPARATE sandboxed
+   NAT adapter seam (`NatAdapterContract` / `NAT64Adapter` mediated by
+   `SandboxedNatAdapter`). The manager's `translate_v4` is the ONE
+   authoritative invocation path for that seam (B1 -- no NAT adapter
+   is ever invoked directly by core code). Without a registered adapter,
+   `translate_v4` fails closed `NAT_UNAVAILABLE` (honest fail-closed, not
+   silent — R2 NAT containment).
 
 ## IPv6-first statement
 
 The ADCOS core is IPv6-native. IPv4 appears ONLY through a
-NAT64/464XLAT adapter (`adapters/ip/nat.py`) behind the seam —
+NAT64/464XLAT adapter (`adapters/ip/nat.py`) behind a SEPARATE
+sandboxed seam (`NatAdapterContract` / `SandboxedNatAdapter`) —
 adapter/policy behavior, NOT core identity. The core
 `ReferenceIPIntegrationEngine` speaks IPv6 only; it never constructs
-or carries an IPv4 packet. IPv4 reachability is the NAT adapter's
-concern, contained entirely behind the seam (R2 NAT containment).
+or carries an IPv4 packet and holds NO NAT adapter (B1 -- one NAT
+authority, no escape hatch around the sandbox). IPv4 reachability is
+the NAT adapter's concern, contained entirely behind the seam (R2
+NAT containment); the manager routes `translate_v4` ONLY through the
+sandboxed NAT seam.
+
+## Real IPv6 interoperability (B3, frozen W018 acceptance)
+
+The frozen WORK-018 acceptance criterion requires that "standard IPv6
+connectivity works end to end" at the application-facing boundary.
+`case_42_b3_real_ipv6_loopback_conformance` proves this directly: an
+ordinary application using ONLY stdlib `AF_INET6` sockets over the OS
+`::1` loopback round-trips bytes end-to-end, with NO ADCOS-specific
+application API in the app path. No TUN/TAP, netfilter, FRR, or
+vendor integration is exercised (those remain behind the adapter
+boundary).
 
 ## Route/session identity separation
 

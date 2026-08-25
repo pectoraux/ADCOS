@@ -33,7 +33,13 @@ The central boundary is exercised throughout:
         != ACCESS/VENDOR AUTHORITY (LOCK-016; IP stacks = adapters)
         != GATEWAY IDENTITY      (gateway is a ROLE, evidence-backed)
 
-All instants are injected; no wall clock, no randomness, no network.
+All instants are injected; no wall clock, no randomness, no EXTERNAL
+network.  The ONE exception is case_42 (B3): a real Linux IPv6
+loopback conformance test mandated by the frozen WORK-018 acceptance
+criterion ("standard IPv6 connectivity works end to end") -- it uses
+ONLY the OS ::1 loopback with ordinary AF_INET6 sockets (no TUN/TAP,
+netfilter, FRR, or vendor integration, which all remain behind the
+adapter boundary), and the app path imports NO ADCOS symbol.
 The in-memory SessionReader/TopologyReader test doubles implement
 the real interfaces (the import-lock rule for test doubles).
 """
@@ -43,8 +49,10 @@ from __future__ import annotations
 import ast
 import hashlib
 import json
+import socket
 import subprocess
 import sys
+import threading
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Tuple
 
@@ -73,6 +81,9 @@ from adapters.ip import (  # noqa: E402
     FlowLabel,
     HopLimit,
     IPProtocol,
+    NAT_CONTRACT_OPERATIONS,
+    NAT_TRANSLATE_STEP_CHARGE,
+    NatAdapterContract,
     SessionIPBinding,
     GatewayRole,
     GatewayClaim,
@@ -86,6 +97,7 @@ from adapters.ip import (  # noqa: E402
     GatewayResolver,
     ReferenceIPIntegrationEngine,
     SandboxedIPIntegration,
+    SandboxedNatAdapter,
     OperationOutcome,
     derive_binding_id,
 )
@@ -231,17 +243,30 @@ def _well_known_prefix() -> IPv6Prefix:
 
 
 def case_01_contract_surface_frozen(results: List[Result]) -> None:
-    """01. the 11 contract operations in order on the ABC; context surface exact."""
+    """01. the 10 engine contract ops + the 2 NAT adapter ops; context surface exact.
+
+    B1: NAT is a SEPARATE explicit seam (not an engine op).  The IP
+    engine is IPv6-only (R2) and has NO translate_v4; IPv4 reachability
+    is the NatAdapterContract seam (translate, health).
+    """
     expected = (
         "open", "provision_prefix", "bind_session", "resolve_gateway",
-        "egress", "ingress", "translate_v4", "app_socket", "rebind_route",
+        "egress", "ingress", "app_socket", "rebind_route",
         "health", "close",
     )
     if CONTRACT_OPERATIONS != expected:
-        results.append(fail("case_01_contract_surface_frozen", "ops drift: %r" % (CONTRACT_OPERATIONS,)))
+        results.append(fail("case_01_contract_surface_frozen", "engine ops drift: %r" % (CONTRACT_OPERATIONS,)))
         return
-    if len(expected) != 11:
-        results.append(fail("case_01_contract_surface_frozen", "expected 11 ops"))
+    if len(expected) != 10:
+        results.append(fail("case_01_contract_surface_frozen", "expected 10 engine ops"))
+        return
+    # B1: the engine has NO translate_v4 (NAT is a separate seam).
+    if "translate_v4" in CONTRACT_OPERATIONS:
+        results.append(fail("case_01_contract_surface_frozen", "translate_v4 must NOT be an engine op (B1: NAT is a separate seam)"))
+        return
+    nat_expected = ("translate", "health")
+    if NAT_CONTRACT_OPERATIONS != nat_expected:
+        results.append(fail("case_01_contract_surface_frozen", "NAT ops drift: %r" % (NAT_CONTRACT_OPERATIONS,)))
         return
     surface = CONTEXT_SURFACE
     expected_surface = frozenset(
@@ -251,7 +276,7 @@ def case_01_contract_surface_frozen(results: List[Result]) -> None:
     if surface != expected_surface:
         results.append(fail("case_01_contract_surface_frozen", "context surface drift: %r" % (surface,)))
         return
-    results.append(ok("case_01_contract_surface_frozen", "11 ops, 6-member context surface"))
+    results.append(ok("case_01_contract_surface_frozen", "10 engine ops + 2 NAT ops; 6-member context surface; NAT is a separate seam"))
 
 
 def case_02_context_least_authority(results: List[Result]) -> None:
@@ -908,12 +933,16 @@ def case_21_r2_nat_unavailable_fail_closed(results: List[Result]) -> None:
 
 
 def case_22_r2_engine_no_ipv4_path(results: List[Result]) -> None:
-    """22. R2 GREEN: static audit -- the core engine has NO IPv4 path.
+    """22. R2 GREEN + B1: static audit -- the core engine has NO IPv4 path
+    and NO NAT authority; NAT is a SEPARATE sandboxed seam.
 
     A grep of engine.py for IPv4 tokens must find only RFC citations or
     NAT-policy DATA references, never an IPv4 forwarding / address
-    construction path.
-    """
+    construction path.  B1: the engine defines NO translate_v4 and
+    holds NO _nat_adapter -- IPv4 reachability is a separate explicit
+    seam (NatAdapterContract + SandboxedNatAdapter), invoked ONLY by the
+    manager through that sandbox (one authoritative path, no escape
+    hatch)."""
     engine_text = (REPO_ROOT / "adapters" / "ip" / "engine.py").read_text(encoding="utf-8")
     # Forbidden IPv4 implementation tokens (RFC citations are OK as
     # COMMENTS; we scan for code-level IPv4 work).
@@ -925,16 +954,37 @@ def case_22_r2_engine_no_ipv4_path(results: List[Result]) -> None:
         if token in engine_text:
             results.append(fail("case_22_r2_engine_no_ipv4_path", "engine.py contains %r" % token))
             return
-    # The engine ITSELF never produces a translated packet (only NAT does).
-    # The engine's translate_v4 must delegate (not implement).
-    if "self._nat_adapter" not in engine_text:
-        results.append(fail("case_22_r2_engine_no_ipv4_path", "engine does not delegate to a NAT adapter"))
+    # B1: the engine has NO translate_v4 method and NO _nat_adapter
+    # field.  (The old design let the engine hold a _nat_adapter and
+    # invoke it directly -- that was the B1 escape hatch; it is gone.)
+    if "def translate_v4" in engine_text:
+        results.append(fail("case_22_r2_engine_no_ipv4_path", "engine defines translate_v4 (B1: NAT must be a separate seam)"))
         return
-    # The engine's nat64 delegation raises NAT_UNAVAILABLE without an adapter.
-    if "NAT_UNAVAILABLE" not in engine_text:
-        results.append(fail("case_22_r2_engine_no_ipv4_path", "engine does not fail closed NAT_UNAVAILABLE"))
+    if "self._nat_adapter" in engine_text:
+        results.append(fail("case_22_r2_engine_no_ipv4_path", "engine holds a _nat_adapter (B1: one NAT authority, not the engine)"))
         return
-    results.append(ok("case_22_r2_engine_no_ipv4_path", "engine has no IPv4 path; NAT is delegated"))
+    if "NAT_UNAVAILABLE" in engine_text:
+        results.append(fail("case_22_r2_engine_no_ipv4_path", "engine references NAT_UNAVAILABLE (engine has no NAT path)"))
+        return
+    # B1: the explicit NAT seam exists and is sandboxed.
+    nat_text = (REPO_ROOT / "adapters" / "ip" / "nat.py").read_text(encoding="utf-8")
+    sandbox_text = (REPO_ROOT / "adapters" / "ip" / "sandbox.py").read_text(encoding="utf-8")
+    manager_text = (REPO_ROOT / "adapters" / "ip" / "manager.py").read_text(encoding="utf-8")
+    if "NatAdapterContract" not in nat_text:
+        results.append(fail("case_22_r2_engine_no_ipv4_path", "nat.py does not use NatAdapterContract (no explicit seam)"))
+        return
+    if "class SandboxedNatAdapter" not in sandbox_text:
+        results.append(fail("case_22_r2_engine_no_ipv4_path", "sandbox.py has no SandboxedNatAdapter (seam not sandboxed)"))
+        return
+    # The manager routes translate_v4 ONLY through the sandboxed NAT
+    # seam (no direct adapter invocation -- no escape hatch).
+    if "self._nat_sandbox" not in manager_text:
+        results.append(fail("case_22_r2_engine_no_ipv4_path", "manager has no _nat_sandbox seam"))
+        return
+    if "self._nat_adapter" in manager_text:
+        results.append(fail("case_22_r2_engine_no_ipv4_path", "manager still holds a direct _nat_adapter (B1 escape hatch)"))
+        return
+    results.append(ok("case_22_r2_engine_no_ipv4_path", "engine has no IPv4/NAT path; NAT is a separate sandboxed seam; one authoritative path"))
 
 
 # --------------------------------------------------------------------------
@@ -1337,12 +1387,16 @@ def case_36_determinism_byte_identical_snapshot(results: List[Result]) -> None:
 
 
 def case_37_determinism_cross_impl_byte_identical(results: List[Result]) -> None:
-    """37. cross-impl byte-identical public contract (mirrors transport case_65).
+    """37. cross-impl byte-identical canonical PUBLIC state (B2: DIRECT,
+    no normalization).
 
     A second impl behind the same contract produces the SAME binding/flow
-    digests for the SAME inputs -- the public contract is independent of
-    the impl.  The snapshot differs ONLY in the implementation_label field
-    (which is implementation metadata, not contract output)."""
+    digests for the SAME inputs, AND byte-identical canonical bytes --
+    the PUBLIC contract is independent of the impl.  B2: implementation
+    identity is NOT part of canonical public state (no
+    implementation_label in snapshot), so the comparison is DIRECT (no
+    field normalization).  The two impls genuinely differ in label
+    (verified via diagnostic_state), so the test is meaningful."""
     class _SecondImpl(ReferenceIPIntegrationEngine):
         """A genuinely independent second implementation: same contract,
         different label."""
@@ -1365,20 +1419,24 @@ def case_37_determinism_cross_impl_byte_identical(results: List[Result]) -> None
     if a.binding_id != b.binding_id:
         results.append(fail("case_37_determinism_cross_impl_byte_identical", "binding_ids diverged across impls"))
         return
-    # Snapshots differ ONLY in the implementation_label field -- if we
-    # normalize that, the snapshots must be byte-identical (the public
-    # contract is independent of the impl behind it).
-    snap_a = json.loads(mgr_a.to_canonical_bytes().decode("utf-8"))
-    snap_b = json.loads(mgr_b.to_canonical_bytes().decode("utf-8"))
-    if snap_a["implementation_label"] == snap_b["implementation_label"]:
-        results.append(fail("case_37_determinism_cross_impl_byte_identical", "labels did not differ"))
+    # B2 regression: implementation_label is NOT part of canonical
+    # public state.
+    snap_a = mgr_a.snapshot()
+    if "implementation_label" in snap_a:
+        results.append(fail("case_37_determinism_cross_impl_byte_identical", "implementation_label leaked into canonical snapshot"))
         return
-    snap_a["implementation_label"] = "normalized"
-    snap_b["implementation_label"] = "normalized"
-    if snap_a != snap_b:
-        results.append(fail("case_37_determinism_cross_impl_byte_identical", "snapshots differ across impls (excl. label)"))
+    # The two impls genuinely differ in label (diagnostic-only) -- so
+    # the test is meaningful (two different impls behind the same contract).
+    if mgr_a.diagnostic_state()["implementation_label"] == mgr_b.diagnostic_state()["implementation_label"]:
+        results.append(fail("case_37_determinism_cross_impl_byte_identical", "labels did not differ (test is vacuous)"))
         return
-    results.append(ok("case_37_determinism_cross_impl_byte_identical", "byte-identical public contract across impls (excl. label)"))
+    # B2: DIRECT canonical-bytes comparison, NO normalization.  The
+    # canonical public state is byte-identical across impls behind the
+    # same contract.
+    if mgr_a.to_canonical_bytes() != mgr_b.to_canonical_bytes():
+        results.append(fail("case_37_determinism_cross_impl_byte_identical", "canonical bytes differ across impls (B2 regression)"))
+        return
+    results.append(ok("case_37_determinism_cross_impl_byte_identical", "byte-identical canonical public state across impls (DIRECT, no normalization)"))
 
 
 # --------------------------------------------------------------------------
@@ -1533,6 +1591,194 @@ def case_41_failure_isolation_no_secret_leak(results: List[Result]) -> None:
 
 
 # --------------------------------------------------------------------------
+# M. B3 -- real IPv6 loopback interoperability (frozen W018 acceptance)
+# --------------------------------------------------------------------------
+
+
+def case_42_b3_real_ipv6_loopback_conformance(results: List[Result]) -> None:
+    """42. B3: ordinary AF_INET6 sockets over ::1 carry bytes end-to-end.
+
+    A standard application (NO ADCOS import in the app path) binds ::1,
+    connects, and round-trips a payload over the real Linux IPv6
+    loopback.  This is the packet-path / interoperability evidence the
+    frozen WORK-018 acceptance criterion requires: standard IPv6
+    connectivity works end to end at the application-facing boundary,
+    with NO ADCOS-specific application API.  This is the ONE real-network
+    conformance case; it uses only the OS ::1 loopback -- no TUN/TAP,
+    netfilter, FRR, or vendor integration, which all remain behind the
+    adapter boundary.
+    """
+    payload = b"adcospktpath-ipv6-loopback-conformance"
+    received: Dict[str, Any] = {}
+    srv = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
+    srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    try:
+        srv.bind(("::1", 0))
+    except OSError as exc:
+        results.append(fail(
+            "case_42_b3_real_ipv6_loopback_conformance",
+            "could not bind ::1 (IPv6 loopback unavailable): %s" % exc,
+        ))
+        return
+    srv.listen(1)
+    port = srv.getsockname()[1]
+    srv.settimeout(5)
+
+    def _server_thread() -> None:
+        try:
+            conn, _ = srv.accept()
+            with conn:
+                data = conn.recv(len(payload))
+                conn.sendall(data)  # echo
+            received["data"] = data
+        except Exception:  # pragma: no cover -- best-effort server
+            received["data"] = None
+
+    t = threading.Thread(target=_server_thread)
+    t.start()
+    # Ordinary client: AF_INET6 over ::1 -- NO ADCOS API in the app path.
+    cli = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
+    cli.settimeout(5)
+    echo = b""
+    try:
+        cli.connect(("::1", port))
+        cli.sendall(payload)
+        while len(echo) < len(payload):
+            chunk = cli.recv(len(payload) - len(echo))
+            if not chunk:
+                break
+            echo += chunk
+    except OSError as exc:
+        results.append(fail(
+            "case_42_b3_real_ipv6_loopback_conformance",
+            "client could not complete the ::1 round-trip: %s" % exc,
+        ))
+        cli.close()
+        t.join()
+        srv.close()
+        return
+    finally:
+        cli.close()
+    t.join()
+    srv.close()
+    if received.get("data") != payload:
+        results.append(fail(
+            "case_42_b3_real_ipv6_loopback_conformance",
+            "server did not receive the payload over ::1",
+        ))
+        return
+    if echo != payload:
+        results.append(fail(
+            "case_42_b3_real_ipv6_loopback_conformance",
+            "echoed payload mismatch over ::1",
+        ))
+        return
+    results.append(ok(
+        "case_42_b3_real_ipv6_loopback_conformance",
+        "AF_INET6 ::1 loopback round-trip; standard IPv6 path end-to-end",
+    ))
+
+
+# --------------------------------------------------------------------------
+# N. B1 -- NAT seam failure isolation (one sandboxed seam, no escape hatch)
+# --------------------------------------------------------------------------
+
+
+def case_43_b1_nat_base_exception_isolated(results: List[Result]) -> None:
+    """43. B1: a NAT adapter raising BaseException (incl SystemExit) is
+    converted to a typed value; it never propagates (no escape hatch)."""
+    class _FaultyNAT(NAT64Adapter):
+        def translate(self, context, *, packet_view, nat_policy):
+            raise SystemExit("vendor NAT stack panic")
+    mgr = _new_manager()
+    binding = _open_and_bind(mgr)
+    mgr.register_nat_adapter(_FaultyNAT(), now=_NOW)
+    nat_policy = NATPolicy(
+        enabled=True, mode="nat64",
+        v6_prefix=binding.prefix, v4_pool="192.0.2.0/24",
+    )
+    pkt = PacketView(
+        ip_flow=binding.ip_flow, payload_bytes=b"v4",
+        direction="egress", translated=False,
+    )
+    r = mgr.translate_v4(packet_view=pkt, nat_policy=nat_policy, now=_NOW)
+    if r.ok:
+        results.append(fail("case_43_b1_nat_base_exception_isolated", "SystemExit crossed the NAT seam"))
+        return
+    if r.reason != IPIntegrationReasonCode.IPINTEGRATION_FAILURE:
+        results.append(fail("case_43_b1_nat_base_exception_isolated", "wrong reason %r" % r.reason))
+        return
+    if r.failure is None or r.failure.exception_class_name != "SystemExit":
+        results.append(fail("case_43_b1_nat_base_exception_isolated", "exception class name not captured"))
+        return
+    # Diagnostic state reflects the isolated NAT failure.
+    if mgr.diagnostic_state()["nat_consecutive_failures"] < 1:
+        results.append(fail("case_43_b1_nat_base_exception_isolated", "NAT failure not accounted in diagnostic state"))
+        return
+    results.append(ok("case_43_b1_nat_base_exception_isolated", "NAT SystemExit -> isolated value; class name only; no escape hatch"))
+
+
+def case_44_b1_nat_malformed_return_rejected(results: List[Result]) -> None:
+    """44. B1: a NAT adapter returning a non-contract value is rejected at
+    the seam (CONTRACT_VIOLATION); the malformed value never enters state."""
+    class _BadShapeNAT(NAT64Adapter):
+        def translate(self, context, *, packet_view, nat_policy):
+            return "not-a-packetview"  # malformed return
+    mgr = _new_manager()
+    binding = _open_and_bind(mgr)
+    mgr.register_nat_adapter(_BadShapeNAT(), now=_NOW)
+    nat_policy = NATPolicy(
+        enabled=True, mode="nat64",
+        v6_prefix=binding.prefix, v4_pool="192.0.2.0/24",
+    )
+    pkt = PacketView(
+        ip_flow=binding.ip_flow, payload_bytes=b"v4",
+        direction="egress", translated=False,
+    )
+    r = mgr.translate_v4(packet_view=pkt, nat_policy=nat_policy, now=_NOW)
+    if r.ok:
+        results.append(fail("case_44_b1_nat_malformed_return_rejected", "malformed NAT return accepted"))
+        return
+    if r.reason != IPIntegrationReasonCode.CONTRACT_VIOLATION:
+        results.append(fail("case_44_b1_nat_malformed_return_rejected", "wrong reason %r" % r.reason))
+        return
+    if mgr.diagnostic_state()["nat_total_contract_violations"] < 1:
+        results.append(fail("case_44_b1_nat_malformed_return_rejected", "contract violation not accounted"))
+        return
+    results.append(ok("case_44_b1_nat_malformed_return_rejected", "malformed NAT return -> CONTRACT_VIOLATION; discarded"))
+
+
+def case_45_b1_nat_budget_exhaustion(results: List[Result]) -> None:
+    """45. B1: NAT translation step-budget exhaustion -> BUDGET_EXHAUSTED
+    (the deterministic hang model; no wall clock anywhere in the NAT seam)."""
+    mgr = _new_manager()
+    binding = _open_and_bind(mgr)
+    # The reference NAT adapter charges NAT_TRANSLATE_STEP_CHARGE (4) per
+    # translate; a step_budget of 2 MUST exhaust on the first call.
+    nat_sandbox = SandboxedNatAdapter(
+        NAT64Adapter(),
+        integration_id="adcos:ipint:nat:budget",
+        step_budget=2,
+    )
+    pol = NATPolicy(
+        enabled=True, mode="nat64",
+        v6_prefix=binding.prefix, v4_pool="192.0.2.0/24",
+    )
+    pkt = PacketView(
+        ip_flow=binding.ip_flow, payload_bytes=b"v4",
+        direction="egress", translated=False,
+    )
+    r = nat_sandbox.translate(_NOW, packet_view=pkt, nat_policy=pol)
+    if r.ok:
+        results.append(fail("case_45_b1_nat_budget_exhaustion", "budget exhausted but NAT translate succeeded"))
+        return
+    if r.failure is None or r.failure.reason_code != IPIntegrationReasonCode.BUDGET_EXHAUSTED:
+        results.append(fail("case_45_b1_nat_budget_exhaustion", "wrong reason"))
+        return
+    results.append(ok("case_45_b1_nat_budget_exhaustion", "NAT BUDGET_EXHAUSTED; hang model; no wall clock"))
+
+
+# --------------------------------------------------------------------------
 # main
 # --------------------------------------------------------------------------
 
@@ -1580,6 +1826,10 @@ def main() -> int:
     case_39_failure_isolation_contract_violation(results)
     case_40_failure_isolation_budget_exhaustion(results)
     case_41_failure_isolation_no_secret_leak(results)
+    case_42_b3_real_ipv6_loopback_conformance(results)
+    case_43_b1_nat_base_exception_isolated(results)
+    case_44_b1_nat_malformed_return_rejected(results)
+    case_45_b1_nat_budget_exhaustion(results)
 
     print("ADCOS IP integration self-test (WORK-018)")
     print("=" * 72)

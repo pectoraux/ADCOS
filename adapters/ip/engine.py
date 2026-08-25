@@ -78,7 +78,10 @@ class ReferenceIPIntegrationEngine(IPIntegrationContract):
 
     label = "reference-ip-engine"
 
-    #: Deterministic step charges per operation (budget model).
+    #: Deterministic step charges per operation (budget model).  The
+    #: engine is IPv6-ONLY (R2): there is NO ``translate_v4`` charge
+    #: here -- NAT translation is charged by the separate NAT seam
+    #: (:class:`adapters.ip.sandbox.SandboxedNatAdapter`).
     STEP_CHARGES: Dict[str, int] = {
         "open": 2,
         "provision_prefix": 3,
@@ -86,14 +89,13 @@ class ReferenceIPIntegrationEngine(IPIntegrationContract):
         "resolve_gateway": 4,
         "egress": 3,
         "ingress": 3,
-        "translate_v4": 4,
         "app_socket": 3,
         "rebind_route": 6,
         "health": 1,
         "close": 2,
     }
 
-    def __init__(self, *, nat_adapter: Optional[Any] = None) -> None:
+    def __init__(self) -> None:
         self._open = False
         self._sequence = 0
         # binding_id -> SessionIPBinding (the engine's own state).
@@ -102,9 +104,10 @@ class ReferenceIPIntegrationEngine(IPIntegrationContract):
         self._flow_index: Dict[str, str] = {}
         # node_id -> IPv6Prefix (provisioned prefixes).
         self._prefixes: Dict[str, IPv6Prefix] = {}
-        # NAT adapter (R2 NAT containment -- the engine ITSELF does no
-        # IPv4; IPv4 reachable ONLY through this adapter).
-        self._nat_adapter = nat_adapter
+        # R2 NAT containment: the engine ITSELF does no IPv4 and holds
+        # NO NAT adapter.  IPv4 reachability is a SEPARATE sandboxed seam
+        # (NatAdapterContract / SandboxedNatAdapter) invoked ONLY by the
+        # manager's translate_v4 (B1 -- one NAT authority).
 
     # ------------------------------------------------------------------
     # Helpers
@@ -499,44 +502,6 @@ class ReferenceIPIntegrationEngine(IPIntegrationContract):
             )
         # Return the SAME sacred session_id; NEVER rewrite it.
         return binding.session_id
-
-    def translate_v4(
-        self,
-        context: IPIntegrationContext,
-        *,
-        packet_view: PacketView,
-        nat_policy: NATPolicy,
-    ) -> PacketView:
-        self._charge(context, "translate_v4")
-        self._require_open()
-        if not isinstance(packet_view, PacketView):
-            raise IPIntegrationError(
-                IPIntegrationReasonCode.INVALID_INPUT,
-                "packet_view must be a PacketView",
-            )
-        if not isinstance(nat_policy, NATPolicy):
-            raise IPIntegrationError(
-                IPIntegrationReasonCode.INVALID_INPUT,
-                "nat_policy must be a NATPolicy",
-            )
-        # Delegate to the registered NAT adapter (R2 containment: the
-        # engine ITSELF does no IPv4; IPv4 is purely the adapter's
-        # concern).  Without an adapter, fail closed honestly.
-        if self._nat_adapter is None:
-            raise IPIntegrationError(
-                IPIntegrationReasonCode.NAT_UNAVAILABLE,
-                "no NAT64 adapter registered; translate_v4 fails closed "
-                "(IPv4 reachable ONLY through a NAT adapter -- R2 NAT "
-                "containment)",
-            )
-        # Forward to the adapter (stateless adapter; context unused).
-        result = self._nat_adapter.translate(None, packet_view, nat_policy)
-        if not isinstance(result, PacketView):
-            raise IPIntegrationError(
-                IPIntegrationReasonCode.CONTRACT_VIOLATION,
-                "NAT adapter returned a non-PacketView value",
-            )
-        return result
 
     def app_socket(
         self,
