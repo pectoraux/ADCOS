@@ -72,3 +72,6 @@ jobs:
 
       - name: Run secure transport profile tests
         run: python3 tools/transport_selftest.py
+
+      - name: Run IP integration boundary tests
+        run: python3 tools/ipintegration_selftest.py

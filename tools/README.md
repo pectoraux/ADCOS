@@ -1044,3 +1044,61 @@ python3 tools/transport_selftest.py
 | `65-contract-independent-of-crypto` | the same history under two record models yields byte-identical manager snapshots and wire views while the frames differ |
 | `66-initiator-zero-trust` | an impersonated acceptance (node_c signature) passes the engine key confirmation but fails the manager identity gate: no record, pending consumed |
 | `67-standards-boundary-documented` | the README standards boundary (reference model, no protocol interoperability claim, RFC citations, AWAITING_CONFIRM, record-protection seam) is present and the removed overstated claim is gone |
+
+## ipintegration_selftest.py — IPv6/IP integration boundary tests (WORK-018)
+
+Deterministic, offline verification of the `adapters/ip/` package against the frozen WORK-018 contract (`spec/work-items.md`; architecture §3, §10, §15, §16, §23, §25 rule 9, §27, §28, §29, §30; LOCK-011, LOCK-013, LOCK-016, LOCK-018, LOCK-019, LOCK-020, LOCK-023): IPv6-first operation, application transparency (LOCK-019), evidence-backed gateway role (architecture §"a reported gateway claim cannot be silently converted into an authoritative gateway fact"), NAT/IPv4 containment as adapter/policy behavior (R2), route/session identity separation (R1), B2-style per-binding sandbox ownership, least-authority facades, sandboxed impl, deterministic snapshots, and LOCK-018 standards leverage (stdlib `ipaddress` for RFC 4291 IPv6; RFC 6437 flow labels; RFC 4007 scopes; RFC 8200 hop limit; RFC 4193 ULA; RFC 4861 ND concepts; RFC 8415 DHCPv6-PD concepts; RFC 6146/6147/7915 NAT64; no reinvented IPv6/crypto/NAT primitive). Exercises the boundary end-to-end — the AppSocket `connect()`→`send()`→`recv()`→`close()` round-trip is byte-identical through the egress/ingress packet path, RFC 4291 IPv6 canonicalization is verified through the stdlib `ipaddress` module, two distinct sessions always yield distinct flow_ids (route/session identity separation), the core engine has NO IPv4 path (R2 containment), and a runtime implementation swap preserves live bindings (B2 per-binding ownership). Runs in CI after the transport suite.
+
+### Invocation
+
+```bash
+python3 tools/ipintegration_selftest.py
+```
+
+Exit codes: `0` all cases pass; `1` at least one case fails.
+
+### Case catalog
+
+| Case | Verifies |
+|---|---|
+| `01-contract-surface-frozen` | the 11 IP integration operations in order on the ABC; context surface exact (6 members) |
+| `02-context-least-authority` | immutable 6-member context facade; no store/identity/policy/topology/manager reachability |
+| `03-context-injected-instant-and-budget` | injected instants; bounded step budget is the hang model (negative/bool charges rejected; over-budget exhausts) |
+| `04-provision-prefix-happy` | provision_prefix deterministically yields a /48 ULA prefix (RFC 4193); per-node content-derived |
+| `05-bind-session-happy` | bind_session produces a binding with sacred session_id + distinct flow_id; default hop limit 64 |
+| `06-egress-happy` | egress decrements hop limit (RFC 8200 64→63); flow_id stable across the decrement |
+| `07-ingress-happy` | ingress classifies by flow_id and returns the SAME sacred session_id |
+| `08-translate-v4-happy` | translate_v4 succeeds with a NAT64 adapter; translated packet returned |
+| `09-app-socket-happy` | app_socket returns a standard-IPv6 facade with connect/send/recv/close only |
+| `10-rebind-route-happy` | rebind_route produces new flow_id + SAME session_id + new binding_id (R1 green) |
+| `11-close-happy` | close_binding releases; egress/ingress on the closed binding fail closed |
+| `12-packet-path-round-trip` | AppSocket.send → egress → ingress → AppSocket.recv; byte-identical payload; trace printed |
+| `13-rfc4291-canonical-ipv6` | RFC 4291 IPv6 canonical form via stdlib ipaddress; auto-canonicalize; malformed rejected |
+| `14-rfc6437-flow-label-range` | RFC 6437 flow label is 20-bit (0..0xFFFFF); 0 and max both valid; out-of-range rejected |
+| `15-rfc4007-scope-vocab` | RFC 4007 scope vocabulary frozen (none/interface-local/link-local/site-local/global/unique-local) |
+| `16-rfc8200-hop-limit-range` | RFC 8200 hop limit 0..255; default 64 |
+| `17-rfc6146-nat64-translation` | NAT64/464XLAT translation deterministic; translated dst in the NAT v6_prefix range |
+| `18-r1-route-session-separation-green` | route change → new flow_id, SAME byte-identical session_id |
+| `19-r1-route-session-collapse-rejected` | a rogue engine that mutates session_id on rebind is rejected at the manager seam with ROUTE_SESSION_COLLAPSE |
+| `20-r1-flow-id-reuse-across-sessions-rejected` | distinct sessions with the same route_ref yield distinct flow_ids; ingress cannot misclassify |
+| `21-r2-nat-unavailable-fail-closed` | without a NAT adapter, translate_v4 fails closed NAT_UNAVAILABLE (honest, not silent) |
+| `22-r2-engine-no-ipv4-path` | static audit: the core engine has no IPv4 path; NAT is delegated to an adapter behind the seam |
+| `23-r3-gateway-evidence-green` | gateway claim WITH evidence → authoritative=True |
+| `24-r3-gateway-unevidenced-fail-closed` | gateway claim WITHOUT evidence → GATEWAY_UNEVIDENCED |
+| `25-r3-gateway-role-not-identity` | two nodes can both be gateways; gateway-ness is a role, not an identity |
+| `26-r4-app-socket-surface-audited` | AppSocket public surface connect/send/recv/close only; no ADCOS tokens in method signatures or docstrings |
+| `27-r4-leaky-socket-rejected` | a fake leaky socket exposing a session_id attribute is rejected at the seam |
+| `28-r5-default-swap-preserves-live-binding` | binding A keeps impl1 across a swap; new binding B uses impl2; both coexist (B2 green) |
+| `29-r5-re-route-into-new-impl-fails` | binding A's owning sandbox stays impl1; impl2 has no state for A (B2 red proof) |
+| `30-r6-standards-boundary-audit` | static audit: no reinvented IP/crypto primitive; no 5G/vendor leakage; RFCs cited; non-confidentiality declared |
+| `31-r6-frozen-spec-intact` | spec/ tree byte-identical to origin/main (frozen-spec integrity) |
+| `32-authority-session-reader-read-only` | SessionReader is read-only (lookup only); no minting of unknown sessions |
+| `33-authority-topology-reader-read-only` | TopologyReader is read-only; no minting of unevidenced gateway claims |
+| `34-authority-no-session-mutation` | the IP integration never mutates session state — the SessionReader snapshot is byte-identical across bind_session |
+| `35-authority-id-grammar-disjoint` | the adcos:ipint prefix is disjoint from adcos:node / adcos:adapter / adcos:transport / sha256: grammars |
+| `36-determinism-byte-identical-snapshot` | byte-identical manager.to_canonical_bytes() across two repeat runs of the same operation sequence |
+| `37-determinism-cross-impl-byte-identical` | a second impl behind the same contract produces the SAME binding/flow digests for the same inputs (excl. implementation_label) |
+| `38-failure-isolation-base-exception` | impl raising SystemExit → typed IPIntegrationFailure value; never propagates; class name only |
+| `39-failure-isolation-contract-violation` | non-contract return shape → CONTRACT_VIOLATION discarded; manager state unchanged |
+| `40-failure-isolation-budget-exhaustion` | step budget exhaustion → BUDGET_EXHAUSTED (hang model; no wall clock) |
+| `41-failure-isolation-no-secret-leak` | failure diagnostics never carry exception message text (LOCK-023) |
