@@ -962,3 +962,85 @@ python3 tools/adapter_selftest.py
 | `54-concurrent-ops-deterministic` | 16 threads × 2 runs → identical ledger/counts |
 | `55-frozen-doc-unchanged` | spec/ byte-identical to origin/main |
 | `56-vocabulary-freeze` | 7 vocabularies + contract + context surface frozen |
+
+## transport_selftest.py — secure transport profile tests (WORK-017)
+
+Deterministic, offline verification of the transport package against the frozen WORK-017 contract (spec/work-items.md; architecture §3, §5.4, §5.5, §7 rule 6, §13, §19, §25 rules 8/9/14, §28 Level 1, §29; LOCK-005, LOCK-006, LOCK-014, LOCK-015, LOCK-016, LOCK-017, LOCK-018, LOCK-022, LOCK-023): the required security, interoperability, and downgrade tests plus the established mechanical audits. Exercises the boundary end-to-end — handshake records and attestations are verified against the real WORK-004 identity stack (revocation/expiry/wrong-role fail closed on both sides), session secureability is checked read-only against a real WORK-012 store, access independence is proven behaviorally by binding the same session to two different access technologies through the real WORK-016 adapter runtime while the transport records stay technology-free, and a genuinely independent second implementation (its own key schedule and its own integrity-only record model) interoperates through the same contract with zero manager changes. Every peer/network-originated rejection (replay, integrity, downgrade) is an audit event that never degrades engine health. The correction-cycle battery (61–67) proves the LOCK-018 standards boundary: the package contains only standard primitives (HKDF-SHA256 RFC 5869, HMAC-SHA256 RFC 2104), cannot express an invented record-protection construction, carries an explicitly non-confidential self-describing reference record model behind the `RecordProtection` seam, gates every privileged operation behind the AWAITING_CONFIRM zero-trust lifecycle, keeps the record-protection implementation replaceable, and keeps the public contract byte-identical across record models. Runs in CI after the adapter suite.
+
+### Invocation
+
+```bash
+python3 tools/transport_selftest.py
+```
+
+### Case catalog
+
+| Case | Verifies |
+|---|---|
+| `01-contract-surface-frozen` | the 11 transport interface operations in order on an abstract ABC; context surface exact |
+| `02-context-least-authority` | immutable 5-member context facade; no store/identity/policy reachability |
+| `03-context-injected-instant-and-budget` | injected instants; bounded step budget is the hang model (negative charges rejected) |
+| `04-profile-catalog-frozen` | 5 initial profiles (TLS 1.3 / QUIC / IPsec / WireGuard-class / generic); known/unknown/invalid classification; access ids invalid here |
+| `05-negotiation-maximal-rank` | maximal policy-satisfying rank, attacker-order independent, lexicographic tie-break |
+| `06-negotiation-no-intersection` | disjoint offers and impossible floors fail `no-eligible-profile` |
+| `07-negotiation-unknown-never-coerced` | unknown ids never negotiate into known profiles; malformed ids rejected |
+| `08-policy-floor-rejects-weak` | property-driven floors; integrity never waivable (§19 minimum); family restriction |
+| `09-establish-happy-path-tls` | full 4-step handshake over TLS 1.3; bidirectional frames; agreement on public state |
+| `10-establish-parametric-profiles` | QUIC, IPsec tunnel, and generic experimental profiles all establish and exchange |
+| `11-offer-expiry-rejected` | expired offers fail OFFER_EXPIRED with security-log audit |
+| `12-unknown-session-rejected` | read-only WORK-012 lookup enforced |
+| `13-non-secureable-session-state` | REQUESTED/AUTHORIZED/TERMINATED sessions not secureable (frozen vocabulary) |
+| `14-revoked-credential-rejected` | CREDENTIAL_REVOKED fail-closed on both establishment sides (zero trust) |
+| `15-expired-credential-rejected` | CREDENTIAL_EXPIRED fail closed |
+| `16-wrong-role-credential` | identity-role credentials alone cannot secure transports |
+| `17-downgrade-offer-stripping` | in-flight removal of strong profiles detected by the offer-digest echo (DOWNGRADE_REJECTED + audit) |
+| `18-downgrade-forced-selection` | tampered and out-of-offer selections rejected by rule and by key confirmation |
+| `19-downgrade-policy-floor` | floors enforced in the negotiation rule and in the transcript |
+| `20-downgrade-events-audited` | every downgrade attempt leaves a content-derived audit event with offer-digest metadata |
+| `21-frame-replay-rejected` | exact frame replay rejected + audit event |
+| `22-below-window-rejected` | below-window sequences rejected (unit + behavioral after 70 deliveries) |
+| `23-out-of-order-in-window` | unseen in-window reordering accepted exactly once |
+| `24-handshake-replay-rejected` | offer-nonce ledger rejects replayed handshakes without creating state |
+| `25-acceptance-replay-rejected` | stale acceptances cannot complete fresh offers |
+| `26-interop-bidirectional` | two independent managers interoperate both directions; shared public key lineage |
+| `27-interop-independent-engines` | separate engine instances derive identical secrets (pure-function schedule) |
+| `28-interop-second-implementation` | an independent second implementation runs behind the same contract; runtime swap; registration gates unknown profiles |
+| `29-wrong-key-unprotect-fails` | cross-transport frames, forged addresses, tampered payload regions/tags all fail closed |
+| `30-key-binding-session` | session input changes the derived keys |
+| `31-key-binding-endpoints` | both NodeIDs are transcript inputs |
+| `32-key-binding-profile-and-policy` | negotiated profile and policy floor are transcript inputs |
+| `33-key-binding-attestation` | responder attestation is a transcript input and is node-bound (WORK-004 signature semantics) |
+| `34-rekey-generation-chain` | generation advance, public lineage growth, key change, old-generation frame rejection |
+| `35-generation-bound` | GENERATION_EXHAUSTED at the rotation bound; transport still functions at the last generation |
+| `36-rekey-revoked-fails` | rekey under a revoked credential fails closed with audit |
+| `37-suspend-resume-rekey` | access-change continuity: suspend blocks sends, resume rekeys, session identity survives (LOCK-006/021) |
+| `38-recheck-suspends-on-revocation` | zero-trust recheck suspends live transports on revocation; resume denied |
+| `39-close-destroys-keys` | terminal close destroys engine key material; history preserved |
+| `40-no-access-technology-tokens` | no technology/vendor identifiers in transport code; no wall-clock/randomness/network modules |
+| `41-transport-adapters-isolated` | /transport and /adapters never import each other |
+| `42-core-never-imports-transport` | 14 core modules import nothing from transport/ |
+| `43-imports-bounded` | transport imports protocol/identity/sessions + stdlib only (declared dependency set) |
+| `44-access-independence-behavioral` | same session bound to 5G + Wi-Fi adapters through the real WORK-016 runtime; establishment records carry no technology fields |
+| `45-raising-implementation-isolated` | exception class only in diagnostics; manager state byte-identical across failures |
+| `46-contract-violation-discarded` | non-contract return shapes are CONTRACT_VIOLATION values, discarded and accounted |
+| `47-budget-exhaustion` | deterministic hang model via step budget; generous budget succeeds on identical inputs |
+| `48-systemexit-isolated` | BaseException fully contained |
+| `49-health-degradation-thresholds` | DEGRADED at 2, FAILED at 5 consecutive implementation failures; success resets; probes never reset |
+| `50-security-rejections-not-health-faults` | 20 replayed frames: 20 audit events, zero engine-health faults (network attacks are not implementation faults) |
+| `51-wire-view-round-trip` | public wire view round-trips byte-stably; unknown extension members preserved |
+| `52-tampered-wire-fails` | 6 tamper classes (ids, state, direction, missing members, event types, unknown properties) rejected |
+| `53-envelope-opaque-forward` | transport state rides WORK-003 envelopes with unknown-type opaque forwarding (LOCK-014) |
+| `54-envelope-protection-round-trip` | secure control path: envelope frames round-trip; replay rejected; expired envelopes fail temporal validation |
+| `55-canonical-determinism` | identical operation histories → byte-identical manager snapshots |
+| `56-cross-process-determinism` | two fresh subprocess runs print byte-identical scenario output |
+| `57-secret-rejection` | LOCK-023 deep rejection of bytes/secret-named members/hex blobs; clean public data passes |
+| `58-frozen-docs-unchanged` | spec/ byte-identical to origin/main (CI-safe) |
+| `59-vocabulary-freeze` | 8 vocabularies closed and exact |
+| `60-concurrency-commutive` | 16 threads across 8 transports converge to the deterministic snapshot |
+| `61-standards-primitives-audit` | LOCK-018 static audit: 11 transport sources contain no cipher/keystream/AEAD tokens and no crypto-library/entropy imports; RFC 5869/2104/8446/9001/4303 citations present; non-confidentiality declared |
+| `62-reference-frame-contract` | frames self-declare `reference-mac-only`; payload region visible by design (no confidentiality claim); core structural validation crypto-neutral (foreign model ids pass structure) while the engine fails closed on foreign models; tag binds generation+sequence+payload |
+| `63-preconfirmation-gate` | AWAITING_CONFIRM gates send/receive/protect_envelope/receive_envelope/rekey (peer-unconfirmed) and suspend; wrong key confirmation, forged initiator attestation, and revoked local credentials never grant authorization; only fully verified confirm() establishes; initiator holds no record pre-completion |
+| `64-record-protection-replaceable` | a second standard-primitive record model (HMAC-SHA512, own domain and model id) runs end-to-end with zero core changes; both engines fail closed on the other's frames |
+| `65-contract-independent-of-crypto` | the same history under two record models yields byte-identical manager snapshots and wire views while the frames differ |
+| `66-initiator-zero-trust` | an impersonated acceptance (node_c signature) passes the engine key confirmation but fails the manager identity gate: no record, pending consumed |
+| `67-standards-boundary-documented` | the README standards boundary (reference model, no protocol interoperability claim, RFC citations, AWAITING_CONFIRM, record-protection seam) is present and the removed overstated claim is gone |

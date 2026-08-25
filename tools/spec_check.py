@@ -166,6 +166,19 @@ GOVERNANCE_ARTIFACTS: List[str] = [
     "federation/serialization.py",
     "federation/README.md",
     "tools/federation_selftest.py",
+    "transport/__init__.py",
+    "transport/errors.py",
+    "transport/profiles.py",
+    "transport/model.py",
+    "transport/validation.py",
+    "transport/keyschedule.py",
+    "transport/recordprotection.py",
+    "transport/contract.py",
+    "transport/sandbox.py",
+    "transport/manager.py",
+    "transport/serialization.py",
+    "transport/README.md",
+    "tools/transport_selftest.py",
     "topology/README.md",
     "resources/README.md",
     "identity/__init__.py",
@@ -543,6 +556,7 @@ def check_files_02(report: Report) -> None:
             "mobility_selftest.py",
             "federation_selftest.py",
             "adapter_selftest.py",
+            "transport_selftest.py",
         ):
             if required_tool not in workflow_text:
                 problems.append("CI workflow does not invoke tools/%s" % required_tool)

@@ -69,3 +69,6 @@ jobs:
 
       - name: Run adapter SDK/runtime tests
         run: python3 tools/adapter_selftest.py
+
+      - name: Run secure transport profile tests
+        run: python3 tools/transport_selftest.py
