@@ -60,3 +60,6 @@ jobs:
 
       - name: Run multipath session semantics tests
         run: python3 tools/multipath_selftest.py
+
+      - name: Run mobility and handover tests
+        run: python3 tools/mobility_selftest.py

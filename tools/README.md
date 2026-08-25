@@ -762,3 +762,58 @@ python3 tools/multipath_selftest.py
 | `43-direct-primitive-attack` | REGRESSION (PR #13 correction 6 — the Architect's exact required test): `session_store._append_state_preserving_event(forged)` after a legitimate MultipathStore exists → `extension-authority-required`; store/history/plan byte-identical |
 | `44-registration-forgery` | REGRESSION (PR #13 correction 7): the EXACT Architect attack (runtime-forged class registering its own `__init__` code), a forged same-named class, an ordinary function named `__init__`, a runtime call presenting the GENUINE constructor code object, and a runtime declaration attempt — all rejected with no capability installed, the direct primitive closed, and the store byte-identical; the genuine flow is unaffected |
 | `45-trust-store-mutation` | REGRESSION (PR #13 correction 8): the instance trust attribute and the module trust set DO NOT EXIST (setattr creates unrelated attributes the gates never consult); replacing the primitive attribute commits nothing and cannot redirect genuine ops (captured primitive); direct primitive + forged callback rejected; the legitimate operation succeeds |
+
+## mobility_selftest.py — mobility and handover tests (WORK-014)
+
+Deterministic, offline verification of the mobility package against the frozen WORK-014 handoff: session-identity preservation across handover, explicit old/candidate path bindings (content-derived), the full binding verification single-sourced from WORK-012, expiry fail-closed, make-before-break and break-before-make modes with rollback, replay semantics, concurrency determinism, and the mechanical prohibitions (no second routing/policy/topology authority, no wall-clock/randomness, no access-technology/vendor/transport branching, no secret leakage). Runs in CI after the multipath suite.
+
+### Invocation
+
+```bash
+python3 tools/mobility_selftest.py
+```
+
+### Case catalog
+
+| Case | Verifies |
+|---|---|
+| `01-session-id-preserved` | session_id + creation binding byte-identical across a successful MBB handover; new path authoritative; session ESTABLISHED |
+| `02-distinct-content-bound-paths` | old/candidate bindings distinct + content-derived; same-path candidate rejected |
+| `03-old-path-mismatch` | expected-old mismatch fails closed at preparation |
+| `04-new-path-mismatch` | tampered candidate path id → path-tampered |
+| `05-policy-denial` | cross-policy candidate → policy-binding-mismatch |
+| `06-hard-intent-violation` | intent-less candidate for an intent-bound session → intent-binding-mismatch |
+| `07-expired-candidate` | candidate expired at commit → EXPIRED, zero mutation |
+| `08-preparation-failure-rollback` | terminal race → FAILED, zero mutation, auditable event |
+| `09-commit-failure-atomic-rollback` | expired-at-commit → EXPIRED; old binding intact (rollback path in 31) |
+| `10-bbm-preserves-identity` | break-before-make commits; identity preserved |
+| `11-mbb-old-path-active-until-commit` | preparation adds nothing; post-commit the new path is the constituent |
+| `12-old-path-retires-after-commit` | session history proves: make → reconnect commit → break |
+| `13-duplicate-replay-idempotent` | exact duplicate → replayed, zero mutation |
+| `14-conflicting-replay` | same-sequence different content → sequence-conflict |
+| `15-sequence-gaps` | gaps + state mismatches fail closed |
+| `16-concurrent-handovers` | first commit wins; second SUPERSEDED with zero mutation; winner authoritative; fresh candidates prepare |
+| `17-race-with-termination` | termination race → deterministic failure; session stays terminated |
+| `18-reservation-not-consumption` | preparation mutates only mobility transaction state (session/resources/topology/plan byte-identical) |
+| `19-no-second-policy-authority` | no policy engine/store references (AST) |
+| `20-no-second-routing-authority` | no routing engine references (AST) |
+| `21-no-second-topology-authority` | no topology/resources imports (AST) |
+| `22-no-wall-clock` | no wall-clock reads |
+| `23-no-randomness` | no random/uuid imports |
+| `24-no-access-tech` | no transport/access identifiers or imports; `gnb` key rejected |
+| `25-no-secret-leakage` | LOCK-023: secrets rejected, never echoed |
+| `26-content-derived-ids` | transaction/binding/event ids reproducible + tamper-evident |
+| `27-serialization-roundtrip` | byte-identical round-trips via WORK-003 machinery |
+| `28-cross-process-determinism` | identical mobility snapshot digest across processes |
+| `29-stale-old-path-deterministic` | handover off a stale old path commits deterministically |
+| `30-rollback-only-when-prior-valid` | commit off an expired old path succeeds; rollback restoration is expiry-gated |
+| `31-rollback-restores-old-binding` | reconnect failure → old binding restored; identity preserved (BBM; corrupted retained candidate) |
+| `32-cancel` | explicit cancel (ok=True); re-cancel + commit fail closed (terminal) |
+| `33-transaction-vocabulary` | 25 frozen reason codes incl. all handoff section-16 codes |
+| `34-session-state-gating` | pre-/terminating fail closed; post-establishment states prepare |
+| `35-unknown-session-and-transaction` | unknown session/transaction fail closed |
+| `36-malformed-instant` | malformed/absent instants fail closed (no wall-clock fallback) |
+| `37-fuzz-never-crashes` | 60 seeded fuzz trials: only fail-closed envelopes |
+| `38-concurrent-commit-threads` | 20 concurrent commits: ≥1 wins, identity + history intact |
+| `39-frozen-doc-unchanged` | all 4 frozen docs unchanged vs origin/main |
+| `40-prior-prompts-unchanged` | all prior prompts WORK-001..013 unchanged vs origin/main |

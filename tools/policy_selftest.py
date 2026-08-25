@@ -1630,7 +1630,7 @@ def case_69_prior_prompts_unchanged(results: List[Result]) -> None:
     # WORK-012.md is new on this branch (the WORK-012 handoff);
     # WORK-001..011 prompts are merged into main and INCLUDED in the
     # byte-identity check below.
-    prior = [p for p in prompts if p != "WORK-013.md"]
+    prior = [p for p in prompts if p != "WORK-014.md"]
     problems = []
     for doc in prior:
         try:

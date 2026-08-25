@@ -140,6 +140,13 @@ GOVERNANCE_ARTIFACTS: List[str] = [
     "multipath/serialization.py",
     "multipath/README.md",
     "tools/multipath_selftest.py",
+    "mobility/__init__.py",
+    "mobility/model.py",
+    "mobility/validation.py",
+    "mobility/store.py",
+    "mobility/serialization.py",
+    "mobility/README.md",
+    "tools/mobility_selftest.py",
     "topology/README.md",
     "resources/README.md",
     "identity/__init__.py",
@@ -450,6 +457,7 @@ def check_files_02(report: Report) -> None:
             "routing_selftest.py",
             "session_selftest.py",
             "multipath_selftest.py",
+            "mobility_selftest.py",
         ):
             if required_tool not in workflow_text:
                 problems.append("CI workflow does not invoke tools/%s" % required_tool)

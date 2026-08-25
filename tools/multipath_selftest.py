@@ -1406,7 +1406,7 @@ def case_35_prior_prompts_unchanged(results: List[Result]) -> None:
     prompts_dir = REPO_ROOT / "spec" / "prompts"
     prompts = sorted(p.name for p in prompts_dir.iterdir()
                      if p.name.startswith("WORK-") and p.name.endswith(".md"))
-    prior = [p for p in prompts if p != "WORK-013.md"]
+    prior = [p for p in prompts if p != "WORK-014.md"]
     problems = []
     for doc in prior:
         try:
