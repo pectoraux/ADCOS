@@ -210,11 +210,75 @@ ARCH_VERSION_FIELD_RE = re.compile(
     re.MULTILINE,
 )
 
+# Ordinary-prose referring expressions (closed list). An Architecture
+# Version phrase in a ## Status section is a REFERENCE — unrestricted per
+# spec/governance.md §3, including inside Status sections — when a
+# referring expression appears in its sentence-bounded prefix, e.g.
+# "follows the frozen Architecture Version 1.0" or "written against
+# Architecture Version 1.0". Any other Status-section occurrence (a bare
+# statement, a state-marker attachment, or a parenthetical) keeps the
+# declaration classification: unknown phrasing fails closed.
+# Refinement directed by the Architect in the WORK-015 review: the
+# corrected handoff Status line "AUTHORITATIVE ARCHITECT HANDOFF —
+# follows the frozen Architecture Version 1.0" is a reference, not a
+# second declaration site; the previous rule classified every literal
+# phrase in a Status section as a declaration.
+REFERRING_EXPRESSION_RE = re.compile(
+    r"\b(?:"
+    r"follow(?:s|ed|ing)?"
+    r"|(?:written\s+)?against"
+    r"|implement(?:s|ed|ing)?"
+    r"|conform(?:s|ed|ing)?\s+to"
+    r"|in\s+accordance\s+with"
+    r"|according\s+to"
+    r"|based\s+on"
+    r"|referenc(?:e|es|ed|ing)"
+    r"|pursuant\s+to"
+    r"|as\s+(?:specified|defined)\s+by"
+    r"|per"
+    r")\b"
+)
+
+# Sentence/line boundaries delimit the prefix examined for a referring
+# expression. A period only ends a sentence when followed by whitespace or
+# end-of-text (so "spec/architecture.md" does not split a sentence).
+SENTENCE_BOUNDARY_RE = re.compile(r"(?:[.!?;](?=\s|$))|\n")
+
+# Maximum characters of the sentence-bounded prefix in which a referring
+# expression is recognized. The canonical forms need roughly twenty
+# characters ("follows the frozen ", "written against "); the window keeps
+# a referring expression distant within a long sentence from whitelisting
+# an otherwise bare trailing statement.
+REFERENCE_WINDOW = 64
+
+
+def _sentence_prefix(text: str, pos: int) -> str:
+    """Sentence-bounded text immediately preceding pos (up to the nearest
+    sentence or line boundary), truncated to the reference window."""
+    start = 0
+    for m in SENTENCE_BOUNDARY_RE.finditer(text, 0, pos):
+        start = m.end()
+    return text[start:pos][-REFERENCE_WINDOW:]
+
 
 def status_declarations(text: str) -> List[str]:
-    """Architecture Version declaration occurrences in a document's Status
-    section (the declaration site convention of this repository)."""
-    return ARCH_VERSION_RE.findall(status_section(text))
+    """Architecture Version DECLARATIONS in a document's Status section.
+
+    A Status-section occurrence of the Architecture Version phrase is a
+    declaration unless it is ordinary prose that refers to the
+    architecture document's version through a referring expression
+    (REFERRING_EXPRESSION_RE matched against the sentence-bounded
+    prefix). Such references are unrestricted — including inside Status
+    sections — per spec/governance.md §3. Bare statements, state-marker
+    attachments, and parentheticals are declarations and fail closed.
+    """
+    status = status_section(text)
+    declarations: List[str] = []
+    for m in ARCH_VERSION_RE.finditer(status):
+        if REFERRING_EXPRESSION_RE.search(_sentence_prefix(status, m.start())):
+            continue  # ordinary prose reference — allowed
+        declarations.append(m.group(0))
+    return declarations
 
 
 def field_declarations(text: str) -> List[str]:
@@ -519,19 +583,24 @@ def check_versions(report: Report, texts: Dict[str, str]) -> None:
     """VERS-01: version-kind distinction and the single authoritative
     Architecture Version declaration site.
 
-    Declaration vs reference (spec/governance.md §3): a *declaration* is the
-    Architecture Version statement in a document's Status section, or an
-    explicit declaration field (line-leading 'Architecture Version: X.Y').
-    Declarations are legal only in the Status section of
-    spec/architecture.md. Any other occurrence — e.g. a prompt or audit note
-    saying it is written against a given architecture version — is a
-    *reference* and is unrestricted. This check therefore rejects actual
-    declarations outside the authoritative site; it does not ban the phrase
-    repository-wide."""
+    Declaration vs reference (spec/governance.md §3; classification
+    refined per the Architect's WORK-015 review direction): a
+    *declaration* is the Architecture Version statement attached as a
+    document's own version — a bare statement, a state-marker
+    attachment, or a parenthetical in a Status section, with no
+    referring expression in its sentence-bounded prefix — or an
+    explicit declaration field (line-leading 'Architecture Version:
+    X.Y'). Declarations are legal only in the Status section of
+    spec/architecture.md. Ordinary prose that *refers* to the
+    architecture document's version ("follows the frozen Architecture
+    Version 1.0", "written against Architecture Version 1.0", ...) is a
+    reference and is unrestricted — including inside Status sections.
+    This check rejects declarations outside the authoritative site; it
+    does not ban the phrase repository-wide."""
     problems: List[str] = []
     arch = texts.get("spec/architecture.md", "")
     arch_status = status_section(arch)
-    arch_status_decls = ARCH_VERSION_RE.findall(arch_status)
+    arch_status_decls = status_declarations(arch)
     if len(arch_status_decls) != 1:
         problems.append(
             "spec/architecture.md Status must declare exactly one "
@@ -551,8 +620,9 @@ def check_versions(report: Report, texts: Dict[str, str]) -> None:
         )
     # No document other than spec/architecture.md may declare the Architecture
     # Version. Declarations are detected structurally (Status-section
-    # statement or line-leading declaration field); prose references are
-    # allowed everywhere.
+    # statements without a referring expression, or line-leading declaration
+    # fields); ordinary prose references — including inside Status sections —
+    # are allowed everywhere.
     for md_path in sorted(REPO_ROOT.rglob("*.md")):
         if ".git" in md_path.parts:
             continue
@@ -565,7 +635,9 @@ def check_versions(report: Report, texts: Dict[str, str]) -> None:
             problems.append(
                 "%s: Status section declares an Architecture Version (%r) — "
                 "declarations are legal only in the Status section of "
-                "spec/architecture.md; use a prose reference instead "
+                "spec/architecture.md; ordinary prose references (e.g. "
+                "'follows the frozen Architecture Version 1.0', 'written "
+                "against Architecture Version 1.0') are allowed anywhere "
                 "(spec/governance.md §3)" % (rel_path, status_decls)
             )
         field_decls = field_declarations(text)

@@ -16,11 +16,15 @@ Exit codes:
     0  all cases passed
     1  at least one case failed
 
-Declaration vs reference (correction cycle 3): negative cases inject
-actual declarations (a Status-section statement or an explicit
-declaration field) and must fail VERS-01; positive cases add ordinary
-prose references — the exact usage future prompts, ADRs, and audit
-records need — and must pass.
+Declaration vs reference (correction cycle 3; classification refined
+during the WORK-015 review per Architect direction): negative cases
+inject actual declarations (a Status-section statement, a parenthetical
+version attachment, or an explicit declaration field) and must fail
+VERS-01; positive cases add ordinary prose references — including
+inside Status sections, the exact usage future prompts, ADRs, and
+audit records need — and must pass. A mixed fixture proves that a
+Status-section prose reference does not whitelist a bare declaration
+statement in the same Status section.
 """
 
 from __future__ import annotations
@@ -75,6 +79,39 @@ PROMPT_WITH_REFERENCE = """# WORK-000 — reference fixture
 This prompt references the governing architecture in ordinary prose:
 implement this Work Item against Architecture Version 1.0 and consult
 `spec/architecture.md` for the authoritative declaration.
+"""
+
+PROMPT_WITH_STATUS_PROSE_REFERENCE = """# WORK-000 — Status-section prose reference fixture (sentence form)
+
+## Status
+
+**ACTIVE — prompt fixture**
+
+This fixture is written against Architecture Version 1.0; the
+authoritative declaration lives only in `spec/architecture.md`.
+"""
+
+PROMPT_WITH_STATUS_MARKER_REFERENCE = """# WORK-000 — Status-section prose reference fixture (marker-line form)
+
+## Status
+
+**ACTIVE — fixture follows the frozen Architecture Version 1.0**
+
+The Status marker line itself carries only a prose reference to the
+architecture document's version — the exact shape of the corrected
+WORK-015 handoff Status line.
+"""
+
+PROMPT_WITH_STATUS_MIXED_REFERENCE_DECLARATION = """# WORK-000 — mixed Status fixture (reference + declaration)
+
+## Status
+
+**ACTIVE — fixture follows the frozen Architecture Version 1.0**
+
+The marker line above is an allowed prose reference; the bare
+statement below is a declaration and must still fail.
+
+**Architecture Version 1.0**
 """
 
 CASES: List[Case] = [
@@ -165,6 +202,22 @@ CASES: List[Case] = [
         "expect_check": "VERS-01",
     },
     {
+        # Negative (WORK-015 refinement): a Status section may contain an
+        # allowed prose reference, but a bare declaration statement in the
+        # same Status section still fails — the refinement is not a
+        # wholesale Status-section whitelist.
+        "name": "architecture-version-status-mixed-reference-and-declaration",
+        "ops": [
+            (
+                "create",
+                "spec/prompts/WORK-000.md",
+                PROMPT_WITH_STATUS_MIXED_REFERENCE_DECLARATION,
+            )
+        ],
+        "expect_exit": 1,
+        "expect_check": "VERS-01",
+    },
+    {
         # Positive: an ordinary prose reference in a process document body
         # must be allowed.
         "name": "architecture-version-reference-in-process-doc-body",
@@ -205,6 +258,35 @@ CASES: List[Case] = [
         # at WORK-001..WORK-040, gap-free).
         "name": "architecture-version-reference-in-new-prompt",
         "ops": [("create", "spec/prompts/WORK-000.md", PROMPT_WITH_REFERENCE)],
+        "expect_exit": 0,
+        "expect_check": None,
+    },
+    {
+        # Positive (WORK-015 refinement): an ordinary prose reference is
+        # allowed inside a Status section — sentence form.
+        "name": "architecture-version-status-prose-reference-sentence",
+        "ops": [
+            (
+                "create",
+                "spec/prompts/WORK-000.md",
+                PROMPT_WITH_STATUS_PROSE_REFERENCE,
+            )
+        ],
+        "expect_exit": 0,
+        "expect_check": None,
+    },
+    {
+        # Positive (WORK-015 refinement): an ordinary prose reference is
+        # allowed inside a Status section — marker-line form, the exact
+        # shape of the corrected WORK-015 handoff Status line.
+        "name": "architecture-version-status-prose-reference-marker-line",
+        "ops": [
+            (
+                "create",
+                "spec/prompts/WORK-000.md",
+                PROMPT_WITH_STATUS_MARKER_REFERENCE,
+            )
+        ],
         "expect_exit": 0,
         "expect_check": None,
     },

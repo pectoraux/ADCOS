@@ -27,7 +27,7 @@ CI runs the same command on every push and pull request (`.github/workflows/spec
 | `FILES-02` | yes | Governance artifacts exist (governance/change-control/workflow documents, schema and ACR locations, tooling) and the CI workflow invokes the checker. |
 | `MARK-01` | yes | Every registered document carries its exact H1 title and a Status section identifying its role (frozen architecture vs. process authority). |
 | `MARK-02` | yes | The four architecture-authority documents carry `FROZEN` status markers. |
-| `VERS-01` | yes | Version-kind distinction and the single architecture-version declaration site. **Declaration vs reference**: a *declaration* is the Architecture Version statement in a document's Status section or an explicit declaration field (line-leading `Architecture Version: X.Y`); declarations are legal only in the Status section of `spec/architecture.md`, which must carry exactly one. Every Markdown document's Status section and declaration fields are scanned; no other document may declare. Ordinary prose references (e.g. "written against Architecture Version 1.0") are unrestricted. Also verifies no frozen document's status section declares a Protocol Version and that `spec/governance.md` defines all four version kinds with the non-conflation rule. |
+| `VERS-01` | yes | Version-kind distinction and the single architecture-version declaration site. **Declaration vs reference** (classification refined per the Architect's WORK-015 review direction): a *declaration* is (a) an Architecture Version phrase in a document's Status section attached as the document's own version — a bare statement, state-marker attachment, or parenthetical with **no referring expression** in its sentence-bounded prefix — or (b) an explicit declaration field (line-leading `Architecture Version: X.Y`) anywhere. Declarations are legal only in the Status section of `spec/architecture.md`, which must carry exactly one. Ordinary prose **references** — an Architecture Version phrase whose sentence-bounded prefix carries a referring expression from the closed list (`follows`, `written against` / `against`, `implements`, `conforms to`, `in accordance with`, `according to`, `based on`, `references`, `pursuant to`, `as specified/defined by`, `per`) — are unrestricted, including inside Status sections; unknown Status-section phrasing fails closed as a declaration. Also verifies no frozen document's status section declares a Protocol Version and that `spec/governance.md` defines all four version kinds with the non-conflation rule. |
 | `BACKLOG-01` | yes | Work Item backlog integrity: unique, gap-free `WORK-001..WORK-040`, with `Objective:` and `Dependencies:` lines per item. |
 | `DEPS-01` | yes | All dependency references (declared dependencies, DAG nodes and edges, execution-phase members, critical-path members) resolve to known Work Item IDs. |
 | `DEPS-02` | yes | The dependency graph (DAG edges ∪ declared dependencies) is acyclic. |
@@ -44,7 +44,7 @@ This tool validates repository structure and specification mechanics only. It is
 
 ## spec_check_selftest.py
 
-Deterministic, offline negative and positive tests for the checker itself, introduced by WORK-001 correction cycles 2 and 3 (Architect reviews of PR #1). Each case copies the specification tree into a temporary directory, applies exactly one change, runs the checker, and asserts the expected exit code and failing check. No repository file is ever modified; temporary directories are always removed.
+Deterministic, offline negative and positive tests for the checker itself, introduced by WORK-001 correction cycles 2 and 3 (Architect reviews of PR #1) and extended during the WORK-015 review (Architect-directed VERS-01 declaration/reference refinement: Status-section prose references must pass while all declaration forms still fail). Each case copies the specification tree into a temporary directory, applies exactly one change, runs the checker, and asserts the expected exit code and failing check. No repository file is ever modified; temporary directories are always removed.
 
 ### Invocation
 
@@ -67,6 +67,7 @@ Negative cases (injected violations must fail):
 | `architecture-version-declared-in-process-doc` | architecture-version **declaration** injected into `spec/workflow.md` Status (the declaration form from the correction cycle 2 review) | `VERS-01` |
 | `architecture-version-declared-in-status-of-new-doc` | new prompt document declaring the architecture version in its Status section | `VERS-01` |
 | `architecture-version-declaration-field-in-new-doc` | new document with an explicit `Architecture Version: 1.0` declaration field | `VERS-01` |
+| `architecture-version-status-mixed-reference-and-declaration` | Status section containing both an allowed prose reference and a bare declaration statement (the refinement is not a wholesale Status-section whitelist) | `VERS-01` |
 | `frozen-marker-removed` | FROZEN marker replaced with DRAFT | `MARK-02` |
 | `execution-phase-order-violation` | W001 appended to Phase 8 sequence | `DEPS-03` |
 
@@ -77,7 +78,9 @@ Positive cases (legitimate content must pass — proving the checker distinguish
 | `baseline-unmutated-tree` | none (control) | exit 0 |
 | `architecture-version-reference-in-process-doc-body` | prose reference in `spec/governance.md` body: “written against Architecture Version 1.0” | exit 0 |
 | `architecture-version-reference-in-readme` | prose reference sentence in `README.md` | exit 0 |
-| `architecture-version-reference-in-new-prompt` | new `spec/prompts/WORK-002.md` referencing the architecture version in ordinary prose | exit 0 |
+| `architecture-version-reference-in-new-prompt` | new `spec/prompts/WORK-000.md` referencing the architecture version in ordinary prose | exit 0 |
+| `architecture-version-status-prose-reference-sentence` | prose reference **inside a Status section** (sentence form): “written against Architecture Version 1.0” | exit 0 |
+| `architecture-version-status-prose-reference-marker-line` | prose reference inside a Status-section marker line — the corrected WORK-015 handoff shape: “follows the frozen Architecture Version 1.0” | exit 0 |
 
 Mutation anchors are asserted to match exactly once; if frozen text drifts, the self-test fails loudly and must be updated deliberately. Output is fully deterministic (temporary paths are never printed).
 
