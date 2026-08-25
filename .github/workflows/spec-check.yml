@@ -66,3 +66,6 @@ jobs:
 
       - name: Run federation protocol tests
         run: python3 tools/federation_selftest.py
+
+      - name: Run adapter SDK/runtime tests
+        run: python3 tools/adapter_selftest.py

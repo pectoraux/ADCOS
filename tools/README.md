@@ -891,3 +891,74 @@ python3 tools/federation_selftest.py
 | `52-prior-prompts-unchanged` | all prior prompts WORK-001..014 unchanged vs origin/main |
 
 
+
+## adapter_selftest.py — adapter SDK/runtime tests (WORK-016)
+
+Deterministic, offline verification of the adapters package against the frozen WORK-016 contract (spec/work-items.md; architecture §6.3/§8/§10/§25/§29; LOCK-001..003, LOCK-016, LOCK-017; `spec/schemas/adapter.schema.json`): the required contract tests and failure-isolation tests plus the established mechanical audits. Exercises the boundary end-to-end — adapter identity is mechanically disjoint from the real WORK-004 NodeID parser, capability exposure is reference-only and inflation-filtered against the descriptor's declaration, the capacity ledger maps into WORK-008 kinds/units with exact integer base-unit math, session binding verifies read-only against a real WORK-012 store (only `SessionStore.get` is ever accessed, proven at runtime and by AST), and every adapter-side fault (including `SystemExit` and contract-violating return values) is a typed isolated value that can never mutate runtime, session, or registry state. Runs in CI after the federation suite.
+
+### Invocation
+
+```bash
+python3 tools/adapter_selftest.py
+```
+
+### Case catalog
+
+| Case | Verifies |
+|---|---|
+| `01-contract-surface-frozen` | the nine §10.1 operations in order on an abstract ABC; GenericAdapter satisfies it |
+| `02-lifecycle-happy-path` | full §10.1 sequence with ordered events and byte-identical replay digest |
+| `03-double-open-fails` | ALREADY_OPEN fails closed; lifecycle stable |
+| `04-use-after-close` | terminal CLOSED; state frozen; rejected attempts audited as failure-isolated events |
+| `05-close-outstanding-fails` | close fails closed while allocations/bindings outstanding (no dangling state) |
+| `06-call-order-gates` | pre-open operations are isolated failures, never exceptions |
+| `07-capability-exposure-references` | exposure by reference; undeclared refs filtered (inflation guard); registry byte-identical |
+| `08-generic-adapter-contract` | §10.5 generic adapter: experimental technologies trialable end to end |
+| `09-new-technology-zero-core-change` | definition of done: 3 technologies incl. an unknown future id register as pure data; no technology tokens in code |
+| `10-adapter-identity-distinct-from-nodeid` | grammars disjoint both ways against the real WORK-004 parser; duplicate ids collide visibly |
+| `11-raising-implementation-isolated` | exception class only in diagnostics (no message text); ledger unchanged |
+| `12-contract-violation-ref` | non-string bind return discarded + audited; no state |
+| `13-contract-violation-capabilities` | malformed capabilities() → fail-soft empty exposure |
+| `14-contract-violation-observe` | malformed observe() rejected; samples unchanged |
+| `15-budget-exhaustion-hang-model` | deterministic hang: BUDGET_EXHAUSTED, repeatable, zero ledger effect |
+| `16-health-degradation-thresholds` | DEGRADED at 2, FAILED at 5 consecutive failures; success resets; FAILED exposes nothing |
+| `17-mid-sequence-crash-consistency` | crash between allocate and bind leaves exact partial state; byte-identical replay |
+| `18-failing-ops-never-touch-core` | SessionStore + capability registry byte-identical during failing ops |
+| `19-context-least-authority` | immutable 5-member context facade; no core reachability |
+| `20-context-injected-instant` | implementations see the injected instant and their own ids only |
+| `21-systemexit-isolated` | BaseException fully contained; runtime continues |
+| `22-failure-containment-across-adapters` | failure domain == one adapter |
+| `23-core-never-imports-adapters` | 13 core modules import nothing from adapters/ |
+| `24-adapters-imports-bounded` | stdlib + protocol/capabilities/sessions/resources only |
+| `25-no-vendor-tech-tokens-in-code` | generic vocabulary only (§25 rule 1) |
+| `26-no-wall-clock-random-network` | no time/random/network/env access in adapters/ |
+| `27-resource-mapping-validation` | WORK-008 kinds/units/availability enforced at entry construction; duplicates rejected |
+| `28-allocate-within-capacity` | exact integer capacity accounting; over-allocation fails closed |
+| `29-allocate-unmapped-kind` | unmapped kinds and mismatched units fail closed |
+| `30-release-restores-capacity` | ledger restored exactly after release |
+| `31-double-release-fails` | ALLOCATION_STATE fail closed |
+| `32-lease-expiry-sweep` | strictly-after creation; deterministic sweep; capacity restored |
+| `33-integer-base-unit-math` | 1 gbps + 2×500 mbps == 2 gbps exactly; +1 mbps fails closed |
+| `34-resource-authority-boundary` | adapter-scoped ledger; WORK-008 accounting symbols absent from code |
+| `35-bind-requires-bindable-session` | ESTABLISHED/DEGRADED bind; AUTHORIZED fails closed |
+| `36-bind-suspended-fails` | SUSPENDED not bindable |
+| `37-bind-terminated-fails` | TERMINATED not bindable |
+| `38-bind-unknown-session-fails` | unknown + unverifiable (no store) both fail closed |
+| `39-unbind-and-double-unbind` | explicit unbind; double unbind fails closed |
+| `40-session-termination-reconciliation` | reconcile releases + audits; SessionStore byte-identical; idempotent |
+| `41-bearer-ref-opaque` | exotic bearer ref verbatim end-to-end; excluded from identity content |
+| `42-runtime-read-only-session-access` | only `SessionStore.get()` accessed (runtime spy + AST proof) |
+| `43-health-effective-state` | LOCK-017 worse-of semantics while OPEN; lifecycle truth when not running |
+| `44-health-determinism` | identical fault sequences → byte-identical health reports |
+| `45-health-impl-raising-isolated` | vendor health API failure contained; computed state survives |
+| `46-frozen-schema-conformance` | all 10 required schema members; real JSON Schema validation clean |
+| `47-wire-round-trip` | view + descriptor round-trips byte-exactly |
+| `48-tampered-wire-fails` | 8 tamper classes rejected |
+| `49-envelope-opaque-forward` | state rides WORK-003 envelopes opaquely; strict reject; protocol registry untouched |
+| `50-canonical-determinism` | byte-identical histories; commutative ledger |
+| `51-cross-process-determinism` | canonical scenario digest stable across processes |
+| `52-unknown-extension-preservation` | fail soft: unknown ids + extensions preserved verbatim |
+| `53-secret-material-rejection` | LOCK-023 deep rejection; values never echoed |
+| `54-concurrent-ops-deterministic` | 16 threads × 2 runs → identical ledger/counts |
+| `55-frozen-doc-unchanged` | spec/ byte-identical to origin/main |
+| `56-vocabulary-freeze` | 7 vocabularies + contract + context surface frozen |
