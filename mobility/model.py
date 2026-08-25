@@ -201,6 +201,7 @@ class MobilityReasonCode:
     SEQUENCE_CONFLICT = "sequence-conflict"
     SEQUENCE_GAP = "sequence-gap"
     REPLAY_CONFLICT = "replay-conflict"
+    REPLAY_PROVENANCE = "replay-provenance"
     RESERVATION_FAILURE = "reservation-failure"
     COMMIT_FAILURE = "commit-failure"
     ROLLBACK_FAILURE = "rollback-failure"
@@ -230,6 +231,7 @@ class MobilityReasonCode:
             cls.SEQUENCE_CONFLICT,
             cls.SEQUENCE_GAP,
             cls.REPLAY_CONFLICT,
+            cls.REPLAY_PROVENANCE,
             cls.RESERVATION_FAILURE,
             cls.COMMIT_FAILURE,
             cls.ROLLBACK_FAILURE,

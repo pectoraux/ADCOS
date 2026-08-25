@@ -765,7 +765,7 @@ python3 tools/multipath_selftest.py
 
 ## mobility_selftest.py — mobility and handover tests (WORK-014)
 
-Deterministic, offline verification of the mobility package against the frozen WORK-014 handoff: session-identity preservation across handover, explicit old/candidate path bindings (content-derived), the full binding verification single-sourced from WORK-012, expiry fail-closed, make-before-break and break-before-make modes with rollback, replay semantics, concurrency determinism, and the mechanical prohibitions (no second routing/policy/topology authority, no wall-clock/randomness, no access-technology/vendor/transport branching, no secret leakage). Runs in CI after the multipath suite.
+Deterministic, offline verification of the mobility package against the frozen WORK-014 handoff: session-identity preservation across handover, explicit old/candidate path bindings (content-derived), the full binding verification single-sourced from WORK-012, expiry fail-closed, make-before-break and break-before-make modes with rollback, Option A replay provenance (fabricated events rejected even when structurally perfect), concurrency determinism, and the mechanical prohibitions (no second routing/policy/topology authority, no wall-clock/randomness, no access-technology/vendor/transport branching, no secret leakage). Runs in CI after the multipath suite.
 
 ### Invocation
 
@@ -817,3 +817,4 @@ python3 tools/mobility_selftest.py
 | `38-concurrent-commit-threads` | 20 concurrent commits: ≥1 wins, identity + history intact |
 | `39-frozen-doc-unchanged` | all 4 frozen docs unchanged vs origin/main |
 | `40-prior-prompts-unchanged` | all prior prompts WORK-001..013 unchanged vs origin/main |
+| `41-fabricated-event-replay` | REGRESSION (PR #14 correction 1): fabricated COMMITTED/ROLLED_BACK/FAILED/CANCELLED events — each structurally perfect (valid event_id, correct next sequence, correct previous_state, legal transition) — all rejected with `replay-provenance`; transaction/session/event-history snapshots unchanged; genuine replay + commit still work |

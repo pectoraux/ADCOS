@@ -122,12 +122,19 @@ evidence. A failed commit rolls back:
 
 ## Replay and concurrency
 
-Replay follows WORK-012-style semantics: exact duplicate events are
-idempotent; conflicting sequence reuse and gaps fail closed; illegal
-transaction-state edges fail closed. Replayed events NEVER create a
-route binding — the session mutations happened (or not) through the
-session contract, whose own validation cannot be bypassed by
-mobility-history replay.
+Replay follows **Option A provenance semantics** (Architect review of
+PR #14, correction 1): replay is valid ONLY for an **exact event that
+already exists in this store's accepted mobility history** — replay is
+genuinely idempotent and can NEVER introduce new state. A fabricated
+event that is structurally perfect (correct content-derived
+`event_id`, correct next sequence, correct `previous_state`, legal
+transition) is still rejected with `replay-provenance`: authoritative
+COMMITTED / ROLLED_BACK / FAILED / CANCELLED outcomes are recorded
+only by the genuine commit/cancel/rollback operations, whose semantic
+consequences are driven through the accepted session/multipath
+contracts. Conflicting sequence reuse, gaps, and state mismatches are
+rejected with their specific diagnostic codes before the provenance
+terminal gate.
 
 Concurrent handovers serialize under the store lock: at most one
 authoritative transition wins a given sequence point. A second

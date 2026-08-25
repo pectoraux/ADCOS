@@ -1193,7 +1193,8 @@ def case_33_transaction_vocabulary(results: List[Result]) -> None:
         "unknown-transaction", "invalid-candidate", "candidate-expired",
         "candidate-unavailable", "path-binding-mismatch", "old-path-mismatch",
         "policy-denied", "intent-violation", "sequence-conflict",
-        "sequence-gap", "replay-conflict", "reservation-failure",
+        "sequence-gap", "replay-conflict", "replay-provenance",
+        "reservation-failure",
         "commit-failure", "rollback-failure", "concurrent-transition",
         "unsupported-operation", "transaction-terminal",
     }
@@ -1214,7 +1215,7 @@ def case_33_transaction_vocabulary(results: List[Result]) -> None:
     if problems:
         results.append(fail("case_33_transaction_vocabulary", "; ".join(problems)))
     else:
-        results.append(ok("case_33_transaction_vocabulary", "25 frozen reason codes incl. all handoff section-16 codes"))
+        results.append(ok("case_33_transaction_vocabulary", "26 frozen reason codes incl. all handoff section-16 codes + replay-provenance"))
 
 
 def case_34_session_state_gating(results: List[Result]) -> None:
@@ -1424,6 +1425,97 @@ def case_40_prior_prompts_unchanged(results: List[Result]) -> None:
 
 
 # --------------------------------------------------------------------------
+# Architect-review regression case (PR #14 correction cycle 1)
+#
+# Blocker: replay_event accepted FABRICATED mobility events. The replay
+# path checked transaction existence, event binding, sequence
+# continuity, previous-state agreement, and transition legality -- but
+# never proved the event was PREVIOUSLY ACCEPTED by this store. A
+# caller could construct a valid MobilityEvent (correct content-derived
+# event_id, correct next sequence, correct previous_state, legal
+# transition) and drive a PREPARED transaction to COMMITTED (or
+# ROLLED_BACK / FAILED / CANCELLED) while the underlying session
+# remained completely unchanged -- corrupting the mobility-owned
+# authoritative transaction state/history.
+#
+# Fix (Option A, per the Architect's recommendation): replay is valid
+# ONLY for an exact event that already exists in the accepted mobility
+# history. Replay is genuinely idempotent and can NEVER introduce new
+# state; the well-formed-but-never-accepted event fails closed with
+# the new replay-provenance code.
+# --------------------------------------------------------------------------
+
+def case_41_fabricated_event_replay(results: List[Result]) -> None:
+    """REGRESSION (PR #14 correction 1): fabricated events are rejected
+    even when structurally perfect (correct event_id, correct next
+    sequence, correct previous_state, legal transition). The
+    transaction snapshot, session snapshot, and event history remain
+    unchanged. Fabricated COMMITTED, ROLLED_BACK, FAILED, and CANCELLED
+    outcomes are all covered; a genuine already-accepted event still
+    replays idempotently."""
+    r_old = _route()
+    policy = _policy_decision()
+    ss, mp, ms, sid = _setup(route=r_old, policy=policy, multipath=True)
+    cand = _distinct_route(policy=policy)
+    pr = _prepare(ms, sid, cand, old_decision=r_old)
+    tid = pr.transaction.transaction_id
+
+    problems = []
+    for new_state, event_type in (
+        (TransactionState.COMMITTED, "committed"),
+        (TransactionState.ROLLED_BACK, "rolled-back"),
+        (TransactionState.FAILED, "failed"),
+        (TransactionState.CANCELLED, "cancelled"),
+    ):
+        tx_before = ms.get_transaction(tid).to_dict()
+        session_before = ss.to_canonical_bytes()
+        events_before = [e.to_dict() for e in ms.get_events(tid)]
+        # The fabricated event: structurally perfect in every dimension.
+        fabricated = MobilityEvent(
+            event_id="",  # correctly derived from its own content
+            transaction_id=tid,
+            sequence=ms.get_transaction(tid).last_event_sequence + 1,
+            previous_state=TransactionState.PREPARED,
+            new_state=new_state,
+            event_type=event_type,
+            event_instant=_LATER,
+            reason_code="fabricated",
+        )
+        r = ms.replay_event(tid, fabricated)
+        label = "PREPARED->%s" % new_state
+        if r.ok:
+            problems.append("%s: fabricated event accepted" % label)
+        elif r.code != MobilityReasonCode.REPLAY_PROVENANCE:
+            problems.append("%s: wrong code %r" % (label, r.code))
+        if ms.get_transaction(tid).to_dict() != tx_before:
+            problems.append("%s: transaction snapshot changed" % label)
+        if ss.to_canonical_bytes() != session_before:
+            problems.append("%s: session snapshot changed" % label)
+        if [e.to_dict() for e in ms.get_events(tid)] != events_before:
+            problems.append("%s: event history changed" % label)
+    # The transaction is still PREPARED and the session untouched.
+    if ms.get_transaction(tid).state != TransactionState.PREPARED:
+        problems.append("transaction not PREPARED after rejections")
+    if ss.get(sid).current_path_id != r_old.selected.path_id:
+        problems.append("session route changed")
+    # A GENUINE already-accepted event still replays idempotently.
+    genuine = ms.get_events(tid)[0]
+    rg = ms.replay_event(tid, genuine)
+    if not (rg.ok and rg.code == MobilityReasonCode.REPLAYED):
+        problems.append("genuine event replay broken: %s/%s" % (rg.ok, rg.code))
+    # And the genuine commit path still works after the rejections.
+    co = ms.commit_handover(tid, event_instant=_LATER)
+    if not (co.ok and co.transaction.state == TransactionState.COMMITTED):
+        problems.append("genuine commit broken after rejections: %s/%s" % (co.ok, co.code))
+    elif ss.get(sid).current_path_id != cand.selected.path_id:
+        problems.append("genuine commit did not move the route")
+    if problems:
+        results.append(fail("case_41_fabricated_event_replay", "; ".join(problems[:5])))
+    else:
+        results.append(ok("case_41_fabricated_event_replay", "fabricated COMMITTED/ROLLED_BACK/FAILED/CANCELLED all rejected (replay-provenance) with every snapshot unchanged; genuine replay + commit still work"))
+
+
+# --------------------------------------------------------------------------
 # Main
 # --------------------------------------------------------------------------
 
@@ -1469,6 +1561,8 @@ def main() -> int:
     case_38_concurrent_commit_threads(results)
     case_39_frozen_doc_unchanged(results)
     case_40_prior_prompts_unchanged(results)
+    # Architect-review regression case (PR #14 correction cycle 1).
+    case_41_fabricated_event_replay(results)
 
     print("ADCOS mobility self-test (WORK-014)")
     print("=" * 72)

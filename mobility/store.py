@@ -684,12 +684,27 @@ class MobilityStore:
     # -- replay ------------------------------------------------------------------
 
     def replay_event(self, transaction_id: str, event: MobilityEvent) -> MobilityResult:
-        """Replay a mobility event under WORK-012-style semantics: exact
-        duplicates idempotent; conflicting sequence reuse and gaps fail
-        closed; illegal transaction-state edges fail closed. Replay
-        NEVER creates a route binding -- the session mutations happened
-        (or did not happen) through the session contract, whose own
-        validation cannot be bypassed by mobility-history replay."""
+        """Replay a mobility event -- Option A provenance semantics
+        (Architect review of PR #14, correction cycle 1): replay is ONLY
+        valid for an EXACT event that already exists in this store's
+        accepted mobility history. Replay is therefore genuinely
+        idempotent and can NEVER introduce new state: a fabricated
+        event with a correct content-derived ``event_id``, the correct
+        next sequence, the correct ``previous_state``, and a legal
+        transition is STILL rejected (``replay-provenance``) because it
+        was never accepted by this store -- an authoritative
+        PREPARED -> COMMITTED (or ROLLED_BACK / FAILED / CANCELLED)
+        outcome can only be recorded by the genuine
+        :meth:`commit_handover` / :meth:`cancel_handover` /
+        rollback operations, whose semantic consequences are driven
+        through the accepted session/multipath contracts.
+
+        Rejection codes (diagnostics before the provenance gate):
+        unknown transaction; wrong transaction binding; conflicting
+        sequence reuse; sequence gaps; previous-state mismatch;
+        illegal transition edges; and -- the terminal gate -- a
+        well-formed next-sequence event that was never accepted
+        (``replay-provenance``)."""
         with self._lock:
             transaction = self._transactions.get(transaction_id)
             if transaction is None:
@@ -716,6 +731,8 @@ class MobilityStore:
                     transaction=transaction,
                 )
             history = self._events.get(transaction_id, [])
+            # PROVENANCE GATE (Option A): the ONLY accepting path is an
+            # exact duplicate of an already-accepted event.
             if any(e.event_id == event.event_id for e in history):
                 return MobilityResult(
                     ok=True,
@@ -726,6 +743,9 @@ class MobilityStore:
                     transaction=transaction,
                     event=event,
                 )
+            # Every event below this line was NOT in the accepted
+            # history: it is rejected. The sequence/state checks are
+            # diagnostics that classify the rejection.
             last = history[-1] if history else None
             if last is not None:
                 if event.sequence <= last.sequence:
@@ -771,20 +791,24 @@ class MobilityStore:
                     "frozen table" % (event.previous_state, event.new_state),
                     transaction=transaction,
                 )
-            updated = _dc_replace(
-                transaction,
-                state=event.new_state,
-                last_event_sequence=event.sequence,
-                last_event_instant=event.event_instant,
-            )
-            self._transactions[transaction_id] = updated
-            self._events.setdefault(transaction_id, []).append(event)
+            # PROVENANCE TERMINAL GATE: a well-formed next-sequence
+            # event that was never accepted by this store. Replay
+            # cannot introduce new state -- a fabricated
+            # PREPARED -> COMMITTED / ROLLED_BACK / FAILED / CANCELLED
+            # outcome fails closed even with a valid event_id, the
+            # correct sequence, the correct previous_state, and a legal
+            # transition (Architect review of PR #14).
             return MobilityResult(
-                ok=True,
-                code=MobilityReasonCode.REPLAYED,
-                detail="event sequence %d applied (%s -> %s)"
-                % (event.sequence, event.previous_state, event.new_state),
-                transaction=updated,
+                ok=False,
+                code=MobilityReasonCode.REPLAY_PROVENANCE,
+                detail="the event was never accepted by this mobility "
+                "store (replay-provenance gate): replay is valid ONLY "
+                "for an exact event already present in the accepted "
+                "history -- a fabricated %s -> %s outcome cannot be "
+                "introduced by replay; authoritative outcomes are "
+                "recorded only by the genuine commit/cancel/rollback "
+                "operations" % (event.previous_state, event.new_state),
+                transaction=transaction,
                 event=event,
             )
 
