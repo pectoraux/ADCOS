@@ -63,3 +63,5 @@ jobs:
 
       - name: Run mobility and handover tests
         run: python3 tools/mobility_selftest.py
+      - name: Run federation protocol tests
+        run: python3 tools/federation_selftest.py

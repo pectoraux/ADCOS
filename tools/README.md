@@ -820,3 +820,71 @@ python3 tools/mobility_selftest.py
 | `41-fabricated-event-replay` | REGRESSION (PR #14 correction 1): fabricated COMMITTED/ROLLED_BACK/FAILED/CANCELLED events — each structurally perfect (valid event_id, correct next sequence, correct previous_state, legal transition) — all rejected with `replay-provenance`; transaction/session/event-history snapshots unchanged; genuine replay + commit still work |
 | `42-mbb-cleanup-failure` | REGRESSION (PR #14 correction 2): fault-injected candidate-removal failure after a failed reconnect → the explicit `CLEANUP_FAILED` terminal outcome (`rolled-back-cleanup-failed`); old binding authoritative; the candidate is NOT silently considered removed (it remains in the plan, explicitly recorded); the `cleanup-failed` event is in the history; no new session |
 | `43-rollback-variants-independent` | REGRESSION (PR #14 correction 2): the old-route session rollback and the MBB candidate cleanup are independent axes — (a) both succeed → ROLLED_BACK; (b) rollback succeeds + cleanup fails → CLEANUP_FAILED with the session authoritative on the old binding; (c) rollback unavailable (no retained old decision) + cleanup succeeds → ROLLED_BACK with the session in its explicit RECONNECTING state; (d) post-commit retire failure → COMMITTED with the distinct cleanup-failure code, the new path authoritative, the stale old entry explicit |
+## federation_selftest.py — federation protocol tests (WORK-015)
+
+Deterministic, offline verification of the federation package against the frozen WORK-015 handoff: the 36 mandatory verification categories plus adversarial regressions. Exercises the authority boundary end-to-end — peer-domain membership never implies node trust (remote claims stay REMOTE_CLAIM in a real WORK-007 graph), imported routes/capabilities never bypass local policy or negotiation (tested against real WORK-010 evaluation and WORK-005 negotiation), settlement stays an opaque reference, exchanges ride WORK-003 envelopes opaquely without registering message types, and the deterministic conflict rules (duplicate/stale/gap/conflict, revocation races) are order-independent. Runs in CI after the mobility suite.
+
+### Invocation
+
+```bash
+python3 tools/federation_selftest.py
+```
+
+### Case catalog
+
+| Case | Verifies |
+|---|---|
+| `01-stable-domain-identity` | domain_id is a content fingerprint over identity material only; admin metadata is not identity; operator binding immutable |
+| `02-relationship-creation` | direct establishment: ESTABLISHED v1, genesis event, symmetric pair identity |
+| `03-invalid-peer-identity` | malformed NodeIDs fail closed at establishment and at exchange construction |
+| `04-duplicate-relationship-idempotency` | exact duplicate → replayed (no new event); conflicting material → relationship-exists |
+| `05-same-sequence-conflict` | same-slot different content → sequence-conflict, watermark + state unchanged (revocation never silently overridden) |
+| `06-sequence-gap` | future sequence → sequence-gap, no mutation |
+| `07-stale-update` | already-used slot with new content → sequence-conflict |
+| `08-scope-allow` | declared + granted + valid → scope-allowed with the active grant returned |
+| `09-scope-denial` | ungranted / undeclared / malformed / unknown scopes all fail closed with distinct codes |
+| `10-grant-escalation-rejection` | grant outside the declared envelope → grant-escalation, nothing stored |
+| `11-route-scope-independence` | route.import granted does not imply route.export |
+| `12-capability-scope-independence` | capability.read does not imply capability.offer |
+| `13-service-scope-independence` | service.discover does not imply service.invoke |
+| `14-resource-scope-independence` | resource.read does not imply resource.reserve |
+| `15-revocation-blocks-new-authorization` | post-revoke scope check / grant publication / exchange all denied |
+| `16-expiry-blocks-new-authorization` | expired instant denies; state stays ESTABLISHED; expiry is not revocation |
+| `17-revoke-preserves-history` | events, grants, and snapshot all preserved after revocation |
+| `18-termination-preserves-unrelated-state` | other relationship + domains + history byte-identical after termination |
+| `19-peer-membership-no-node-trust` | check_scope has no node parameter; peer node stays topology-unknown |
+| `20-remote-claim-provenance` | REMOTE_CLAIM class, peer reporter, exchange id in evidence refs |
+| `21-gateway-claim-not-authoritative` | remote GATEWAY claim never enters get_authoritative_claims; self claim does (LOCK-008) |
+| `22-route-import-local-policy` | ungranted import recording denied; recorded refs are opaque strings; scope check is not a PolicyDecision; WORK-010 deny set denies |
+| `23-capability-import-local-negotiation` | imported refs do not satisfy WORK-005 negotiation (explicit rejection reasons) |
+| `24-settlement-opaque` | settlement reference stored/round-tripped verbatim; no settlement-consuming API exists |
+| `25-replay-duplicate-safety` | duplicate exchanges idempotent; genuine event replay idempotent; fabricated event → replay-provenance |
+| `26-deterministic-snapshot` | byte-identical snapshots across drives and across insertion orders |
+| `27-serialize-deserialize-byte-identity` | all five object kinds + snapshot byte-identical round-trips |
+| `28-cross-process-determinism` | identical snapshot digest across processes |
+| `29-no-wall-clock` | AST scan: no wall-clock reads in federation/ |
+| `30-no-randomness` | AST scan: no random/uuid imports |
+| `31-no-access-tech` | no access/vendor identifiers or network imports; leakage in free text rejected |
+| `32-no-secret-leakage` | secret-shaped extensions rejected; snapshots clean |
+| `33-no-duplicated-authority` | no second identity/policy/routing/topology/resource/capability authority (AST) |
+| `34-concurrent-updates-deterministic` | same-slot race: exactly one applies, rest sequence-conflict; distinct grants all apply |
+| `35-revocation-update-race` | both application orders converge on REVOKED; nothing applies after |
+| `36-extension-handling` | optional unknown extensions forwarded opaquely; unknown required extensions fail closed |
+| `37-cross-domain-identity-confusion` | wrong operator identity, unknown domain, third-domain pair, forged author all fail closed |
+| `38-domain-lifecycle-gates` | suspended/retired local + retired peer gate establishment; frozen transition table |
+| `39-relationship-not-yet-valid` | pre-validity instant denied |
+| `40-suspended-blocks-authorization` | suspension denies; resume restores |
+| `41-grant-lifecycle` | revoke → grant-inactive; re-grant at next sequence; grant expiry → grant-expired |
+| `42-exchange-typed-fields` | kind-conditional fields fail closed (route refs on scope-update etc.) |
+| `43-wire-tamper-ids` | tampered derived ids rejected for all five object kinds |
+| `44-fuzz-never-crashes` | 120 seeded fuzz trials: only fail-closed errors/envelopes, no raw exceptions |
+| `45-envelope-opaque-forward` | exchange payload round-trips through a real WORK-003 envelope; unregistered type forwarded opaquely only; no federation message type in the frozen registry |
+| `46-policy-gate-establishment` | missing / wrong-set / tampered / deny decisions fail; matching tamper-evident allow passes |
+| `47-frozen-schema-conformance` | all 10 required §21 members present with correct types |
+| `48-peer-identity-exchange` | declarations register domains; exact duplicates idempotent; operator binding immutable; registered peer usable |
+| `49-local-first` | no reachability state or API; terminal relationships fully queryable |
+| `50-vocabulary-freeze` | 8 scopes, 6 relationship states, 19 event types, 12 exchange kinds, 51 reason codes, closed transition tables |
+| `51-frozen-doc-unchanged` | all 4 frozen docs unchanged vs origin/main |
+| `52-prior-prompts-unchanged` | all prior prompts WORK-001..014 unchanged vs origin/main |
+
+
