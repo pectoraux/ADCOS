@@ -2,7 +2,7 @@
 
 ## Status
 
-**AUTHORITATIVE ARCHITECT HANDOFF — Architecture Version 1.0**
+**AUTHORITATIVE ARCHITECT HANDOFF — follows the frozen Architecture Version 1.0**
 
 This prompt is the implementation contract for WORK-015. Z.ai is the implementer; the LLM Architect is the review authority. Do not infer missing architecture from convenience or from future Work Items.
 
