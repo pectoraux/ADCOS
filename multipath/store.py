@@ -865,6 +865,22 @@ def _define_multipath_store() -> type:
 
 MultipathStore = _define_multipath_store()
 
+# ---------------------------------------------------------------------------
+# IMPORT-TIME CONSTRUCTOR DECLARATION (Architect review of PR #13,
+# correction cycle 7): pin THIS module's genuine MultipathStore
+# constructor code object with the generic session substrate, so that
+# per-store capability registration can verify the registering frame is
+# the GENUINE constructor execution (not merely a function named
+# "__init__"). The declaration is made from this module's top-level
+# frame and is filename-bound to this file -- only this module can
+# declare its own constructor. The substrate stays free of any multipath
+# import (correct layering: multipath imports sessions, never the
+# reverse).
+# ---------------------------------------------------------------------------
+from sessions.store import _declare_extension_constructor as _sessions_declare
+
+_sessions_declare(getattr(MultipathStore, "__init__").__code__)
+
 
 __all__ = [
     "MultipathStore",

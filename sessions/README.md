@@ -222,8 +222,16 @@ code objects). A direct call —
 authority exists: holding references to the store, the capability,
 or the registry cannot satisfy a frame check. Registration
 (`_register_extension_commit_capability`) is a generic
-constructor-time handshake: first registration wins, and it is only
-accepted from within a constructor frame.## Store semantics
+constructor-time handshake: first registration wins, and — the
+correction-7 fix — the registering frame's code object must BE a
+**declared genuine extension constructor**: extension packages pin
+their constructor code objects at **import time** via
+`_declare_extension_constructor` (module-level frame + filename
+binding — only the module that owns the constructor can declare it).
+A function merely named `__init__` proves nothing: runtime-forged
+classes, forged same-named classes, and ordinary functions named
+`__init__` were never import-declared and are rejected, so the trusted
+code-object registry cannot be poisoned at registration.## Store semantics
 
 Atomic `create` / `transition` / `append_event` (replay) / `reconnect`
 (binding update) / `suspend` / `terminate`. A failed transition leaves

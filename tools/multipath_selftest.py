@@ -2050,6 +2050,167 @@ def case_43_direct_primitive_attack(results: List[Result]) -> None:
 
 
 # --------------------------------------------------------------------------
+# Architect-review regression case (PR #13 correction cycle 7)
+#
+# Blocker: capability registration was forgeable. The registration gate
+# checked only frame.f_code.co_name == "__init__" -- proving the NAME,
+# not the caller's genuineness. A runtime-forged class could register
+# its own __init__ code object into the trusted _extension_commit_codes
+# registry and then commit forged events by calling the session
+# primitive directly from within that __init__ (the registered code IS
+# the attacker's code, so both commit-time frame gates pass).
+#
+# Fix: import-time constructor declaration. Extension packages declare
+# their genuine constructor code objects from their own MODULE-LEVEL
+# frame, filename-bound to their own file (only the module that owns
+# the constructor can declare it); per-store registration verifies the
+# registering frame's code object against that pinned set. Runtime
+# classes, forged same-named classes, and ordinary functions named
+# "__init__" were never import-declared -> rejected; the genuine
+# constructor (declared at multipath import) -> accepted.
+# --------------------------------------------------------------------------
+
+def case_44_registration_forgery(results: List[Result]) -> None:
+    """REGRESSION (PR #13 correction 7): the exact Architect attack --
+    a runtime-forged class registering its own __init__ code object --
+    plus the forged same-named class and the ordinary function named
+    __init__. Each proves: registration rejected, no capability
+    installed, the direct primitive stays closed, and the store stays
+    byte-identical; the genuine flow is unaffected."""
+    import sessions.store as _sessions_store
+    problems = []
+
+    def _drive_to_established(ss, sid):
+        ss.transition(sid, SessionState.AUTHORIZED, event_instant=_NOW)
+        ss.transition(sid, SessionState.ESTABLISHED, event_instant=_NOW)
+
+    def _forged_event(ss, sid):
+        return SessionEvent(
+            event_id="", session_id=sid,
+            sequence=ss.get(sid).last_event_sequence + 1,
+            previous_state=SessionState.ESTABLISHED,
+            new_state=SessionState.ESTABLISHED,
+            event_type=MP_EVENT_PATH_ADDED, event_instant=_NOW,
+            metadata=(
+                (META_PATH_ID, "sha256:" + "e" * 64),
+                (META_ROUTE_DECISION_ID, "sha256:" + "f" * 64),
+                (META_PATH_EXPIRES_AT, "2030-01-01T00:00:00Z"),
+            ),
+        )
+
+    # (1) THE EXACT ARCHITECT ATTACK: a runtime-forged class registering
+    #     its own __init__ code object.
+    class Attacker:
+        def __init__(self, store):
+            self.store = store
+            store._register_extension_commit_capability(
+                self.__class__.__init__.__code__
+            )
+
+    r_direct = _route((_AB,))
+    policy = _policy_decision()
+    ss = SessionStore()
+    res = ss.create(r_direct, policy, source_node_id=_NODE_A,
+                    destination_node_id=_NODE_B, creation_instant=_NOW)
+    sid = res.session.session_id
+    _drive_to_established(ss, sid)
+    before = ss.to_canonical_bytes()
+    try:
+        Attacker(ss)
+        problems.append("(1) exact attack registration accepted")
+    except Exception as error:
+        if getattr(error, "code", "") != "extension-authority":
+            problems.append("(1) wrong code %r" % getattr(error, "code", ""))
+    if ss._extension_commit_codes:
+        problems.append("(1) capability installed by rejected registration")
+    r_prim = ss._append_state_preserving_event(_forged_event(ss, sid))
+    if r_prim.ok or r_prim.code != SessionReasonCode.EXTENSION_AUTHORITY_REQUIRED:
+        problems.append("(1) primitive open: %s/%s" % (r_prim.ok, r_prim.code))
+    if ss.to_canonical_bytes() != before:
+        problems.append("(1) store mutated")
+
+    # (2) A forged same-named class (runtime type() construction).
+    def _forged_init(self, store):
+        store._register_extension_commit_capability(
+            type(self).__init__.__code__
+        )
+
+    Forged = type("MultipathStore", (), {"__init__": _forged_init})
+    try:
+        Forged(ss)
+        problems.append("(2) forged same-named class accepted")
+    except Exception as error:
+        if getattr(error, "code", "") != "extension-authority":
+            problems.append("(2) wrong code %r" % getattr(error, "code", ""))
+    if ss._extension_commit_codes:
+        problems.append("(2) capability installed")
+
+    # (3) An ordinary function NAMED __init__ (the weak correction-6
+    #     check passed this; the declared-set check must reject it).
+    def __init__(store):  # noqa: A001 -- deliberately named __init__
+        store._register_extension_commit_capability(__init__.__code__)
+
+    try:
+        __init__(ss)
+        problems.append("(3) ordinary __init__ function accepted")
+    except Exception as error:
+        if getattr(error, "code", "") != "extension-authority":
+            problems.append("(3) wrong code %r" % getattr(error, "code", ""))
+    if ss._extension_commit_codes:
+        problems.append("(3) capability installed")
+
+    # (4) The genuine constructor IS import-declared (the anchor exists),
+    #     and registering from NON-constructor runtime code fails even
+    #     when presenting the GENUINE constructor's code object (the
+    #     frame itself must be the genuine constructor execution).
+    declared = _sessions_store._DECLARED_CONSTRUCTORS
+    genuine_ctor = MultipathStore.__init__.__code__
+    if genuine_ctor not in declared:
+        problems.append("(4) genuine constructor not import-declared")
+    try:
+        ss._register_extension_commit_capability(genuine_ctor)
+        problems.append("(4) runtime call presenting genuine code accepted")
+    except Exception as error:
+        if getattr(error, "code", "") != "extension-authority":
+            problems.append("(4) wrong code %r" % getattr(error, "code", ""))
+    if ss._extension_commit_codes:
+        problems.append("(4) capability installed")
+
+    # (5) Import-time declaration itself is frame-gated: a runtime call
+    #     to _declare_extension_constructor is rejected.
+    try:
+        _sessions_store._declare_extension_constructor(_forged_init.__code__)
+        problems.append("(5) runtime declaration accepted")
+    except Exception as error:
+        if getattr(error, "code", "") != "extension-authority":
+            problems.append("(5) wrong code %r" % getattr(error, "code", ""))
+    if _forged_init.__code__ in _sessions_store._DECLARED_CONSTRUCTORS:
+        problems.append("(5) forged code declared")
+
+    # (6) The GENUINE flow is unaffected: constructing the real
+    #     MultipathStore over the SAME store registers cleanly and
+    #     validated operations commit.
+    ms = MultipathStore(ss)
+    if not ss._extension_commit_codes:
+        problems.append("(6) genuine registration failed")
+    route_alt = _route((_AC, _CB), reach=(_NODE_C,), instant="2026-06-01T12:00:01Z")
+    r_add = ms.add_path(sid, route_alt, event_instant=_NOW)
+    if not (r_add.ok and r_add.plan.get(route_alt.selected.path_id)):
+        problems.append("(6) genuine add failed: %s/%s" % (r_add.ok, r_add.code))
+    # A second authority is still rejected (unchanged).
+    try:
+        MultipathStore(ss)
+        problems.append("(6) second authority accepted")
+    except Exception:
+        pass
+
+    if problems:
+        results.append(fail("case_44_registration_forgery", "; ".join(problems[:5])))
+    else:
+        results.append(ok("case_44_registration_forgery", "exact attack / forged same-named class / ordinary __init__ / runtime-presented genuine code / runtime declaration all rejected with no capability and no mutation; genuine flow unaffected"))
+
+
+# --------------------------------------------------------------------------
 # Main
 # --------------------------------------------------------------------------
 
@@ -2102,6 +2263,8 @@ def main() -> int:
     # Architect-review regression case (PR #13 correction cycle 5).
     case_42_token_acquisition_surfaces(results)
     case_43_direct_primitive_attack(results)
+    # Architect-review regression case (PR #13 correction cycle 7).
+    case_44_registration_forgery(results)
 
     print("ADCOS multipath self-test (WORK-013)")
     print("=" * 72)

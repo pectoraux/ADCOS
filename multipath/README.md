@@ -79,8 +79,9 @@ events as `illegal-transition`, and the session substrate is fully
 GENERIC — no multipath import, no registration API, no plan-append
 surface (WORK-012 never depends on WORK-013; verified mechanically).
 The plan-event commit path is owned by THIS layer, and the boundary is
-enforced by **call-frame code-object identity at two gates**
-(Architect reviews of PR #13, corrections 1-6):
+enforced by **call-frame code-object identity at two commit gates plus
+an import-time-anchored registration proof** (Architect reviews of PR
+#13, corrections 1-7):
 
 1. **The session substrate primitive**
    (`SessionStore._append_state_preserving_event`) accepts events ONLY
@@ -100,6 +101,17 @@ enforced by **call-frame code-object identity at two gates**
    capability (or the authority instance) via deep closure
    introspection does not help: calling it from attacker code fails
    the frame check.
+
+3. **Registration is import-time anchored** (correction 7): the
+   genuine constructor code object is DECLARED at multipath import
+   time via `sessions._declare_extension_constructor` (module-level
+   frame + filename binding — only the module that owns the
+   constructor can declare it), and per-store registration verifies
+   the registering frame's code object against that pinned set. A
+   function merely named `__init__` proves nothing: runtime-forged
+   classes, forged same-named classes, and ordinary functions named
+   `__init__` were never import-declared and are rejected, so the
+   trusted code-object registry cannot be poisoned at registration.
 
 The authority registry, the per-instance capabilities, and the
 operation-code set all live in the class-factory closure — **not**

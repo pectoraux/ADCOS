@@ -72,6 +72,78 @@ RECONNECT_EVENT_TYPE = "reconnected"
 _WRAPPED_AS_INVALID_INPUT = frozenset({"invalid-input", "invalid-node"})
 
 
+# --------------------------------------------------------------------------
+# Extension constructor declarations (import-time trust anchoring)
+#
+# Architect review of PR #13, correction cycle 7: checking that the
+# registering frame is a function NAMED "__init__" proves only the name,
+# not the genuine constructor -- a runtime-forged class satisfies it and
+# poisons the trusted code-object registry. The registration proof must
+# instead establish that the caller IS the genuine extension constructor
+# EXECUTION, while this layer stays free of any extension import.
+#
+# The anchor: extension packages DECLARE their genuine constructor code
+# objects at IMPORT TIME, from their own module-level frame, bound to
+# their own file (filename identity between the declaring frame and the
+# declared constructor -- only the module that owns the constructor can
+# declare it). Per-store registration then verifies the registering
+# frame's code object against this pinned set. Runtime-defined classes,
+# forged same-named classes, and ordinary functions named "__init__"
+# were never import-declared and are rejected.
+# --------------------------------------------------------------------------
+
+#: Module-level set of DECLARED genuine extension constructor code
+#: objects (populated only by :func:`_declare_extension_constructor`
+#: at import time). The substrate never knows WHICH extension declared.
+_DECLARED_CONSTRUCTORS: set = set()
+
+
+def _declare_extension_constructor(constructor_code: Any) -> None:
+    """Import-time declaration of a genuine extension constructor (the
+    trust anchor for per-store capability registration).
+
+    Constraints (mechanically enforced):
+
+    - the declaration MUST be made from a MODULE-LEVEL frame
+      (``co_name == "<module>"`` -- i.e., while the extension module is
+      being imported), never from runtime code;
+    - the declared constructor MUST be defined in the SAME FILE as the
+      declaring module (``co_filename`` identity): only the module
+      that owns the constructor can declare it;
+    - the declared code object MUST be an ``__init__`` (``co_name``
+      check on the DECLARED code, not on the caller -- the weak
+      correction-6 check inverted).
+
+    Threat model honesty: an adversary that can execute module-level
+    code in the process (i.e., controls imports) can equally monkeypatch
+    any Python boundary; this anchor defends against RUNTIME code
+    holding references -- the class of attack under review -- and pins
+    trust to import time, which precedes runtime code."""
+    frame = sys._getframe(1)
+    declaring = frame.f_code
+    if declaring.co_name != "<module>":
+        raise SessionError(
+            "extension-authority",
+            "extension constructors are declared at IMPORT TIME from the "
+            "extension module's top level, not from runtime code",
+        )
+    if getattr(constructor_code, "co_filename", None) != declaring.co_filename:
+        raise SessionError(
+            "extension-authority",
+            "the declared constructor is not defined in the declaring "
+            "module's file -- only the module that owns the constructor "
+            "can declare it",
+        )
+    if getattr(constructor_code, "co_name", None) != "__init__":
+        raise SessionError(
+            "extension-authority",
+            "the declared code object is not a constructor "
+            "(co_name %r != '__init__')"
+            % getattr(constructor_code, "co_name", None),
+        )
+    _DECLARED_CONSTRUCTORS.add(constructor_code)
+
+
 def _envelope_error(error: SessionError) -> SessionResult:
     """Map a SessionError raised during a store operation to the
     deterministic failure envelope (specific reason codes pass
@@ -817,15 +889,21 @@ class SessionStore:
         store -- the generic constructor-time handshake (called by an
         extension constructor; the substrate never knows which one).
 
-        GENERIC + FRAME-GUARDED (Architect review of PR #13, correction
-        cycle 6): exactly one capability may own a store's
+        GENERIC + FRAME-GUARDED (Architect reviews of PR #13,
+        corrections 6-7): exactly one capability may own a store's
         extension-event seam (first registration wins; later
-        registrations fail closed), and registration is only accepted
-        from within a constructor frame (``co_name == "__init__"`` --
-        defense in depth). The security boundary itself lives at COMMIT
-        time: the primitive verifies CALL-FRAME CODE-OBJECT identity,
-        so even a registered code object cannot be exercised by a
-        caller that is not literally executing it."""
+        registrations fail closed), and -- the correction-7 fix -- the
+        registering frame's code object must BE a DECLARED genuine
+        extension constructor (pinned at import time via
+        :func:`_declare_extension_constructor`, module-level frame +
+        filename binding). A function merely NAMED "__init__" proves
+        nothing: runtime-forged classes, forged same-named classes, and
+        ordinary functions named "__init__" were never import-declared
+        and are rejected here, so the trusted code-object registry
+        cannot be poisoned at registration. The security boundary at
+        COMMIT time is unchanged: the primitive verifies CALL-FRAME
+        CODE-OBJECT identity, so even a registered code object cannot
+        be exercised by a caller that is not literally executing it."""
         if self._extension_commit_codes:
             raise SessionError(
                 "extension-authority",
@@ -834,12 +912,15 @@ class SessionStore:
                 "extension-event seam",
             )
         frame = sys._getframe(1)
-        if frame.f_code.co_name != "__init__":
+        if frame.f_code not in _DECLARED_CONSTRUCTORS:
             raise SessionError(
                 "extension-authority",
-                "extension commit capabilities are registered from an "
-                "extension constructor (constructor-time handshake), "
-                "not from arbitrary code",
+                "extension commit capabilities are registered only by a "
+                "DECLARED genuine extension constructor (import-time "
+                "declaration via sessions._declare_extension_constructor; "
+                "the registering frame's code object is not in the "
+                "declared set) -- a function merely named '__init__' "
+                "does not establish constructor genuineness",
             )
         self._extension_commit_codes.add(code_object)
 
