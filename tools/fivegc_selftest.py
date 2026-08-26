@@ -255,7 +255,7 @@ def case_01_contract_surface_frozen() -> Result:
     name = "case_01_contract_surface_frozen"
     ops = CONTRACT_OPERATIONS
     expected = (
-        "open", "provision_subscriber", "bind_session", "authenticate",
+        "open", "provision_subscriber", "bind_session", "attach_external_pdu_session", "authenticate",
         "establish_pdu_session", "egress_pdu", "release_pdu_session",
         "app_session", "health", "close",
     )
@@ -265,7 +265,7 @@ def case_01_contract_surface_frozen() -> Result:
         "integration_id", "now", "charge", "steps_left", "session_reader", "subscriber_reader",
     }):
         return fail(name, "CONTEXT_SURFACE != 6-member facade")
-    return ok(name, "10 engine ops; 6-member context surface")
+    return ok(name, "11 engine ops; 6-member context surface")
 
 
 def case_02_context_least_authority() -> Result:

@@ -56,7 +56,7 @@ from .contract import (
     SubscriberReader,
 )
 from .errors import FiveGCoreError, FiveGCoreFailure, FiveGCoreReasonCode
-from .model import AuthResult, PduSessionBinding, PduSessionView, SubscriberRecord
+from .model import AuthResult, ExternalPduSessionEvidence, PduSessionBinding, PduSessionView, SubscriberRecord
 from .session import AppSession
 
 # The contract module defines _BudgetExhausted privately; re-import it
@@ -380,6 +380,19 @@ class SandboxedFiveGCore:
             lambda ctx: self._implementation.bind_session(
                 ctx, session_id=session_id, supi=supi, snssai=snssai,
                 dnn=dnn, qos_requirements=qos_requirements,
+            ),
+            validate=self._validate_pdu_session_binding,
+        )
+
+    def attach_external_pdu_session(
+        self, now: str, *, session_id: str, supi: str, snssai: Any,
+        dnn: Any, evidence: ExternalPduSessionEvidence,
+    ) -> FiveGCoreOpResult:
+        return self._mediate(
+            now, "attach_external_pdu_session",
+            lambda ctx: self._implementation.attach_external_pdu_session(
+                ctx, session_id=session_id, supi=supi, snssai=snssai,
+                dnn=dnn, evidence=evidence,
             ),
             validate=self._validate_pdu_session_binding,
         )

@@ -65,6 +65,7 @@ from .errors import FiveGCoreError, FiveGCoreReasonCode
 from .model import (
     AuthResult,
     Dnn,
+    ExternalPduSessionEvidence,
     PduSessionBinding,
     PduSessionId,
     PduSessionView,
@@ -380,6 +381,22 @@ class FiveGCoreContract(abc.ABC):
         session_id -- R1 invariant).
         """
 
+    def attach_external_pdu_session(
+        self,
+        context: FiveGCoreContext,
+        *,
+        session_id: str,
+        supi: str,
+        snssai: Snssai,
+        dnn: Dnn,
+        evidence: "ExternalPduSessionEvidence",
+    ) -> PduSessionBinding:
+        """Adopt a PDU session established by an external 5GC."""
+        raise FiveGCoreError(
+            FiveGCoreReasonCode.NF_UNAVAILABLE,
+            "external PDU adoption is not supported",
+        )
+
     @abc.abstractmethod
     def authenticate(
         self,
@@ -476,6 +493,7 @@ CONTRACT_OPERATIONS: Tuple[str, ...] = (
     "open",
     "provision_subscriber",
     "bind_session",
+    "attach_external_pdu_session",
     "authenticate",
     "establish_pdu_session",
     "egress_pdu",

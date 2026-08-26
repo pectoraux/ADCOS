@@ -307,6 +307,22 @@ class PduSessionBinding:
 
 
 @dataclass(frozen=True)
+class ExternalPduSessionEvidence:
+    """Secret-free evidence for a PDU session established by an external 5GC."""
+
+    external_pdu_session_id: str
+    ue_ipv4: str
+    data_endpoint: Tuple[str, int]
+
+    def to_dict(self) -> dict:
+        return {
+            "external_pdu_session_id": self.external_pdu_session_id,
+            "ue_ipv4": self.ue_ipv4,
+            "data_endpoint": list(self.data_endpoint),
+        }
+
+
+@dataclass(frozen=True)
 class PduSessionView:
     """The established PDU session view (3GPP TS 23.501 §5.6.6).
 
@@ -463,6 +479,7 @@ __all__ = [
     "CredentialSlot",
     "SubscriberRecord",
     "PduSessionBinding",
+    "ExternalPduSessionEvidence",
     "PduSessionView",
     "AuthResult",
     "LinkMetricsSample",

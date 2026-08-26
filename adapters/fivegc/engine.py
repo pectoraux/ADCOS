@@ -33,6 +33,7 @@ from .errors import FiveGCoreError, FiveGCoreReasonCode
 from .model import (
     AuthResult,
     Dnn,
+    ExternalPduSessionEvidence,
     PduSessionBinding,
     PduSessionId,
     PduSessionView,
@@ -223,6 +224,51 @@ class Reference5GCoreEngine(FiveGCoreContract):
                 "binding already exists for session",
             )
         self._bindings[pdu_session_ref] = _BindingEntry(binding=binding)
+        return binding
+
+    def attach_external_pdu_session(
+        self,
+        context: FiveGCoreContext,
+        *,
+        session_id: str,
+        supi: str,
+        snssai: Snssai,
+        dnn: Dnn,
+        evidence: ExternalPduSessionEvidence,
+    ) -> PduSessionBinding:
+        context.charge(self.STEP_CHARGES["bind_session"])
+        if not self._open:
+            raise FiveGCoreError(FiveGCoreReasonCode.NOT_OPEN, "engine not open")
+        session_view = context.session_reader().lookup(session_id)
+        if session_view is None or not session_view.secureable:
+            raise FiveGCoreError(
+                FiveGCoreReasonCode.SESSION_NOT_SECUREABLE,
+                "session is missing or not secureable",
+            )
+        if not isinstance(evidence, ExternalPduSessionEvidence):
+            raise FiveGCoreError(FiveGCoreReasonCode.INVALID_INPUT, "invalid external PDU evidence")
+        self._sequence += 1
+        supi_obj = Supi(value=supi)
+        pdu_session_id = PduSessionId(value=evidence.external_pdu_session_id)
+        binding_id = derive_binding_id(session_id, pdu_session_id)
+        pdu_session_ref = derive_pdu_session_ref(binding_id, self._sequence)
+        binding = PduSessionBinding(
+            session_id=session_id, pdu_session_id=pdu_session_id,
+            pdu_session_ref=pdu_session_ref, binding_id=binding_id,
+            supi=supi_obj, snssai=snssai, dnn=dnn, closed=False,
+        )
+        if pdu_session_ref in self._bindings:
+            raise FiveGCoreError(FiveGCoreReasonCode.BINDING_EXISTS, "binding already exists")
+        entry = _BindingEntry(binding=binding)
+        entry.auth_ref = "external:%s" % evidence.external_pdu_session_id
+        entry.pdu_view = PduSessionView(
+            pdu_session_ref=pdu_session_ref,
+            ue_ipv6="",
+            qos_flows=(QosFlowSpec(five_qi=Qfi(value=9), arp_priority=0),),
+            smf_instance_id="external:%s" % evidence.external_pdu_session_id,
+            data_endpoint=evidence.data_endpoint,
+        )
+        self._bindings[pdu_session_ref] = entry
         return binding
 
     def authenticate(

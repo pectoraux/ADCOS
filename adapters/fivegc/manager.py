@@ -35,6 +35,7 @@ from protocol.canonicalization import canonical_json_bytes
 from .contract import FiveGCoreContract, SessionReader, SubscriberReader
 from .errors import FIVEGC_PREFIX, FiveGCoreError, FiveGCoreFailure, FiveGCoreReasonCode
 from .model import (
+    ExternalPduSessionEvidence,
     FiveGCEvent,
     derive_integration_id,
 )
@@ -200,6 +201,26 @@ class FiveGCoreManager:
             )
             self._append_event(
                 "BIND_SESSION", now=now,
+                pdu_session_ref=binding.pdu_session_ref,
+            )
+        return result
+
+    def attach_external_pdu_session(
+        self, *, now: str, session_id: str, supi: str, snssai: Any,
+        dnn: Any, evidence: ExternalPduSessionEvidence,
+    ) -> FiveGCoreOpResult:
+        sandbox = self._require_default()
+        result = sandbox.attach_external_pdu_session(
+            now, session_id=session_id, supi=supi, snssai=snssai,
+            dnn=dnn, evidence=evidence,
+        )
+        if result.ok:
+            binding = result.value
+            self._bindings[binding.pdu_session_ref] = _BindingRecord(
+                binding=binding, sandbox=sandbox,
+            )
+            self._append_event(
+                "ATTACH_EXTERNAL_PDU_SESSION", now=now,
                 pdu_session_ref=binding.pdu_session_ref,
             )
         return result
