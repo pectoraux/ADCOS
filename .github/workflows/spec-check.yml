@@ -78,3 +78,6 @@ jobs:
 
       - name: Run 5G Core integration boundary tests
         run: python3 tools/fivegc_selftest.py
+
+      - name: Run Wi-Fi/non-3GPP access adapter tests
+        run: python3 tools/wifi_selftest.py
