@@ -104,6 +104,7 @@ from adapters.backhaul import (  # noqa: E402
     LinkDescriptor,
     LinkMetricName,
     OID_SYS_UPTIME,
+    PACKET_SOCKET_PROTOCOL,
     SnmpEthernetElementClient,
     SnmpV2cClient,
     SnmpValue,
@@ -553,8 +554,15 @@ class _SnmpResponder:
     deterministically over real UDP sockets.  Scriptable failure
     modes: ``oper_stuck`` (ifOperStatus never comes up),
     ``row_not_active`` (createAndGo lands notInService),
+    ``egress_write_drops`` (the egress PortList SET is silently
+    dropped), ``no_if_speed`` (ifSpeed answers noSuchInstance),
     ``generr_on_set`` (error-status genErr on every SET),
     ``garbage`` (non-BER bytes), ``silent`` (no answer).
+
+    Port capacity model (IF-MIB RFC 2863): ``if_speed`` (Gauge32,
+    default the greater-than-max sentinel 4294967295) and
+    ``if_high_speed`` (Gauge32 in Mbps, default 10000 = 10 Gbps) --
+    exactly how a real agent reports a >4.29 Gbps port.
     """
 
     def __init__(self, *, if_index: int = 1, community: str = "public") -> None:
@@ -567,6 +575,8 @@ class _SnmpResponder:
         # The stateful in-memory MIB (schema-level DATA only).
         self.admin_status = 2  # ifAdminStatus: down
         self.oper_status = 2  # ifOperStatus: down
+        self.if_speed = 4294967295  # ifSpeed: the RFC 2863 sentinel
+        self.if_high_speed = 10000  # ifHighSpeed: 10000 Mbps = 10 Gbps
         self.rx_octets = 0
         self.tx_octets = 0
         self.rx_errors = 0
@@ -712,7 +722,7 @@ class _SnmpResponder:
                     self.vlans[vid]["rowStatus"] = value
         elif oid.startswith(OID_DOT1Q_VLAN_STATIC_EGRESS_PORTS + "."):
             vid = int(oid.rsplit(".", 1)[1])
-            if vid in self.vlans:
+            if vid in self.vlans and self.mode != "egress_write_drops":
                 self.vlans[vid]["egress"] = value_raw
 
     def _resolve_get(self, oid: str):
@@ -727,6 +737,15 @@ class _SnmpResponder:
             return (0x02, bytes((self.admin_status,)))
         if oid == "1.3.6.1.2.1.2.2.1.8.%d" % self._if_index:
             return (0x02, bytes((self.oper_status,)))
+        if oid == "1.3.6.1.2.1.2.2.1.5.%d" % self._if_index:
+            if self.mode == "no_if_speed":
+                return None
+            return (0x42, self.if_speed.to_bytes(4, "big"))  # Gauge32
+        if oid == "1.3.6.1.2.1.31.1.1.1.15.%d" % self._if_index:
+            raw = self.if_high_speed.to_bytes(
+                max(1, (self.if_high_speed.bit_length() + 7) // 8), "big"
+            )
+            return (0x42, raw)  # Gauge32 (Mbps)
         if oid == "1.3.6.1.2.1.2.2.1.10.%d" % self._if_index:
             return (0x41, self.rx_octets.to_bytes(4, "big"))
         if oid == "1.3.6.1.2.1.2.2.1.16.%d" % self._if_index:
@@ -751,9 +770,16 @@ class _SnmpResponder:
 class _RecordingElementClient(BackhaulElementClient):
     """An in-memory element-client double that RECORDS every call
     (the external-seam fault-injection double for the compensating
-    rollback regression -- case_41)."""
+    rollback regression -- case_41).  Declares a REAL element-side
+    capacity mechanism (supports_element_side_capacity = True) so
+    the allocate/release compensation legs keep exercising the
+    element-capacity path."""
 
     label = "recording-element"
+
+    #: The double models an element whose interface REALLY reserves
+    #: bandwidth (keeping case_41's allocate compensation meaningful).
+    supports_element_side_capacity = True
 
     def __init__(self) -> None:
         self.calls = []
@@ -775,8 +801,8 @@ class _RecordingElementClient(BackhaulElementClient):
     def release_capacity(self, allocation):
         self._record("release_capacity", allocation.key)
 
-    def bind_bearer(self, link, *, endpoint_label):
-        self._record("bind_bearer", endpoint_label)
+    def bind_bearer(self, link, *, endpoint_label, nonce):
+        self._record("bind_bearer", endpoint_label, nonce)
         return ElementBearer(
             key="element-bearer-1", far_mac=derive_local_mac("far")
         )
@@ -3224,15 +3250,19 @@ def case_42_real_snmp_protocol_client() -> Result:
 
 
 def case_43_snmp_ethernet_element_client_lifecycle() -> Result:
-    """Blocker 1 regression (the element layer): the PRODUCTION
-    element client -- the real SNMP-managed IEEE 802.1Q Ethernet
-    switch path -- drives its full lifecycle over real SNMP bytes
-    (IF-MIB ifAdminStatus/ifOperStatus link bring-up with the
-    compensating admin restore; Q-BRIDGE-MIB dot1qVlanStaticTable
-    createAndGo/destroy; the egress PortList bearer bind/unbind; the
-    IF-MIB counter observation), with the honest target-specific
-    admission rule (bind requires a live VLAN) and deterministic VID
-    derivation.
+    """Blocker 1 regression (the element layer) + PR #23 second-review
+    Blocker 2 regression (the element layer): the PRODUCTION element
+    client -- the real SNMP-managed IEEE 802.1Q Ethernet switch path
+    -- drives its full lifecycle over real SNMP bytes (IF-MIB
+    ifAdminStatus/ifOperStatus link bring-up with the compensating
+    admin restore + the REAL ifSpeed/ifHighSpeed port-capacity read;
+    the bearer's OWN 802.1Q VLAN segmentation created at BIND and
+    destroyed at UNBIND (Q-BRIDGE-MIB dot1qVlanStaticTable
+    createAndGo/destroy + the egress PortList); the IF-MIB counter
+    observation), with capacity allocation FAMILY-NATIVE on this
+    target (allocate_capacity is the seam's honest raising default:
+    a VLAN row is L2 segmentation, NEVER a bps reservation) and
+    deterministic VID derivation from the bearer nonce.
     """
     name = "case_43_snmp_ethernet_element_client_lifecycle"
     responder = _SnmpResponder(if_index=4)
@@ -3243,35 +3273,64 @@ def case_43_snmp_ethernet_element_client_lifecycle() -> Result:
             egress_if="lo",  # unused on the management-plane legs
             far_mac=bytes.fromhex("0200aabbccdd"), timeout_s=2.0,
         )
-        # bind-before-allocate fails closed (the honest admission rule).
-        link_pre = ElementLink(
-            key="ifindex:4", far_mac=b"\x02\x00\x00\x00\x00\x01",
-            prior_admin_status=2, if_index=4,
-        )
-        try:
-            client.bind_bearer(link_pre, endpoint_label="port-a")
-            return fail(name, "bind without a live allocation accepted")
-        except BackhaulError as exc:
-            if exc.reason != BackhaulReasonCode.ILLEGAL_STATE:
-                return fail(name, "wrong admission reason: %s" % exc.reason)
-        # link_up: GET admin(2) -> SET up -> GET oper(up) confirmed.
+        # (0) the capacity declaration is honest: this target exposes
+        # no real element-side bandwidth-reservation mechanism.
+        if client.supports_element_side_capacity:
+            return fail(name, "SNMP target must NOT claim element-side capacity")
+        # link_up: GET admin(2) -> GET ifSpeed (sentinel -> ifHighSpeed)
+        # -> SET up -> GET oper(up) confirmed; the REAL port speed is
+        # reported (10 Gbps via the RFC 2863 sentinel path).
         link = client.link_up(
             name="eth-1", profile=BackhaulProfile.ETHERNET,
-            capacity_bps=1000, endpoint_labels=("port-a",),
+            capacity_bps=1_000_000_000, endpoint_labels=("port-a",),
         )
         if link.prior_admin_status != 2:
             return fail(name, "link_up did not snapshot the prior admin state")
         if responder.admin_status != 1 or responder.oper_status != 1:
             return fail(name, "link_up did not bring the port up on the agent")
-        # allocate: deterministic VID + createAndGo -> active verified.
-        alloc = client.allocate_capacity(
-            link, kind="backhaul", quantity_base=100, purpose="test",
-            nonce="nonce-1",
+        if link.port_speed_bps != 10_000_000_000:
+            return fail(
+                name, "ifSpeed sentinel -> ifHighSpeed port speed wrong: %d"
+                % link.port_speed_bps,
+            )
+        # a NON-sentinel port reports its plain Gauge32 ifSpeed.
+        responder.if_speed = 1_000_000_000
+        link_1g = client.link_up(
+            name="eth-1b", profile=BackhaulProfile.ETHERNET,
+            capacity_bps=1_000_000_000, endpoint_labels=("port-a",),
         )
-        if alloc.vlan_id not in responder.vlans:
-            return fail(name, "allocate did not create the VLAN row")
-        if responder.vlans[alloc.vlan_id]["rowStatus"] != 1:
-            return fail(name, "VLAN row not active")
+        if link_1g.port_speed_bps != 1_000_000_000:
+            return fail(name, "plain ifSpeed port speed wrong: %d" % link_1g.port_speed_bps)
+        responder.if_speed = 4294967295
+        # (1) allocate_capacity is the seam's HONEST RAISING DEFAULT:
+        # VLAN existence is never a bps reservation (Blocker 2).
+        try:
+            client.allocate_capacity(
+                link, kind="backhaul", quantity_base=100,
+                purpose="test", nonce="nonce-1",
+            )
+            return fail(name, "allocate_capacity accepted on a no-capacity element")
+        except BackhaulError as exc:
+            if exc.reason != BackhaulReasonCode.ILLEGAL_STATE:
+                return fail(name, "wrong capacity-default reason: %s" % exc.reason)
+        if responder.vlans:
+            return fail(name, "capacity default left element state behind")
+        try:
+            client.release_capacity(ElementAllocation(key="x"))
+            return fail(name, "release_capacity accepted on a no-capacity element")
+        except BackhaulError:
+            pass
+        # (2) bind_bearer creates the bearer's OWN VLAN segmentation
+        # (deterministic VID from the nonce) + lands the bridge port
+        # in its egress PortList.
+        bearer = client.bind_bearer(link, endpoint_label="port-a", nonce="nonce-1")
+        if bearer.vlan_id not in responder.vlans:
+            return fail(name, "bind did not create the bearer's VLAN row")
+        if responder.vlans[bearer.vlan_id]["rowStatus"] != 1:
+            return fail(name, "bearer VLAN row not active")
+        if not port_list_test(responder.vlans[bearer.vlan_id]["egress"], 3):
+            return fail(name, "bridge port not in the egress PortList: %r"
+                        % responder.vlans[bearer.vlan_id]["egress"])
         # deterministic VID: same nonce -> same vid on a fresh client.
         client_b = SnmpEthernetElementClient(
             host="127.0.0.1", port=responder.endpoint[1],
@@ -3279,38 +3338,44 @@ def case_43_snmp_ethernet_element_client_lifecycle() -> Result:
             egress_if="lo", far_mac=b"\x02\x00\x00\x00\x00\x01",
             timeout_s=2.0,
         )
-        probe_alloc = client_b._derive_vlan_id("nonce-1")
-        if probe_alloc != alloc.vlan_id:
+        if client_b._derive_vlan_id("nonce-1") != bearer.vlan_id:
             return fail(name, "VID derivation not deterministic")
-        # bind: the bridge port lands in the VLAN's egress PortList.
-        bearer = client.bind_bearer(link, endpoint_label="port-a")
-        if bearer.vlan_id != alloc.vlan_id:
-            return fail(name, "bearer carries the wrong VLAN")
-        egress = responder.vlans[alloc.vlan_id]["egress"]
-        if not port_list_test(egress, 3):
-            return fail(name, "bridge port not in the egress PortList: %r" % egress)
-        # observe: the IF-MIB counters (generic vocabulary mapping).
+        # (3) observe: the IF-MIB counters (generic vocabulary mapping).
         responder.rx_octets = 111
         responder.tx_octets = 222
         responder.rx_errors = 3
         obs = client.observe(link)
         if not obs.state_up or obs.rx_bytes != 111 or obs.tx_bytes != 222 or obs.rx_errors != 3:
             return fail(name, "observation mismatch: %r" % (obs,))
-        # unbind: the bit clears.
+        # (4) unbind: the egress bit clears AND the bearer's VLAN row
+        # is destroyed (the segmentation goes away WITH the bearer).
         client.unbind_bearer(bearer)
-        if port_list_test(responder.vlans[alloc.vlan_id]["egress"], 3):
-            return fail(name, "unbind did not clear the egress PortList")
-        # release: destroy + verified gone.
-        client.release_capacity(alloc)
-        if alloc.vlan_id in responder.vlans:
-            return fail(name, "release did not destroy the VLAN row")
-        # link_down: ownership-aware restore (prior was down(2)).
+        if bearer.vlan_id in responder.vlans:
+            return fail(name, "unbind did not destroy the bearer's VLAN row")
+        # (5) link_down: ownership-aware restore (prior was down(2)).
         client.link_down(link)
         if responder.admin_status != 2:
             return fail(name, "link_down did not restore the prior admin state")
 
         # ---- failure legs with internal compensation ---------------
-        # (a) ifOperStatus never comes up: link_up compensates by
+        # (a) ifSpeed unreadable: link_up fails CLOSED before any SET
+        # (the admin state is untouched -- nothing was mutated).
+        responder.mode = "no_if_speed"
+        responder.admin_status = 2
+        responder.oper_status = 2
+        try:
+            client.link_up(
+                name="eth-nospeed", profile=BackhaulProfile.ETHERNET,
+                capacity_bps=1000, endpoint_labels=("port-a",),
+            )
+            return fail(name, "no-ifSpeed link_up succeeded")
+        except BackhaulError as exc:
+            if exc.reason != BackhaulReasonCode.BACKHAUL_UNAVAILABLE:
+                return fail(name, "wrong no-ifSpeed reason: %s" % exc.reason)
+        if responder.admin_status != 2:
+            return fail(name, "no-ifSpeed link_up mutated the admin state")
+        responder.mode = "normal"
+        # (b) ifOperStatus never comes up: link_up compensates by
         # restoring the prior administrative state.
         responder.mode = "oper_stuck"
         responder.admin_status = 2
@@ -3330,8 +3395,8 @@ def case_43_snmp_ethernet_element_client_lifecycle() -> Result:
                 % responder.admin_status,
             )
         responder.mode = "normal"
-        # (b) createAndGo lands notInService: allocate compensates by
-        # destroying the half-created row.
+        # (c) createAndGo lands notInService AT BIND: bind compensates
+        # by destroying the half-created row (no egress write happens).
         responder.mode = "row_not_active"
         responder.admin_status = 2
         responder.oper_status = 2
@@ -3340,19 +3405,37 @@ def case_43_snmp_ethernet_element_client_lifecycle() -> Result:
             capacity_bps=1000, endpoint_labels=("port-a",),
         )
         try:
-            client.allocate_capacity(
-                link2, kind="backhaul", quantity_base=100,
-                purpose="test", nonce="nonce-2",
-            )
-            return fail(name, "row-not-active allocate succeeded")
+            client.bind_bearer(link2, endpoint_label="port-a", nonce="nonce-2")
+            return fail(name, "row-not-active bind succeeded")
         except BackhaulError:
             pass
         if responder.vlans:
-            return fail(name, "row-not-active allocate left a half-created row")
+            return fail(name, "row-not-active bind left a half-created row")
         responder.mode = "normal"
+        # (d) the egress PortList SET is silently dropped: bind
+        # compensates by restoring the prior bitmap and destroying
+        # the row.
+        responder.mode = "egress_write_drops"
+        try:
+            client.bind_bearer(link2, endpoint_label="port-a", nonce="nonce-3")
+            return fail(name, "egress-dropped bind succeeded")
+        except BackhaulError:
+            pass
+        if responder.vlans:
+            return fail(name, "egress-dropped bind left the row behind")
+        responder.mode = "normal"
+        # (e) an empty/invalid nonce is rejected before any element op.
+        before_requests = len(responder.requests)
+        try:
+            client.bind_bearer(link2, endpoint_label="port-a", nonce="")
+            return fail(name, "empty-nonce bind accepted")
+        except BackhaulError:
+            pass
+        if len(responder.requests) != before_requests:
+            return fail(name, "empty-nonce bind reached the element")
     finally:
         responder.close()
-    return ok(name, "production SNMP element client: real IF-MIB/Q-BRIDGE-MIB lifecycle over real SNMP bytes (link_up/allocate/bind/observe/unbind/release/link_down + admission rule + deterministic VID), with internal compensation on both failure legs")
+    return ok(name, "production SNMP element client: real IF-MIB/Q-BRIDGE-MIB lifecycle over real SNMP bytes (link_up + ifSpeed/ifHighSpeed real port-capacity read, bearer VLAN segmentation created at bind/destroyed at unbind, observe, link_down; capacity allocation FAMILY-NATIVE -- the honest raising default), with internal compensation on all four failure legs")
 
 
 def case_44_real_w012_session_authority_in_gate() -> Result:
@@ -3534,6 +3617,268 @@ def case_45_preflight_separation_and_distinct_status() -> Result:
     return ok(name, "preflight separates hard management checks (real SNMP round-trip) from data-plane capability and never-blocking diagnostics; the gate reports the DISTINCT DATA_PEER_UNREACHABLE with the management plane verified over real SNMP and the element left clean; a dead endpoint stays UNREACHABLE")
 
 
+def case_46_production_wire_path_protocol_consistency() -> Result:
+    """PR #23 second-review Blocker 1 regression: the production
+    packet socket's PROTOCOL matches the tagged wire format it
+    carries.  The AF_PACKET socket is created and addressed with the
+    OUTER TPID 0x8100 (the kernel's receive-demux key for
+    802.1Q-tagged frames per packet(7)); 0x88B5 appears only INSIDE
+    the 4-byte tag as the inner EtherType of the frame
+    encode_8021q_frame emits.  A tagged frame traverses the EXACT
+    PacketFrameIo/PacketDataSocket path (wire write + read-back
+    through the facade's recv), with ONLY the OS socket object
+    substituted by an in-test double (every production byte of the
+    frame path executes -- the documented internal regression seam).
+    """
+    import socket as _s
+    import struct as _struct
+    from adapters.backhaul.ethernet import PacketDataSocket, PacketFrameIo
+
+    name = "case_46_production_wire_path_protocol_consistency"
+    # (0) the constants: the packet-socket protocol IS the outer TPID,
+    # and the experimental ethertype is the INNER (conformance-outer)
+    # value -- never the socket protocol.
+    if PACKET_SOCKET_PROTOCOL != TPID_8021Q or TPID_8021Q != 0x8100:
+        return fail(name, "packet socket protocol must be the outer TPID 0x8100")
+    if ETHERTYPE_EXPERIMENTAL != 0x88B5 or ETHERTYPE_EXPERIMENTAL == PACKET_SOCKET_PROTOCOL:
+        return fail(name, "the experimental ethertype must stay INTERNAL to the tag")
+
+    class _FakePacketSocket:
+        """Records the production path's socket usage; feeds the
+        far-end echo frames on recvfrom (an OS-object double ONLY)."""
+
+        def __init__(self) -> None:
+            self.bound = None
+            self.timeout = None
+            self.sent = []
+            self.rx_queue: List[bytes] = []
+            self.closed = False
+
+        def bind(self, addr):
+            self.bound = addr
+
+        def settimeout(self, t):
+            self.timeout = t
+
+        def sendto(self, frame, addr):
+            self.sent.append((bytes(frame), bytes(addr)))
+
+        def recvfrom(self, bufsize):
+            if self.rx_queue:
+                return self.rx_queue.pop(0), None
+            raise _s.timeout("timed out")
+
+        def close(self):
+            self.closed = True
+
+    fake = _FakePacketSocket()
+    created: List[Tuple[int, int, int]] = []
+
+    def factory(family, typ, proto):
+        created.append((family, typ, proto))
+        return fake
+
+    # (1) open the EXACT production IO with the OS-object double.
+    io = PacketFrameIo("lo", timeout_s=1.0, _socket_factory=factory)
+    io.open()
+    if created != [(
+        _s.AF_PACKET, _s.SOCK_RAW, _s.htons(PACKET_SOCKET_PROTOCOL),
+    )]:
+        return fail(
+            name,
+            "socket created with the wrong protocol: %r (expected "
+            "htons(0x%04X))" % (created, PACKET_SOCKET_PROTOCOL),
+        )
+    if fake.bound != ("lo", 0):
+        return fail(name, "socket bound unexpectedly: %r" % (fake.bound,))
+    # (2) the tagged production frame goes out through send_frame.
+    dst = derive_local_mac("far-end-wire-path")
+    src = derive_local_mac("backhaul:bearer:" + "a" * 32)
+    payload = b"tagged-wire-path-v1"
+    frame = encode_8021q_frame(dst, src, 1234, payload)
+    if frame[12:14] != b"\x81\x00":
+        return fail(name, "outer TPID 0x8100 not at the demux position [12:14]")
+    if frame[16:18] != b"\x88\xb5":
+        return fail(name, "inner experimental ethertype not inside the tag")
+    io.send_frame(frame, dst)
+    if len(fake.sent) != 1 or fake.sent[0][0] != frame:
+        return fail(name, "send_frame altered the frame bytes")
+    family_f, proto_f, ifindex_f, hatype_f, halen_f, dst_f = _struct.unpack(
+        "HHiHH6s", fake.sent[0][1]
+    )
+    if family_f != _s.AF_PACKET:
+        return fail(name, "sockaddr_ll sll_family wrong: %d" % family_f)
+    if proto_f != _s.htons(PACKET_SOCKET_PROTOCOL):
+        return fail(
+            name,
+            "sll_protocol wrong: 0x%04X (must be htons(0x8100), the "
+            "tagged frame's outer TPID)" % proto_f,
+        )
+    if ifindex_f != _s.if_nametoindex("lo"):
+        return fail(name, "sll_ifindex wrong: %d" % ifindex_f)
+    if halen_f != 6 or dst_f != dst:
+        return fail(name, "sockaddr_ll link-layer address wrong")
+    # (3) the far-end echo comes back through the EXACT
+    # PacketDataSocket read path: non-matching frames are skipped,
+    # the tagged echo to the local MAC returns the payload.
+    other_host = derive_local_mac("some-other-host")
+    echo = encode_8021q_frame(src, dst, 1234, payload)  # far -> local
+    wrong_inner = encode_8021q_frame(src, other_host, 1234, payload, ethertype=0x0800)
+    to_other = encode_8021q_frame(other_host, dst, 1234, payload)
+    fake.rx_queue = [to_other, wrong_inner, b"\x01\x02\x03", echo]
+    data_sock = PacketDataSocket(io, src)
+    data_sock.settimeout(0.5)
+    got = data_sock.recv()
+    if got != payload:
+        return fail(name, "echo payload mismatch through the read path: %r" % got)
+    # (4) a following timeout propagates (no fabricated data).
+    try:
+        data_sock.recv()
+        return fail(name, "recv fabricated data after the queue drained")
+    except _s.timeout:
+        pass
+    # (5) close releases the socket object.
+    data_sock.close()
+    if not fake.closed or io.is_open:
+        return fail(name, "close did not release the packet socket")
+    return ok(name, "AF_PACKET protocol == outer TPID 0x8100 at socket(), in sll_protocol, and on the wire (0x88B5 only INSIDE the tag); a tagged frame + non-matching frames traversed the exact PacketFrameIo/PacketDataSocket write/read path with only the OS socket object substituted")
+
+
+def case_47_capacity_semantics_vlan_is_not_bandwidth() -> Result:
+    """PR #23 second-review Blocker 2 regression (the adapter layer,
+    through the FULL mediated path): WORK-008 bps capacity allocation
+    on the SNMP production target is FAMILY-NATIVE -- ``allocate``
+    emits ZERO SNMP PDUs toward the element (a dot1qVlanStaticRowStatus
+    SET appears ONLY at bind, as the bearer's L2 segmentation), the
+    ledger admission still enforces the bps bound with NO element
+    traffic, provision is bounded by the element-REPORTED real port
+    speed (over-declaration fails closed with the prior administrative
+    state restored), and ``release`` is a pure local ledger commit.
+    """
+    name = "case_47_capacity_semantics_vlan_is_not_bandwidth"
+    # (0) the honest declarations: the SNMP target claims NO
+    # element-side capacity mechanism; the conformance client (whose
+    # own protocol models capacity natively) does.
+    if SnmpEthernetElementClient.supports_element_side_capacity:
+        return fail(name, "SNMP target must not claim element-side capacity")
+    if not JsonConformanceElementClient.supports_element_side_capacity:
+        return fail(name, "conformance client must declare its native capacity ops")
+
+    responder = _SnmpResponder(if_index=7)
+    try:
+        responder.if_speed = 1_000_000_000  # a real 1 Gbps port (Gauge32)
+        adapter = ManagedBackhaulAdapter(
+            element=SnmpEthernetElementClient(
+                host="127.0.0.1", port=responder.endpoint[1],
+                community="public", if_index=7, bridge_port=5,
+                egress_if="lo",
+                far_mac=derive_local_mac("far-capacity-semantics"),
+                timeout_s=2.0,
+            )
+        )
+        mgr = _new_manager(adapter)
+
+        def _vlan_traffic_since(mark: int) -> List[str]:
+            return [
+                oid for _tag, oid in responder.requests[mark:]
+                if oid.startswith("1.3.6.1.2.1.17.7.1.4.3.1.")
+            ]
+
+        # (1) over-declared provision fails CLOSED: the declared
+        # capacity exceeds the element-REPORTED real port speed; the
+        # prior admin state is restored and no VLAN state appears.
+        before = mgr.to_canonical_bytes()
+        over = mgr.provision_link(
+            now=_NOW,
+            descriptor=_descriptor(name="over-declared", capacity_bps=2_000_000_000),
+            credential_slot_name=_CRED_SLOT,
+        )
+        if over.ok:
+            return fail(name, "over-declared provision accepted")
+        if "capacity-exhausted" not in over.detail:
+            return fail(name, "over-declared provision wrong detail: %s" % over.detail[:120])
+        if responder.admin_status != 2:
+            return fail(name, "over-declared provision left the admin state mutated")
+        if responder.vlans:
+            return fail(name, "over-declared provision left VLAN state")
+        if mgr.to_canonical_bytes() != before:
+            return fail(name, "over-declared provision mutated the manager snapshot")
+        # (2) the honest provision at the REAL port speed: the element
+        # was really asked for its port capacity (the ifSpeed GET).
+        link_ref = _provision(mgr, name="capacity-semantics")
+        if not any("2.2.1.5.7" in oid for _t, oid in responder.requests):
+            return fail(name, "provision never read the element's ifSpeed")
+        # (3) FAMILY-NATIVE allocate: ZERO SNMP PDUs -- the VLAN row
+        # is NOT the reservation.
+        mark = len(responder.requests)
+        alloc_ref = _allocate(mgr, link_ref)
+        if len(responder.requests) != mark:
+            return fail(
+                name,
+                "allocate emitted element traffic (VLAN-as-capacity "
+                "regression): %s" % responder.requests[mark:],
+            )
+        # (4) the ledger admission still enforces the bps bound
+        # (950 Mbps more > the 1 Gbps link carrying the 100 Mbps
+        # reservation) -- with NO element traffic either.
+        mark = len(responder.requests)
+        refused = mgr.allocate(
+            now=_NOW, link_ref=link_ref, kind="backhaul",
+            quantity_base=950_000_000, purpose="over",
+        )
+        if refused.ok:
+            return fail(name, "ledger admission accepted an over-reservation")
+        if "capacity-exhausted" not in refused.detail:
+            return fail(name, "over-reservation wrong detail: %s" % refused.detail[:120])
+        if len(responder.requests) != mark:
+            return fail(name, "failed admission emitted element traffic")
+        # (5) the segmentation appears ONLY at bind (createAndGo +
+        # egress PortList) -- as the BEARER's construct.
+        mark = len(responder.requests)
+        binding = _provision_bind(
+            mgr, _SESSION_ID, name="capacity-semantics", link_ref=link_ref,
+        )
+        vlan_ops = _vlan_traffic_since(mark)
+        if not any(oid.startswith("1.3.6.1.2.1.17.7.1.4.3.1.5.") for oid in vlan_ops):
+            return fail(name, "bind did not create the bearer VLAN row")
+        if not any(oid.startswith("1.3.6.1.2.1.17.7.1.4.3.1.2.") for oid in vlan_ops):
+            return fail(name, "bind did not touch the egress PortList")
+        if len(responder.vlans) != 1:
+            return fail(name, "expected exactly one bearer VLAN, got %s" % sorted(responder.vlans))
+        vid = next(iter(responder.vlans))
+        if not port_list_test(responder.vlans[vid]["egress"], 5):
+            return fail(name, "bridge port not in the bearer VLAN egress")
+        # (6) unbind destroys the segmentation; release is a PURE
+        # local ledger commit (no SNMP PDU).
+        r = mgr.unbind_session(now=_NOW, bearer_ref=binding.bearer_ref)
+        if not r.ok:
+            return fail(name, "unbind failed: %s" % r.detail[:120])
+        if responder.vlans:
+            return fail(name, "unbind left the bearer VLAN row behind")
+        mark = len(responder.requests)
+        r = mgr.release(now=_NOW, allocation_ref=alloc_ref)
+        if not r.ok:
+            return fail(name, "release failed: %s" % r.detail[:120])
+        if len(responder.requests) != mark:
+            return fail(name, "release emitted element traffic on a family-native target")
+        # the fail-closed double-release guard is a CALLER-side raise.
+        try:
+            mgr.release(now=_NOW, allocation_ref=alloc_ref)
+            return fail(name, "double release accepted")
+        except BackhaulError as exc:
+            if exc.reason != BackhaulReasonCode.ALLOCATION_UNKNOWN:
+                return fail(name, "double release wrong reason: %s" % exc.reason)
+        # (7) teardown restores the element.
+        r = mgr.close_link(now=_NOW, link_ref=link_ref)
+        if not r.ok:
+            return fail(name, "close_link failed: %s" % r.detail[:120])
+        if responder.admin_status != 2:
+            return fail(name, "teardown did not restore the admin state")
+    finally:
+        responder.close()
+    return ok(name, "capacity semantics corrected: allocate/release emit ZERO SNMP PDUs (the VLAN row appears ONLY at bind as the bearer's L2 segmentation and dies at unbind); the WORK-008 ledger admission still enforces the bps bound with no element traffic; provision is bounded by the element-reported real ifSpeed (over-declaration fails closed, admin state restored)")
+
+
 # ==========================================================================
 # Entry point
 # ==========================================================================
@@ -3587,6 +3932,9 @@ def main() -> int:
         case_43_snmp_ethernet_element_client_lifecycle,
         case_44_real_w012_session_authority_in_gate,
         case_45_preflight_separation_and_distinct_status,
+        # PR #23 SECOND architect-review remediation regressions.
+        case_46_production_wire_path_protocol_consistency,
+        case_47_capacity_semantics_vlan_is_not_bandwidth,
     ]
     results: List[Result] = []
     for case in cases:

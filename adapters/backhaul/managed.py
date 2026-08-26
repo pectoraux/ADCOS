@@ -34,17 +34,29 @@ The PR #23 architect review (Blockers 1 + 2) reshaped this adapter:
   byte-for-byte equivalent to the pre-call state:
 
   - ``provision_link`` -- validate (charge, descriptor validation,
-    content-derived ``link_ref``) -> element ``link_up`` -> commit
-    (local link bookkeeping); a commit failure after a successful
-    ``link_up`` compensates with ``link_down``.
-  - ``allocate`` / ``release`` -- validate -> element
-    ``allocate_capacity`` / ``release_capacity`` -> commit; commit
-    failure compensates with the element-side release.
+    content-derived ``link_ref``) -> element ``link_up`` -> the
+    REAL-CAPACITY BOUND (the element-reported ``port_speed_bps``
+    must carry the declared capacity; over-declaration fails closed
+    with compensation) -> commit (local link bookkeeping); a commit
+    failure after a successful ``link_up`` compensates with
+    ``link_down``.
+  - ``allocate`` / ``release`` -- validate -> (element
+    ``allocate_capacity`` / ``release_capacity`` ONLY when the
+    element's external interface REALLY reserves bandwidth --
+    ``supports_element_side_capacity``; the SNMP production target
+    does NOT, and its VLAN rows are L2 segmentation, never bps
+    reservations) -> commit.  On elements without a real element-
+    side mechanism the reservation is FAMILY-NATIVE: the WORK-008
+    ledger admission, bounded by the element-reported port speed --
+    never faked with a forwarding construct (the PR #23 second-
+    review Blocker 2 rule).
   - ``bind_session`` / ``unbind_session`` -- validate (session
     verification, identity-smuggling rejection, capacity gates,
     content-derived ``bearer_ref``) -> element ``bind_bearer`` /
-    ``unbind_bearer`` -> commit; commit failure compensates with the
-    element-side unbind.
+    ``unbind_bearer`` (on the SNMP target: the bearer's OWN IEEE
+    802.1Q VLAN segmentation, created/destroyed at bind/unbind and
+    derived from the adapter's bearer nonce) -> commit; commit
+    failure compensates with the element-side unbind.
   - ``egress_frame`` -- validate (contract-shape validation, budget
     charge, bearer lookup, availability gate -- the deterministic
     tx/rx counters are NOT touched) -> the element's REAL data-plane
@@ -187,6 +199,30 @@ class ManagedBackhaulAdapter(ReferenceBackhaulEngine):
             capacity_bps=descriptor.capacity_bps,
             endpoint_labels=list(descriptor.endpoint_labels),
         )
+        # Phase 2b: the REAL-CAPACITY BOUND (the PR #23 second-review
+        # Blocker 2 grounding): the element-REPORTED port speed
+        # (IF-MIB ifSpeed/ifHighSpeed on the SNMP target) must carry
+        # the descriptor's declared capacity.  Over-declaration fails
+        # CLOSED with compensation (the port's prior administrative
+        # state is restored) -- the family-native WORK-008 ledger is
+        # never bounded by a number the real port cannot carry.
+        if (
+            element_link.port_speed_bps
+            and descriptor.capacity_bps > element_link.port_speed_bps
+        ):
+            self._compensate(
+                lambda: self._element.link_down(element_link),
+                "LINK_UP over-declared-capacity rollback",
+            )
+            raise BackhaulError(
+                BackhaulReasonCode.CAPACITY_EXHAUSTED,
+                "declared link capacity %d bps exceeds the element-"
+                "reported real port speed %d bps (IF-MIB ifSpeed; the "
+                "element's prior administrative state was restored -- "
+                "the family-native capacity ledger is never bounded by "
+                "a number the real port cannot carry)"
+                % (descriptor.capacity_bps, element_link.port_speed_bps),
+            )
         # Phase 3: commit the local bookkeeping (infallible after
         # validation); a failure compensates on the element.
         try:
@@ -219,13 +255,24 @@ class ManagedBackhaulAdapter(ReferenceBackhaulEngine):
         )
         element_link = self._element_links.get(link_ref, _no_element_link())
         element_alloc = None
-        if element_link.key:
-            # Phase 2: the REAL external admission exchange.  The
-            # element mints its OWN opaque allocation identity.
+        if element_link.key and self._element.supports_element_side_capacity:
+            # Phase 2: the REAL external admission exchange -- ONLY
+            # for elements whose external interface REALLY reserves
+            # bandwidth (supports_element_side_capacity; e.g. the
+            # conformance client).  The element mints its OWN opaque
+            # allocation identity.
             element_alloc = self._element.allocate_capacity(
                 element_link, kind=kind, quantity_base=quantity_base,
                 purpose=purpose, nonce=allocation.allocation_ref,
             )
+        # else: FAMILY-NATIVE reservation (the PR #23 second-review
+        # Blocker 2 rule) -- the SNMP production target exposes no
+        # bandwidth-reservation mechanism on its real interface, so
+        # NO element-side capacity operation is performed at all:
+        # the reservation IS the WORK-008 ledger admission validated
+        # above (against the link capacity, itself bounded at
+        # provision time by the element-reported real port speed).
+        # A forwarding construct (a VLAN row) is never substituted.
         # Phase 3: commit the local bookkeeping.
         try:
             self._commit_allocate(allocation)
@@ -254,9 +301,12 @@ class ManagedBackhaulAdapter(ReferenceBackhaulEngine):
             context, allocation_ref=allocation_ref
         )
         element_alloc = self._element_allocs.get(allocation_ref)
-        # Phase 2: the REAL external release exchange (carries the
-        # ELEMENT's opaque allocation id -- the adapter's refs never
-        # cross).
+        # Phase 2: the REAL external release exchange -- ONLY when an
+        # element-side reservation exists (elements that really make
+        # them; on family-native targets there is never one -- the
+        # release is purely the local ledger commit below, carrying
+        # the ELEMENT's opaque allocation id when it exists -- the
+        # adapter's refs never cross).
         if element_alloc is not None and element_alloc.key:
             self._element.release_capacity(element_alloc)
         # Phase 3: commit the local release (a reservation is never
@@ -287,11 +337,16 @@ class ManagedBackhaulAdapter(ReferenceBackhaulEngine):
         element_bearer = None
         if element_link.key:
             # Phase 2: the REAL external bearer exchange (schema-level
-            # DATA only: the link, the endpoint label; the sacred
-            # session_id NEVER crosses to the element -- the element
-            # mints its own opaque bearer id).
+            # DATA only: the link, the endpoint label, and the opaque
+            # nonce; the sacred session_id NEVER crosses to the
+            # element -- the element mints its own opaque bearer id;
+            # on the SNMP target this op creates the bearer's OWN
+            # 802.1Q VLAN SEGMENTATION, deterministically derived
+            # from the nonce -- a forwarding construct, NOT a
+            # capacity reservation).
             element_bearer = self._element.bind_bearer(
-                element_link, endpoint_label=endpoint_label
+                element_link, endpoint_label=endpoint_label,
+                nonce=binding.bearer_ref,
             )
         # Phase 3: commit the local bookkeeping.
         try:

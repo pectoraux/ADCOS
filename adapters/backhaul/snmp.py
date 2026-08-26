@@ -20,9 +20,14 @@ Python stdlib:
   (cited as DATA -- LOCK-018; the family never reinvents them):
 
   - IF-MIB (RFC 2863): ``ifAdminStatus`` / ``ifOperStatus`` (the
-    port administrative/operational state -- 1=up, 2=down, 3=testing)
-    and the ``ifInOctets`` / ``ifOutOctets`` / ``ifInErrors`` /
-    ``ifOutErrors`` counters (Counter32);
+    port administrative/operational state -- 1=up, 2=down, 3=testing),
+    ``ifSpeed`` (the port's REAL bandwidth in bits per second,
+    Gauge32; the value 4294967295 means "greater than the maximum
+    reportable by this object", in which case ``ifHighSpeed`` (the
+    port speed in millions of bits per second, IF-MIB ifXTable)
+    carries the real number -- RFC 2863 ifSpeed/ifHighSpeed
+    semantics), and the ``ifInOctets`` / ``ifOutOctets`` /
+    ``ifInErrors`` / ``ifOutErrors`` counters (Counter32);
   - Q-BRIDGE-MIB (RFC 4363): ``dot1qVlanStaticRowStatus`` (the
     IEEE 802.1Q static VLAN table; RowStatus values per RFC 2579 --
     createAndGo(4) / active(1) / destroy(6)) and
@@ -64,6 +69,8 @@ __all__ = [
     "OID_SYS_UPTIME",
     "OID_IF_ADMIN_STATUS",
     "OID_IF_OPER_STATUS",
+    "OID_IF_SPEED",
+    "OID_IF_HIGH_SPEED",
     "OID_IF_IN_OCTETS",
     "OID_IF_OUT_OCTETS",
     "OID_IF_IN_ERRORS",
@@ -72,6 +79,7 @@ __all__ = [
     "OID_DOT1Q_VLAN_STATIC_ROW_STATUS",
     "IF_STATUS_UP",
     "IF_STATUS_DOWN",
+    "IF_SPEED_GREATER_THAN_MAX",
     "ROW_STATUS_ACTIVE",
     "ROW_STATUS_CREATE_AND_GO",
     "ROW_STATUS_DESTROY",
@@ -89,10 +97,20 @@ OID_SYS_UPTIME = "1.3.6.1.2.1.1.3.0"
 #: IF-MIB (RFC 2863) ifTable column objects, indexed by ifIndex.
 OID_IF_ADMIN_STATUS = "1.3.6.1.2.1.2.2.1.7"  # INTEGER: 1=up,2=down,3=testing
 OID_IF_OPER_STATUS = "1.3.6.1.2.1.2.2.1.8"  # INTEGER: 1=up,2=down,3=testing
+OID_IF_SPEED = "1.3.6.1.2.1.2.2.1.5"  # Gauge32: the port's real bandwidth, bits per second
 OID_IF_IN_OCTETS = "1.3.6.1.2.1.2.2.1.10"  # Counter32
 OID_IF_IN_ERRORS = "1.3.6.1.2.1.2.2.1.14"  # Counter32
 OID_IF_OUT_OCTETS = "1.3.6.1.2.1.2.2.1.16"  # Counter32
 OID_IF_OUT_ERRORS = "1.3.6.1.2.1.2.2.1.20"  # Counter32
+
+#: IF-MIB (RFC 2863) ifXTable column object, indexed by ifIndex.
+OID_IF_HIGH_SPEED = "1.3.6.1.2.1.31.1.1.1.15"  # Gauge32: the port speed, millions of bits per second
+
+#: The RFC 2863 ifSpeed sentinel: a Gauge32 value of 2^32-1 means the
+#: port's bandwidth is GREATER than the maximum reportable by
+#: ifSpeed, and ifHighSpeed carries the real number instead (cited
+#: as DATA -- LOCK-018).
+IF_SPEED_GREATER_THAN_MAX = 4294967295
 
 #: Q-BRIDGE-MIB (RFC 4363) dot1qVlanStaticTable column objects,
 #: indexed by VlanIndex (the VLAN identifier).

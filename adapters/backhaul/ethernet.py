@@ -16,10 +16,17 @@ Two responsibilities, both behind the adapter seam (LOCK-016/017/018):
     Ethernet-II frames written onto a real interface through a Linux
     ``AF_PACKET``/``SOCK_RAW`` socket (the actual L2 egress path --
     raw link-layer frames per packet(7)), and the same socket read
-    back for the far-end echo.  Creating an ``AF_PACKET`` socket
-    requires ``CAP_NET_RAW``; where the capability is absent the data
-    plane fails CLOSED with a typed error (an honest
-    verification-environment blocker, never a fabricated success).
+    back for the far-end echo.  The packet socket's PROTOCOL is the
+    tagged wire path's OUTER TPID ``0x8100`` (packet(7): the kernel
+    demultiplexes received frames on the frame's OUTERMOST
+    EtherType-position field; the production frame's outer field is
+    the 802.1Q TPID, with ``0x88B5`` appearing only INSIDE the tag as
+    the inner EtherType -- the PR #23 second-review Blocker 1
+    wire-path consistency, regression-pinned by case_46).  Creating
+    an ``AF_PACKET`` socket requires ``CAP_NET_RAW``; where the
+    capability is absent the data plane fails CLOSED with a typed
+    error (an honest verification-environment blocker, never a
+    fabricated success).
 
 These helpers are ADAPTER-SIDE.  No frame header, MAC-shaped address,
 VLAN identifier, or raw socket ever crosses the sandbox seam as
@@ -40,6 +47,7 @@ from .errors import BackhaulError, BackhaulReasonCode
 __all__ = [
     "ETHERTYPE_EXPERIMENTAL",
     "TPID_8021Q",
+    "PACKET_SOCKET_PROTOCOL",
     "encode_ethernet_ii_frame",
     "parse_ethernet_ii_header",
     "frame_payload_offset",
@@ -62,6 +70,24 @@ ETHERTYPE_EXPERIMENTAL = 0x88B5
 #: The IEEE 802.1Q-2022 Tag Protocol Identifier (TPID): 0x8100 (the
 #: standards-registered TPID; cited, never invented here).
 TPID_8021Q = 0x8100
+
+#: The ``AF_PACKET`` socket protocol for the production wire path:
+#: the OUTER TPID ``0x8100`` (Linux ``ETH_P_8021Q``).  packet(7):
+#: the ``socket()`` protocol argument is the link-layer protocol
+#: number in network byte order, and the kernel demultiplexes
+#: RECEIVED frames on the frame's OUTERMOST EtherType-position field
+#: -- for the 802.1Q-tagged production frame
+#: (:func:`encode_8021q_frame`) that field is the TPID ``0x8100``,
+#: with the family's experimental ``0x88B5`` appearing only INSIDE
+#: the 4-byte tag as the inner EtherType.  A socket opened for
+#: ``0x88B5`` would therefore never receive the tagged production
+#: frames its own encoder emits (the PR #23 second-review Blocker 1
+#: wire-path mismatch); the socket protocol, the transmit
+#: ``sll_protocol``, and the frame encoder must all agree on the
+#: tagged shape.  The untagged ``0x88B5`` Ethernet-II frame remains
+#: the CONFORMANCE wire shape (:func:`encode_ethernet_ii_frame` over
+#: the conformance peer's TCP socket -- no AF_PACKET there).
+PACKET_SOCKET_PROTOCOL = TPID_8021Q
 
 #: Ethernet-II header length: 6-byte destination MAC + 6-byte source
 #: MAC + 2-byte EtherType (IEEE 802.3-2018 clause 3 frame format).
@@ -267,14 +293,18 @@ def check_packet_socket_capability() -> Tuple[bool, str]:
     never a fabricated success).
     """
     try:
+        # The PRODUCTION socket configuration: protocol = the tagged
+        # wire path's outer TPID 0x8100 (PACKET_SOCKET_PROTOCOL above).
         sock = _socket.socket(
             _socket.AF_PACKET, _socket.SOCK_RAW,
-            _socket.htons(ETHERTYPE_EXPERIMENTAL),
+            _socket.htons(PACKET_SOCKET_PROTOCOL),
         )
     except OSError as exc:
         return False, "%s: %s" % (exc.__class__.__name__, exc)
     try:
-        return True, "AF_PACKET/SOCK_RAW socket created"
+        return True, "AF_PACKET/SOCK_RAW socket created (protocol 0x%04X)" % (
+            PACKET_SOCKET_PROTOCOL,
+        )
     finally:
         sock.close()
 
@@ -290,10 +320,10 @@ class PacketFrameIo:
     production data plane never fabricates a write.
     """
 
-    __slots__ = ("_ifname", "_ifindex", "_sock", "_timeout_s")
+    __slots__ = ("_ifname", "_ifindex", "_sock", "_timeout_s", "_factory")
 
     def __init__(
-        self, ifname: str, *, timeout_s: float = 2.0
+        self, ifname: str, *, timeout_s: float = 2.0, _socket_factory=None
     ) -> None:
         if not isinstance(ifname, str) or not ifname:
             raise BackhaulError(
@@ -302,6 +332,14 @@ class PacketFrameIo:
             )
         self._ifname = ifname
         self._timeout_s = timeout_s
+        # Internal REGRESSION seam ONLY (underscore-prefixed, never a
+        # production parameter): substitutes the OS socket OBJECT for
+        # the in-test double while every production byte of THIS class
+        # (socket() protocol argument, bind, sendto sockaddr_ll,
+        # recvfrom) still executes -- the wire-path regression
+        # (case_46) drives the exact PacketFrameIo/PacketDataSocket
+        # path without CAP_NET_RAW.  None = the real OS socket.
+        self._factory = _socket_factory
         self._sock: Optional[_socket.socket] = None
         self._ifindex = 0
 
@@ -324,9 +362,13 @@ class PacketFrameIo:
                 % (self._ifname, exc.__class__.__name__, exc),
             ) from None
         try:
-            sock = _socket.socket(
+            # The PRODUCTION protocol: the tagged wire path's OUTER
+            # TPID 0x8100 (PACKET_SOCKET_PROTOCOL) -- the socket
+            # receives exactly the frames encode_8021q_frame emits.
+            maker = self._factory if self._factory is not None else _socket.socket
+            sock = maker(
                 _socket.AF_PACKET, _socket.SOCK_RAW,
-                _socket.htons(ETHERTYPE_EXPERIMENTAL),
+                _socket.htons(PACKET_SOCKET_PROTOCOL),
             )
         except OSError as exc:
             raise BackhaulError(
@@ -366,7 +408,7 @@ class PacketFrameIo:
         addr = struct.pack(
             "HHiHH6s",
             _socket.AF_PACKET,  # sll_family
-            _socket.htons(ETHERTYPE_EXPERIMENTAL),  # sll_protocol
+            _socket.htons(PACKET_SOCKET_PROTOCOL),  # sll_protocol (the tagged frame's outer TPID; network byte order per packet(7))
             self._ifindex,  # sll_ifindex
             0,  # sll_hatype (ARPHRD_ETHER unspecified)
             6,  # sll_halen

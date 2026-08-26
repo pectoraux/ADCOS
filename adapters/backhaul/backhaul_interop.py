@@ -351,9 +351,9 @@ class InteropOutcome:
       environment-capability matrix.
     * ``"PEER_FAILED"`` -- the element's management plane was
       reachable but a REAL management-plane operation (link
-      provisioning / VLAN allocation / bearer binding / teardown)
-      failed, or a mediated boundary operation failed for a
-      non-data-plane reason, or the gate's session-authority
+      provisioning / bearer VLAN segmentation / bearer binding /
+      teardown) failed, or a mediated boundary operation failed for
+      a non-data-plane reason, or the gate's session-authority
       negative controls did not hold.
     * ``"DATA_PEER_UNREACHABLE"`` -- the element's management plane
       was verified over real SNMP, but the DATA plane cannot carry
@@ -553,8 +553,11 @@ def run_backhaul_interop(
         if not alloc.ok:
             return InteropOutcome(
                 "PEER_FAILED",
-                "real element ALLOCATE (SNMP dot1qVlanStaticRowStatus "
-                "createAndGo) failed: %s" % alloc.detail,
+                "capacity allocation (FAMILY-NATIVE WORK-008 ledger "
+                "admission on this target -- the SNMP-managed 802.1Q "
+                "switch exposes no bandwidth-reservation MIB object; "
+                "bounded by the element-reported ifSpeed) failed: %s"
+                % alloc.detail,
             )
         state["alloc_ref"] = alloc.value.allocation_ref
         # ---- session-authority negative controls (Blocker 3) -------
@@ -588,8 +591,9 @@ def run_backhaul_interop(
         if not bound.ok:
             return InteropOutcome(
                 "PEER_FAILED",
-                "real element BIND (SNMP dot1qVlanStaticEgressPorts) "
-                "failed: %s" % bound.detail,
+                "real element BIND (SNMP bearer VLAN segmentation: "
+                "dot1qVlanStaticRowStatus createAndGo + egress "
+                "PortList) failed: %s" % bound.detail,
             )
         state["bearer_ref"] = bound.value.bearer_ref
         # ---- the data-plane phase -----------------------------------
@@ -602,10 +606,13 @@ def run_backhaul_interop(
             return InteropOutcome(
                 "DATA_PEER_UNREACHABLE",
                 "real SNMP management-plane interop verified "
-                "(ifAdminStatus up + ifOperStatus confirm + VLAN "
-                "createAndGo + egress PortList bind, all over real "
-                "SNMPv2c/UDP), but the DATA plane cannot carry in this "
-                "environment -- never a fabricated PASS.  "
+                "(ifAdminStatus up + ifOperStatus confirm + real "
+                "ifSpeed capacity read + bearer VLAN segmentation "
+                "(dot1qVlanStaticRowStatus createAndGo + egress "
+                "PortList), all over real SNMPv2c/UDP; capacity "
+                "allocation is family-native WORK-008 ledger admission "
+                "on this target), but the DATA plane cannot carry in "
+                "this environment -- never a fabricated PASS.  "
                 "Environment-capability matrix:\n%s"
                 % probe_report.summary(),
             )
@@ -664,12 +671,15 @@ def run_backhaul_interop(
             "PASSED",
             "real SNMP-managed Ethernet-switch interop: real SNMPv2c "
             "management plane (ifAdminStatus/ifOperStatus link_up + "
-            "dot1qVlanStaticTable VLAN allocation + egress PortList "
-            "bearer bind) + %d payload bytes carried end-to-end as "
-            "802.1Q-tagged Ethernet-II frames on the real wire and "
-            "received back byte-identical through the standard session "
-            "facade with the REAL WORK-012 session authority "
-            "(payload=%r)" % (len(payload), payload),
+            "real ifSpeed capacity read + bearer VLAN segmentation "
+            "(dot1qVlanStaticRowStatus createAndGo at bind + egress "
+            "PortList); capacity allocation family-native per the "
+            "PR #23 second-review Blocker 2 rule) + %d payload bytes "
+            "carried end-to-end as 802.1Q-tagged Ethernet-II frames "
+            "(outer TPID 0x8100, inner EtherType 0x88B5) on the real "
+            "wire and received back byte-identical through the "
+            "standard session facade with the REAL WORK-012 session "
+            "authority (payload=%r)" % (len(payload), payload),
         )
     except Exception as exc:  # noqa: BLE001 -- gate-level isolation
         try:

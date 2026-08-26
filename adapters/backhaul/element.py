@@ -11,22 +11,38 @@ module defines that seam:
   element" surface the :class:`~adapters.backhaul.managed.
   ManagedBackhaulAdapter` drives transactionally (validate ->
   perform external operation -> commit local bookkeeping): link
-  up/down, capacity allocate/release, bearer bind/unbind, link
-  observation, the real data-plane frame write, and the facade data
-  socket lifecycle.
+  up/down, capacity allocate/release (ONLY for elements whose
+  external interface provides a REAL bandwidth-reservation
+  mechanism -- ``supports_element_side_capacity``; the honest default
+  is NO, and capacity allocation is then family-native), bearer
+  bind/unbind, link observation, the real data-plane frame write, and
+  the facade data-socket lifecycle.
 
 * :class:`SnmpEthernetElementClient` -- the PRODUCTION client: a
   REAL SNMP-managed IEEE 802.1Q Ethernet switch.  Management plane =
   real SNMPv2c over UDP (:mod:`adapters.backhaul.snmp`) against the
   standard MIB objects every managed Ethernet switch exposes -- IF-MIB
-  (RFC 2863) ``ifAdminStatus``/``ifOperStatus`` and the interface
-  counters, Q-BRIDGE-MIB (RFC 4363) ``dot1qVlanStaticRowStatus`` /
-  ``dot1qVlanStaticEgressPorts``.  Data plane = real IEEE 802.1Q-
-  tagged Ethernet-II frames written onto the wire through an
-  ``AF_PACKET``/``SOCK_RAW`` socket
+  (RFC 2863) ``ifAdminStatus``/``ifOperStatus``/``ifSpeed``/the
+  interface counters, Q-BRIDGE-MIB (RFC 4363)
+  ``dot1qVlanStaticRowStatus`` / ``dot1qVlanStaticEgressPorts``.  Data
+  plane = real IEEE 802.1Q-tagged Ethernet-II frames written onto the
+  wire through an ``AF_PACKET``/``SOCK_RAW`` socket
   (:mod:`adapters.backhaul.ethernet`) -- the actual L2 egress toward
   the switch.  This is the concrete real target the B1
   real-interoperability gate drives.
+
+  CAPACITY SEMANTICS (the PR #23 second-review Blocker 2 correction):
+  the SNMP-managed IEEE 802.1Q switch exposes NO standard
+  bandwidth-reservation/rate-policing MIB object on this target -- a
+  Q-BRIDGE ``dot1qVlanStaticTable`` row is Layer-2 SEGMENTATION, not
+  a rate resource, and VLAN existence is NEVER substituted for a bps
+  reservation.  This client therefore declares
+  ``supports_element_side_capacity = False``: WORK-008 bps capacity
+  allocation on this target is FAMILY-NATIVE (the reference engine's
+  ledger admission, bounded by the element-REPORTED real port speed
+  -- ``ifSpeed``/``ifHighSpeed`` read at ``link_up``), and the VLAN
+  row the client creates at ``bind_bearer`` is exactly what the
+  standard says it is: the bearer's L2 segmentation.
 
 * :class:`JsonConformanceElementClient` -- the CONFORMANCE client:
   the in-repo deterministic architectural-evidence protocol (the
@@ -53,7 +69,7 @@ import hashlib
 import json
 import socket as _socket
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, Optional, Sequence, Tuple
 
 from .ethernet import (
     PacketDataSocket,
@@ -64,15 +80,18 @@ from .ethernet import (
 )
 from .errors import BackhaulError, BackhaulReasonCode
 from .snmp import (
+    IF_SPEED_GREATER_THAN_MAX,
     IF_STATUS_UP,
     OID_DOT1Q_VLAN_STATIC_EGRESS_PORTS,
     OID_DOT1Q_VLAN_STATIC_ROW_STATUS,
     OID_IF_ADMIN_STATUS,
+    OID_IF_HIGH_SPEED,
     OID_IF_IN_ERRORS,
     OID_IF_IN_OCTETS,
     OID_IF_OPER_STATUS,
     OID_IF_OUT_ERRORS,
     OID_IF_OUT_OCTETS,
+    OID_IF_SPEED,
     ROW_STATUS_ACTIVE,
     ROW_STATUS_CREATE_AND_GO,
     ROW_STATUS_DESTROY,
@@ -105,21 +124,31 @@ class ElementLink:
 
     ``key`` is the element's OWN opaque link identifier (empty when
     the element has none); ``far_mac`` the element-assigned far-end
-    MAC-shaped frame destination (None when unknown); and
+    MAC-shaped frame destination (None when unknown);
     ``prior_admin_status`` the IF-MIB ifAdminStatus value observed
     BEFORE the client brought the port up (the compensating-rollback
-    snapshot; None when the concept does not apply).
+    snapshot; None when the concept does not apply); and
+    ``port_speed_bps`` the element-REPORTED real port capacity in
+    bits per second (IF-MIB ``ifSpeed``, with ``ifHighSpeed``
+    carrying the number when ``ifSpeed`` reports its greater-than-max
+    sentinel; 0 when the element reports no speed concept) -- the
+    REAL external datum that bounds the family-native WORK-008
+    capacity ledger (the PR #23 second-review Blocker 2 grounding).
     """
 
     key: str
     far_mac: Optional[bytes] = None
     prior_admin_status: Optional[int] = None
     if_index: int = 0
+    port_speed_bps: int = 0
 
 
 @dataclass(frozen=True)
 class ElementAllocation:
-    """The element-side view of one capacity allocation."""
+    """The element-side view of one capacity allocation (ONLY for
+    elements that provide a REAL element-side bandwidth-reservation
+    mechanism -- ``supports_element_side_capacity``; e.g. the
+    conformance client, whose protocol models capacity natively)."""
 
     key: str
     vlan_id: int = 0
@@ -131,11 +160,12 @@ class ElementBearer:
 
     ``key`` is the element's OWN opaque bearer identifier; ``far_mac``
     the bearer's frame destination (dominates the link-level address
-    when present); ``vlan_id`` the IEEE 802.1Q VLAN the bearer's
-    frames carry (0 = untagged conformance path); ``data_endpoint``
-    is a CONFORMANCE-ONLY convenience (the peer's wire echo endpoint;
-    a real element NEVER returns one -- the real data path is the
-    wire itself).
+    when present); ``vlan_id`` the IEEE 802.1Q VLAN carrying the
+    bearer's frames -- the bearer's L2 SEGMENTATION, created by the
+    client at bind (0 = no VLAN concept / untagged conformance path);
+    ``data_endpoint`` is a CONFORMANCE-ONLY convenience (the peer's
+    wire echo endpoint; a real element NEVER returns one -- the real
+    data path is the wire itself).
     """
 
     key: str
@@ -169,12 +199,33 @@ class BackhaulElementClient(abc.ABC):
     -- the adapter treats any raise as "the external operation did
     NOT happen (or was compensated)" and refuses to commit local
     bookkeeping.
+
+    CAPACITY DECLARATION (the PR #23 second-review Blocker 2 rule):
+    ``supports_element_side_capacity`` states whether the element's
+    ACTUAL external interface provides a REAL bandwidth-reservation
+    mechanism (a rate/QoS resource that actually holds or enforces
+    the requested bps).  The honest DEFAULT is ``False``: for such
+    elements the adapter performs NO element-side capacity operation
+    at all -- WORK-008 bps allocation stays FAMILY-NATIVE (the
+    reference engine's ledger admission), and the default
+    ``allocate_capacity``/``release_capacity`` below raise as a
+    defensive backstop.  Only an element whose real interface
+    genuinely reserves bandwidth may override these and declare
+    ``True`` (the in-repo conformance client does: its protocol
+    models capacity allocation as a first-class operation -- honest
+    FOR CONFORMANCE; a VLAN row is NOT such a mechanism and is never
+    presented as one).
     """
 
     __slots__ = ()
 
     #: Informational label (diagnostic only -- never canonical state).
     label: str = ""
+
+    #: Whether the element's external interface provides a REAL
+    #: element-side bandwidth-reservation mechanism (see the class
+    #: docstring).  Honest default: NO.
+    supports_element_side_capacity: bool = False
 
     @abc.abstractmethod
     def link_up(
@@ -192,7 +243,6 @@ class BackhaulElementClient(abc.ABC):
         """Tear the link's service down (ownership-aware: restore the
         recorded pre-link state where the element models it)."""
 
-    @abc.abstractmethod
     def allocate_capacity(
         self,
         link: ElementLink,
@@ -202,22 +252,63 @@ class BackhaulElementClient(abc.ABC):
         purpose: str,
         nonce: str,
     ) -> ElementAllocation:
-        """Reserve capacity on the link.  ``nonce`` is the adapter's
-        opaque content-derived uniqueness input (the client derives
-        any element-side identifier it must mint deterministically
-        from it)."""
+        """Reserve capacity on the link -- ONLY for elements whose
+        external interface REALLY reserves bandwidth
+        (``supports_element_side_capacity = True``).
 
-    @abc.abstractmethod
+        The honest DEFAULT raises: this element provides no real
+        element-side bandwidth-reservation mechanism, so capacity
+        allocation is FAMILY-NATIVE (the reference engine's WORK-008
+        ledger admission) and the adapter never calls this method.
+        The raise is the defensive structural backstop against a
+        future element conflating a forwarding construct (e.g. a
+        VLAN row) with a rate resource -- the PR #23 second-review
+        Blocker 2 rule: VLAN existence is NOT bandwidth reservation.
+        """
+        raise BackhaulError(
+            BackhaulReasonCode.ILLEGAL_STATE,
+            "element %r declares no real element-side bandwidth-"
+            "reservation mechanism (supports_element_side_capacity="
+            "False); WORK-008 bps allocation is FAMILY-NATIVE on this "
+            "element -- no external capacity operation is performed "
+            "and none may be faked with a forwarding construct" % (
+                self.label or self.__class__.__name__,
+            ),
+        )
+
     def release_capacity(self, allocation: ElementAllocation) -> None:
-        """Release a capacity reservation."""
+        """Release an element-side capacity reservation -- ONLY for
+        elements that really make them (see ``allocate_capacity``).
+
+        The honest DEFAULT raises (there is never an element-side
+        reservation to release on such an element)."""
+        raise BackhaulError(
+            BackhaulReasonCode.ILLEGAL_STATE,
+            "element %r declares no real element-side bandwidth-"
+            "reservation mechanism; there is no element-side capacity "
+            "reservation to release (capacity allocation is "
+            "family-native on this element)" % (
+                self.label or self.__class__.__name__,
+            ),
+        )
 
     @abc.abstractmethod
     def bind_bearer(
-        self, link: ElementLink, *, endpoint_label: str
+        self,
+        link: ElementLink,
+        *,
+        endpoint_label: str,
+        nonce: str,
     ) -> ElementBearer:
         """Establish a session bearer on the link.  The sacred ADCOS
         ``session_id`` NEVER crosses to the element -- the element
-        mints its OWN opaque bearer identity."""
+        mints its OWN opaque bearer identity.  ``nonce`` is the
+        adapter's opaque content-derived uniqueness input (the
+        adapter's bearer ref); elements that mint their own bearer
+        identifiers ignore it, elements that derive deterministic
+        element-side segmentation identifiers (e.g. the SNMP target's
+        VLAN id) derive them from it -- it is DATA, never identity
+        that crosses back."""
 
     @abc.abstractmethod
     def unbind_bearer(self, bearer: ElementBearer) -> None:
@@ -270,17 +361,32 @@ class SnmpEthernetElementClient(BackhaulElementClient):
     * management plane -- real SNMPv2c over UDP
       (:class:`~adapters.backhaul.snmp.SnmpV2cClient`): the link
       lifecycle maps to IF-MIB ``ifAdminStatus``/``ifOperStatus`` on
-      the configured switch port (ifIndex), the capacity allocation
-      maps to a Q-BRIDGE-MIB ``dot1qVlanStaticTable`` row
-      (createAndGo/destroy), the bearer binding maps to the VLAN's
-      ``dot1qVlanStaticEgressPorts`` PortList (add/remove the bridge
-      port), and the observation maps to the IF-MIB interface
-      counters;
+      the configured switch port (ifIndex) plus the port's REAL
+      capacity read (``ifSpeed``, with ``ifHighSpeed`` when ifSpeed
+      reports its greater-than-max sentinel -- RFC 2863); the bearer
+      binding maps to the creation of the bearer's OWN IEEE 802.1Q
+      segmentation -- a Q-BRIDGE-MIB ``dot1qVlanStaticTable`` row
+      (createAndGo/destroy, the VLAN identifier content-derived from
+      the adapter's nonce) whose ``dot1qVlanStaticEgressPorts"
+      PortList carries the bridge port (add/remove); and the
+      observation maps to the IF-MIB interface counters;
     * data plane -- real IEEE 802.1Q-tagged Ethernet-II frames
       written onto the configured egress interface through an
       ``AF_PACKET``/``SOCK_RAW`` socket (the actual L2 wire path
       toward the switch; requires ``CAP_NET_RAW`` -- absent
       capability fails CLOSED with a typed error).
+
+    CAPACITY SEMANTICS -- NARROWED HONESTLY (the PR #23 second-review
+    Blocker 2 correction): this target's standard MIBs expose NO
+    bandwidth-reservation/rate-policing object, so this client
+    declares ``supports_element_side_capacity = False`` (inheriting
+    the raising defaults) and performs NO element-side capacity
+    operation: WORK-008 bps allocation is FAMILY-NATIVE (the
+    reference engine's ledger admission, bounded at ``provision``
+    time by the element-reported ``port_speed_bps``).  The VLAN row
+    is the bearer's Layer-2 SEGMENTATION exactly as IEEE 802.1Q/
+    RFC 4363 define it -- never presented as, and never substituted
+    for, a bps reservation.
 
     Construction carries the real element's coordinates (adapter
     config DATA -- never core state): the SNMP agent endpoint, the
@@ -294,7 +400,7 @@ class SnmpEthernetElementClient(BackhaulElementClient):
 
     __slots__ = (
         "_snmp", "_if_index", "_bridge_port", "_egress_if",
-        "_far_mac", "_io", "_links", "_allocations", "_data_sockets",
+        "_far_mac", "_io", "_bearer_vids", "_data_sockets",
         "label",
     )
 
@@ -340,10 +446,9 @@ class SnmpEthernetElementClient(BackhaulElementClient):
         self._egress_if = egress_if
         self._far_mac = bytes(far_mac)
         self._io: Optional[PacketFrameIo] = None
-        # link key -> live vlan ids (the ownership-aware teardown map)
-        self._links: Dict[str, List[int]] = {}
-        # allocation key -> vlan id
-        self._allocations: Dict[str, int] = {}
+        # bearer key -> the bearer's live VLAN id (its L2
+        # segmentation; the ownership-aware teardown map).
+        self._bearer_vids: Dict[str, int] = {}
         # bearer key -> PacketDataSocket (the facade read side)
         self._data_sockets: Dict[str, PacketDataSocket] = {}
         self.label = label
@@ -358,8 +463,13 @@ class SnmpEthernetElementClient(BackhaulElementClient):
         capacity_bps: int,
         endpoint_labels: Sequence[str],
     ) -> ElementLink:
-        # Phase 1: the port's CURRENT administrative state (the
-        # compensating-rollback snapshot).
+        # Phase 0: the port's CURRENT administrative state (the
+        # compensating-rollback snapshot) and its REAL reported
+        # capacity (IF-MIB ifSpeed; ifHighSpeed when ifSpeed reports
+        # the greater-than-max sentinel -- RFC 2863).  The port speed
+        # is the REAL external datum that bounds the family-native
+        # WORK-008 ledger (never a substitute for element-side rate
+        # enforcement, which this target does not expose).
         try:
             prior = self._snmp.get(
                 "%s.%d" % (OID_IF_ADMIN_STATUS, self._if_index)
@@ -371,6 +481,7 @@ class SnmpEthernetElementClient(BackhaulElementClient):
                 "the element (IF-MIB; the port does not exist or is not "
                 "in the agent's MIB view)" % self._if_index,
             ) from None
+        port_speed = self._read_port_speed_bps()
         # Phase 2: bring the port administratively up (IF-MIB).
         if prior != IF_STATUS_UP:
             self._snmp.set(
@@ -402,6 +513,7 @@ class SnmpEthernetElementClient(BackhaulElementClient):
             far_mac=self._far_mac,
             prior_admin_status=prior,
             if_index=self._if_index,
+            port_speed_bps=port_speed,
         )
 
     def link_down(self, link: ElementLink) -> None:
@@ -414,25 +526,36 @@ class SnmpEthernetElementClient(BackhaulElementClient):
             "%s.%d" % (OID_IF_ADMIN_STATUS, self._if_index),
             SnmpValue.integer(target),
         )
-        self._links.pop(link.key, None)
 
-    def allocate_capacity(
-        self,
-        link: ElementLink,
-        *,
-        kind: str,
-        quantity_base: int,
-        purpose: str,
-        nonce: str,
-    ) -> ElementAllocation:
-        """Create the IEEE 802.1Q static VLAN row (Q-BRIDGE-MIB
-        ``dot1qVlanStaticRowStatus`` createAndGo) -- the element-side
-        capacity reservation.  The VLAN identifier is content-derived
-        from the caller's nonce (deterministic; collision probes the
-        next candidates).  A failed verify compensates by destroying
-        the half-created row."""
+    # NOTE (PR #23 second-review Blocker 2): this client defines NO
+    # allocate_capacity / release_capacity -- it inherits the seam's
+    # honest raising defaults (supports_element_side_capacity is
+    # False).  The SNMP-managed IEEE 802.1Q switch exposes no
+    # standard bandwidth-reservation MIB object; a dot1qVlanStaticTable
+    # row is L2 segmentation and is NEVER presented as a bps
+    # reservation.  WORK-008 capacity allocation on this target is
+    # family-native (the reference engine's ledger admission,
+    # bounded by the element-reported port_speed_bps).
+
+    def bind_bearer(
+        self, link: ElementLink, *, endpoint_label: str, nonce: str,
+    ) -> ElementBearer:
+        """Establish the bearer's Layer-2 SEGMENTATION on the switch:
+        create the bearer's OWN IEEE 802.1Q static VLAN row
+        (Q-BRIDGE-MIB ``dot1qVlanStaticRowStatus`` createAndGo; the
+        VLAN identifier content-derived from the adapter's nonce)
+        and add the bridge port to its static egress PortList
+        (``dot1qVlanStaticEgressPorts`` read-modify-write).
+
+        This is the bearer's forwarding construct -- exactly what
+        IEEE 802.1Q / RFC 4363 define a VLAN row to BE -- and NOT a
+        capacity reservation (this target exposes no rate resource;
+        capacity allocation is family-native).  A failed verify at
+        either step compensates (destroy the half-created row /
+        restore the prior egress bitmap)."""
         vid = self._derive_vlan_id(nonce)
         row_oid = "%s.%d" % (OID_DOT1Q_VLAN_STATIC_ROW_STATUS, vid)
+        # Step 1: the segmentation row (createAndGo -> active).
         self._snmp.set(row_oid, SnmpValue.integer(ROW_STATUS_CREATE_AND_GO))
         try:
             status = self._snmp.get(row_oid).as_int()
@@ -441,27 +564,91 @@ class SnmpEthernetElementClient(BackhaulElementClient):
         if status != ROW_STATUS_ACTIVE:
             # createAndGo did not reach active: compensate + fail.
             try:
-                self._snmp.set(row_oid, SnmpValue.integer(ROW_STATUS_DESTROY))
+                self._snmp.set(
+                    row_oid, SnmpValue.integer(ROW_STATUS_DESTROY)
+                )
             except BackhaulError:
                 pass  # best-effort compensation; the error below wins
             raise BackhaulError(
                 BackhaulReasonCode.BACKHAUL_UNAVAILABLE,
-                "VLAN %d did not reach dot1qVlanStaticRowStatus active(1) "
-                "after createAndGo (status=%d; the row was destroyed -- no "
-                "half-created reservation stays on the element)"
-                % (vid, status),
+                "bearer VLAN %d did not reach dot1qVlanStaticRowStatus "
+                "active(1) after createAndGo (status=%d; the row was "
+                "destroyed -- no half-created segmentation stays on "
+                "the element)" % (vid, status),
             )
-        self._links.setdefault(link.key, []).append(vid)
-        self._allocations[str(vid)] = vid
-        return ElementAllocation(key=str(vid), vlan_id=vid)
+        # Step 2: the bridge port lands in the row's static egress
+        # PortList (read-modify-write + verify + bitmap restore).
+        egress_oid = "%s.%d" % (OID_DOT1Q_VLAN_STATIC_EGRESS_PORTS, vid)
+        current = self._snmp.get(egress_oid).as_octets()
+        if port_list_test(current, self._bridge_port):
+            try:
+                self._snmp.set(
+                    row_oid, SnmpValue.integer(ROW_STATUS_DESTROY)
+                )
+            except BackhaulError:
+                pass
+            raise BackhaulError(
+                BackhaulReasonCode.ILLEGAL_STATE,
+                "bridge port %d already in bearer VLAN %d's static egress "
+                "PortList (one live bearer per bridge port on this "
+                "target; the row was destroyed)"
+                % (self._bridge_port, vid),
+            )
+        updated = port_list_set(current, self._bridge_port)
+        self._snmp.set(egress_oid, SnmpValue.octet_string(updated))
+        verify = self._snmp.get(egress_oid).as_octets()
+        if not port_list_test(verify, self._bridge_port):
+            # Compensate: restore the prior bitmap, destroy the row.
+            try:
+                self._snmp.set(
+                    egress_oid, SnmpValue.octet_string(current)
+                )
+            except BackhaulError:
+                pass
+            try:
+                self._snmp.set(
+                    row_oid, SnmpValue.integer(ROW_STATUS_DESTROY)
+                )
+            except BackhaulError:
+                pass
+            raise BackhaulError(
+                BackhaulReasonCode.BACKHAUL_UNAVAILABLE,
+                "bridge port %d did not land in bearer VLAN %d's static "
+                "egress PortList after the SET (the prior bitmap was "
+                "restored and the row destroyed)"
+                % (self._bridge_port, vid),
+            )
+        bearer_key = "vid:%d:port:%d" % (vid, self._bridge_port)
+        self._bearer_vids[bearer_key] = vid
+        return ElementBearer(
+            key=bearer_key,
+            far_mac=self._far_mac,
+            vlan_id=vid,
+        )
 
-    def release_capacity(self, allocation: ElementAllocation) -> None:
-        """Destroy the VLAN row (Q-BRIDGE-MIB destroy) and verify it
-        is gone."""
-        vid = validate_vlan_id(allocation.vlan_id)
+    def unbind_bearer(self, bearer: ElementBearer) -> None:
+        """Tear the bearer's segmentation down: remove the bridge port
+        from the VLAN's static egress PortList (verify the bit
+        cleared) and destroy the VLAN row (verify it is gone) -- the
+        bearer's forwarding construct goes away WITH the bearer."""
+        vid = validate_vlan_id(bearer.vlan_id)
+        egress_oid = "%s.%d" % (OID_DOT1Q_VLAN_STATIC_EGRESS_PORTS, vid)
+        current = self._snmp.get(egress_oid).as_octets()
+        if port_list_test(current, self._bridge_port):
+            updated = port_list_clear(current, self._bridge_port)
+            self._snmp.set(egress_oid, SnmpValue.octet_string(updated))
+            verify = self._snmp.get(egress_oid).as_octets()
+            if port_list_test(verify, self._bridge_port):
+                raise BackhaulError(
+                    BackhaulReasonCode.BACKHAUL_UNAVAILABLE,
+                    "bridge port %d still in bearer VLAN %d's static "
+                    "egress PortList after the clearing SET (the unbind "
+                    "did not take)" % (self._bridge_port, vid),
+                )
+        # The segmentation row goes away with the bearer.
         row_oid = "%s.%d" % (OID_DOT1Q_VLAN_STATIC_ROW_STATUS, vid)
         self._snmp.set(row_oid, SnmpValue.integer(ROW_STATUS_DESTROY))
-        self._allocations.pop(allocation.key, None)
+        self._bearer_vids.pop(bearer.key, None)
         try:
             status = self._snmp.get(row_oid).as_int()
         except BackhaulError:
@@ -469,82 +656,9 @@ class SnmpEthernetElementClient(BackhaulElementClient):
         if status != 0:
             raise BackhaulError(
                 BackhaulReasonCode.BACKHAUL_UNAVAILABLE,
-                "VLAN %d still present (rowStatus=%d) after destroy -- "
-                "the reservation did not release cleanly" % (vid, status),
-            )
-
-    def bind_bearer(
-        self, link: ElementLink, *, endpoint_label: str
-    ) -> ElementBearer:
-        """Add the bridge port to the link's live VLAN's static egress
-        PortList (Q-BRIDGE-MIB ``dot1qVlanStaticEgressPorts``) -- the
-        element-side bearer.  The bind REQUIRES a live allocation
-        (VLAN) on the link: an Ethernet bearer carries frames in an
-        allocated VLAN; bind-before-allocate fails closed with a
-        typed error (the honest target-specific admission rule)."""
-        vids = self._links.get(link.key) or []
-        if not vids:
-            raise BackhaulError(
-                BackhaulReasonCode.ILLEGAL_STATE,
-                "bind on link %r requires a live allocation (the SNMP "
-                "Ethernet target binds bearers into the VLAN created by "
-                "dot1qVlanStaticTable; allocate capacity first)"
-                % link.key,
-            )
-        vid = vids[0]  # the link's current VLAN (first live allocation)
-        egress_oid = "%s.%d" % (OID_DOT1Q_VLAN_STATIC_EGRESS_PORTS, vid)
-        current = self._snmp.get(egress_oid).as_octets()
-        if port_list_test(current, self._bridge_port):
-            raise BackhaulError(
-                BackhaulReasonCode.ILLEGAL_STATE,
-                "bridge port %d already in VLAN %d's static egress "
-                "PortList (one live bearer per bridge port on this "
-                "target)" % (self._bridge_port, vid),
-            )
-        updated = port_list_set(current, self._bridge_port)
-        self._snmp.set(egress_oid, SnmpValue.octet_string(updated))
-        verify = self._snmp.get(egress_oid).as_octets()
-        if not port_list_test(verify, self._bridge_port):
-            # Compensate: restore the prior bitmap.
-            try:
-                self._snmp.set(
-                    egress_oid, SnmpValue.octet_string(current)
-                )
-            except BackhaulError:
-                pass
-            raise BackhaulError(
-                BackhaulReasonCode.BACKHAUL_UNAVAILABLE,
-                "bridge port %d did not land in VLAN %d's static egress "
-                "PortList after the SET (the prior bitmap was restored)"
-                % (self._bridge_port, vid),
-            )
-        return ElementBearer(
-            key="vid:%d:port:%d" % (vid, self._bridge_port),
-            far_mac=self._far_mac,
-            vlan_id=vid,
-        )
-
-    def unbind_bearer(self, bearer: ElementBearer) -> None:
-        """Remove the bridge port from the VLAN's static egress
-        PortList (and verify the bit cleared)."""
-        vid = validate_vlan_id(bearer.vlan_id)
-        egress_oid = "%s.%d" % (OID_DOT1Q_VLAN_STATIC_EGRESS_PORTS, vid)
-        current = self._snmp.get(egress_oid).as_octets()
-        if not port_list_test(current, self._bridge_port):
-            raise BackhaulError(
-                BackhaulReasonCode.ILLEGAL_STATE,
-                "bridge port %d not in VLAN %d's static egress PortList "
-                "(already unbound?)" % (self._bridge_port, vid),
-            )
-        updated = port_list_clear(current, self._bridge_port)
-        self._snmp.set(egress_oid, SnmpValue.octet_string(updated))
-        verify = self._snmp.get(egress_oid).as_octets()
-        if port_list_test(verify, self._bridge_port):
-            raise BackhaulError(
-                BackhaulReasonCode.BACKHAUL_UNAVAILABLE,
-                "bridge port %d still in VLAN %d's static egress PortList "
-                "after the clearing SET (the unbind did not take)"
-                % (self._bridge_port, vid),
+                "bearer VLAN %d still present (rowStatus=%d) after "
+                "destroy -- the segmentation did not release cleanly"
+                % (vid, status),
             )
 
     def observe(self, link: ElementLink) -> ElementObservation:
@@ -623,25 +737,63 @@ class SnmpEthernetElementClient(BackhaulElementClient):
             self._io.open()  # fails CLOSED on EPERM / missing interface
         return self._io
 
+    def _read_port_speed_bps(self) -> int:
+        """Read the port's REAL capacity from the element (IF-MIB):
+        ``ifSpeed`` in bits per second; when ``ifSpeed`` reports the
+        RFC 2863 greater-than-max Gauge32 sentinel, ``ifHighSpeed``
+        (millions of bits per second) carries the number.  A port
+        whose speed cannot be read fails CLOSED -- the family-native
+        capacity ledger must never be bounded by a fabricated
+        number."""
+        try:
+            speed = self._snmp.get(
+                "%s.%d" % (OID_IF_SPEED, self._if_index)
+            ).as_int()
+        except BackhaulError:
+            raise BackhaulError(
+                BackhaulReasonCode.BACKHAUL_UNAVAILABLE,
+                "switch port ifIndex %d has no ifSpeed object on the "
+                "element (IF-MIB; the real port capacity cannot be "
+                "established -- the family-native capacity ledger "
+                "refuses to be bounded by a fabricated number)"
+                % self._if_index,
+            ) from None
+        if speed == IF_SPEED_GREATER_THAN_MAX:
+            try:
+                high = self._snmp.get(
+                    "%s.%d" % (OID_IF_HIGH_SPEED, self._if_index)
+                ).as_int()
+            except BackhaulError:
+                raise BackhaulError(
+                    BackhaulReasonCode.BACKHAUL_UNAVAILABLE,
+                    "switch port ifIndex %d reports the ifSpeed "
+                    "greater-than-max sentinel but has no ifHighSpeed "
+                    "object (IF-MIB; the real port capacity cannot be "
+                    "established)" % self._if_index,
+                ) from None
+            return high * 1_000_000
+        return speed
+
     def _derive_vlan_id(self, nonce: str) -> int:
-        """Content-derive the VLAN identifier from the caller's
-        nonce: 2..4094 (deterministic; collision probes the next
-        candidates).  No randomness, no environment reads."""
+        """Content-derive the BEARER SEGMENTATION VLAN identifier from
+        the caller's nonce: 2..4094 (deterministic; collision probes
+        the next candidates against the LIVE bearer VLANs).  No
+        randomness, no environment reads."""
         if not isinstance(nonce, str) or not nonce:
             raise BackhaulError(
                 BackhaulReasonCode.INVALID_INPUT,
-                "allocation nonce must be a non-empty string",
+                "bearer nonce must be a non-empty string",
             )
         digest = hashlib.sha256(nonce.encode("utf-8")).digest()
         candidate = 2 + int.from_bytes(digest[:4], "big") % 4093
         for _ in range(4093):
-            if candidate not in self._allocations.values():
+            if candidate not in self._bearer_vids.values():
                 return validate_vlan_id(candidate)
             candidate = 2 + (candidate - 1) % 4093
         raise BackhaulError(
             BackhaulReasonCode.CAPACITY_EXHAUSTED,
             "no free VLAN identifier on the element (all 2..4094 in "
-            "use by this client)",
+            "use by this client's live bearers)",
         )
 
 
@@ -667,10 +819,24 @@ class JsonConformanceElementClient(BackhaulElementClient):
     IEEE 802.1Q bridging) and NEVER claimed as production
     interoperability (LOCK-024; the B1 gate forbids it as an
     acceptance peer).
+
+    CAPACITY: this client declares ``supports_element_side_capacity
+    = True`` -- the conformance protocol models capacity allocation
+    as a FIRST-CLASS element operation of its own protocol (the
+    ALLOCATE/RELEASE exchanges hold the reserved quantity in the
+    peer's own state), which is honest FOR CONFORMANCE.  This
+    declaration is exactly what a REAL element would need to earn by
+    exposing an actual bandwidth-reservation mechanism (the PR #23
+    second-review Blocker 2 rule); the conformance peer is not a
+    real element and never closes the B1 gate.
     """
 
     __slots__ = ("_control_endpoint", "_data_peer", "_timeout_s",
                  "_wire_sockets", "label")
+
+    #: The conformance protocol models capacity natively (see the
+    #: class docstring; honest FOR CONFORMANCE, never production).
+    supports_element_side_capacity = True
 
     def __init__(
         self,
@@ -813,8 +979,12 @@ class JsonConformanceElementClient(BackhaulElementClient):
         )
 
     def bind_bearer(
-        self, link: ElementLink, *, endpoint_label: str
+        self, link: ElementLink, *, endpoint_label: str, nonce: str,
     ) -> ElementBearer:
+        # ``nonce`` (the adapter's opaque bearer ref) is IGNORED here:
+        # the conformance element mints its OWN bearer identity (the
+        # BIND exchange's elementBearerId) -- only the deterministic-
+        # segmentation targets (the SNMP client's VLAN id) consume it.
         if not link.key:
             return ElementBearer(key="", far_mac=link.far_mac)
         response = self._control_exchange(

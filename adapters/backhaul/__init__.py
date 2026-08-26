@@ -163,10 +163,15 @@ the REAL SNMPv2c client, and the REAL Ethernet frame writer):
                  IEEE 802.3-2018 Ethernet-II headers, IEEE 802.1Q-2022
                  VLAN tags (TPID 0x8100), content-derived locally
                  administered MAC-shaped addresses, the
-                 AF_PACKET/SOCK_RAW frame writer (the actual L2
-                 egress toward the switch; CAP_NET_RAW-gated, fails
-                 CLOSED), and the packet-socket facade for the app
-                 session's read side
+                 AF_PACKET/SOCK_RAW frame writer BOUND TO THE TAGGED
+                 WIRE FORMAT (protocol = the outer TPID 0x8100 -- the
+                 kernel demuxes on the frame's outermost
+                 EtherType-position field; 0x88B5 appears only INSIDE
+                 the tag as the inner EtherType; PR #23 second-review
+                 Blocker 1) writing 802.1Q-tagged frames (the actual
+                 L2 egress toward the switch; CAP_NET_RAW-gated,
+                 fails CLOSED), and the packet-socket facade for the
+                 app session's read side
 - snmp.py        The REAL SNMPv2c management-plane client in pure
                  stdlib: the ASN.1/BER transfer syntax (RFC 2578),
                  RFC 3416/3417 community framing over UDP, request-id
@@ -177,13 +182,21 @@ the REAL SNMPv2c client, and the REAL Ethernet frame writer):
 - element.py     The element-client seam -- ONE concrete real
                  production target (PR #23 Blocker 1):
                  BackhaulElementClient (one method = one external
-                 operation) + SnmpEthernetElementClient (the real
-                 SNMP-managed IEEE 802.1Q Ethernet switch: link
-                 lifecycle on ifAdminStatus/ifOperStatus, capacity
-                 allocation on dot1qVlanStaticTable, bearer binding
-                 on the VLAN egress PortList, observation on the
-                 IF-MIB counters, data plane on the 802.1Q frame
-                 writer) + JsonConformanceElementClient (the
+                 operation; supports_element_side_capacity declares
+                 whether the element's REAL interface reserves
+                 bandwidth -- honest default NO) +
+                 SnmpEthernetElementClient (the real SNMP-managed
+                 IEEE 802.1Q Ethernet switch: link lifecycle on
+                 ifAdminStatus/ifOperStatus + the real ifSpeed/
+                 ifHighSpeed port-capacity read, bearer binding as
+                 the bearer's OWN 802.1Q VLAN segmentation
+                 (dot1qVlanStaticTable row + egress PortList,
+                 created at bind and destroyed at unbind),
+                 observation on the IF-MIB counters, data plane on
+                 the 802.1Q frame writer; capacity allocation
+                 FAMILY-NATIVE -- a VLAN row is L2 segmentation,
+                 never a bps reservation (PR #23 second-review
+                 Blocker 2)) + JsonConformanceElementClient (the
                  conformance protocol client -- the JSON/TCP peer
                  above, never the production interop protocol)
 - managed.py     ManagedBackhaulAdapter -- the TRANSACTIONAL
@@ -257,6 +270,7 @@ from .errors import (
 )
 from .ethernet import (
     ETHERTYPE_EXPERIMENTAL,
+    PACKET_SOCKET_PROTOCOL,
     TPID_8021Q,
     check_packet_socket_capability,
     derive_local_mac,
@@ -304,7 +318,9 @@ from .snmp import (
     OID_DOT1Q_VLAN_STATIC_EGRESS_PORTS,
     OID_DOT1Q_VLAN_STATIC_ROW_STATUS,
     OID_IF_ADMIN_STATUS,
+    OID_IF_HIGH_SPEED,
     OID_IF_OPER_STATUS,
+    OID_IF_SPEED,
     OID_SYS_UPTIME,
     SnmpV2cClient,
     SnmpValue,
@@ -370,6 +386,8 @@ __all__ = [
     "port_list_test",
     "OID_IF_ADMIN_STATUS",
     "OID_IF_OPER_STATUS",
+    "OID_IF_SPEED",
+    "OID_IF_HIGH_SPEED",
     "OID_SYS_UPTIME",
     "OID_DOT1Q_VLAN_STATIC_EGRESS_PORTS",
     "OID_DOT1Q_VLAN_STATIC_ROW_STATUS",
@@ -419,6 +437,7 @@ __all__ = [
     # IEEE 802.1Q-2022)
     "ETHERTYPE_EXPERIMENTAL",
     "TPID_8021Q",
+    "PACKET_SOCKET_PROTOCOL",
     "encode_ethernet_ii_frame",
     "parse_ethernet_ii_header",
     "encode_8021q_frame",

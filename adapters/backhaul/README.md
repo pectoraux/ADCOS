@@ -157,9 +157,34 @@ real wire write succeeds — and `close`), with explicit compensating
 rollback (LINK_DOWN / RELEASE / UNBIND) where an external operation
 could succeed before the local commit. The element clients apply the
 same discipline INTERNALLY (e.g. an SNMP link_up that fails its
-ifOperStatus confirmation restores the prior ifAdminStatus; a VLAN
-createAndGo that does not reach active destroys the half-created
+ifOperStatus confirmation restores the prior ifAdminStatus; a bearer
+VLAN createAndGo that does not reach active destroys the half-created
 row). Pinned by selftest cases 40–41.
+
+## Capacity semantics (PR #23 second review, Blocker 2): a VLAN is
+## L2 segmentation, never bandwidth
+
+The SNMP-managed IEEE 802.1Q switch exposes NO standard
+bandwidth-reservation/rate-policing MIB object on its real
+interface, so the production client declares
+`supports_element_side_capacity = False` and the seam's honest
+default `allocate_capacity`/`release_capacity` RAISE: WORK-008 bps
+capacity allocation on this target is **FAMILY-NATIVE** — the
+reference engine's ledger admission — bounded at provision time by
+the element-REPORTED real port speed (IF-MIB `ifSpeed`, with
+`ifHighSpeed` carrying the number when `ifSpeed` reports its RFC 2863
+greater-than-max sentinel; a declared capacity above the reported
+port speed fails CLOSED with the prior administrative state
+restored). `allocate`/`release` therefore emit ZERO SNMP PDUs on this
+target. The `dot1qVlanStaticTable` row the client creates at
+`bind_bearer` (deterministically derived from the adapter's bearer
+nonce, destroyed at `unbind_bearer`) is exactly what IEEE 802.1Q /
+RFC 4363 define it to be: the bearer's **Layer-2 segmentation** --
+never presented as, and never substituted for, a bps reservation.
+Only an element whose real interface genuinely reserves bandwidth
+may declare `supports_element_side_capacity = True` (the in-repo
+conformance client does — its own protocol models capacity natively,
+which is honest FOR CONFORMANCE). Pinned by selftest cases 43/47.
 
 ## Resource model reuse (WORK-008) and IP delegation (WORK-018)
 
@@ -186,22 +211,35 @@ Ethernet switch, driven through its ACTUAL external interfaces —
   the ASN.1/BER transfer syntax (RFC 2578), the RFC 3416/3417 PDU
   framing over UDP, request-id correlation, error-status decoding,
   and the standard MIB objects every managed switch exposes — IF-MIB
-  (RFC 2863) `ifAdminStatus`/`ifOperStatus` + the interface counters,
-  Q-BRIDGE-MIB (RFC 4363) `dot1qVlanStaticRowStatus` /
+  (RFC 2863) `ifAdminStatus`/`ifOperStatus`/`ifSpeed`/`ifHighSpeed` +
+  the interface counters, Q-BRIDGE-MIB (RFC 4363)
+  `dot1qVlanStaticRowStatus` /
   `dot1qVlanStaticEgressPorts` (the RFC 2674 PortList bitmap), and
   SNMPv2-MIB `sysUpTime` (RFC 3418) for reachability probing;
 - `adapters/backhaul/ethernet.py` — the REAL Ethernet data plane:
   IEEE 802.1Q-2022-tagged IEEE 802.3-2018 Ethernet-II frames written
   onto a real interface through an `AF_PACKET`/`SOCK_RAW` socket
-  (requires `CAP_NET_RAW`; the absence fails CLOSED with a typed
-  error), plus the frame-shape helpers as cited DATA;
+  whose PROTOCOL is the tagged wire path's OUTER TPID `0x8100`
+  (packet(7): the kernel demultiplexes received frames on the frame's
+  outermost EtherType-position field; the family's experimental
+  `0x88B5` appears only INSIDE the 4-byte tag as the inner EtherType
+  — the socket protocol, the transmit `sll_protocol`, and the frame
+  encoder all agree on the tagged shape; PR #23 second review,
+  Blocker 1, pinned by selftest case 46) (requires `CAP_NET_RAW`;
+  the absence fails CLOSED with a typed error), plus the frame-shape
+  helpers as cited DATA;
 - `adapters/backhaul/element.py` — the element-client seam:
-  `BackhaulElementClient` (one method = one external operation) with
+  `BackhaulElementClient` (one method = one external operation;
+  `supports_element_side_capacity` declares whether the element's
+  real interface reserves bandwidth — honest default NO) with
   `SnmpEthernetElementClient` (the production client: the link
-  lifecycle maps to ifAdminStatus/ifOperStatus, the capacity
-  allocation to a dot1qVlanStaticTable row, the bearer binding to the
-  VLAN's egress PortList, the observation to the IF-MIB counters, and
-  the data plane to the 802.1Q frame writer) and
+  lifecycle maps to ifAdminStatus/ifOperStatus plus the real
+  ifSpeed/ifHighSpeed port-capacity read, the bearer binding to the
+  bearer's OWN 802.1Q VLAN segmentation (dot1qVlanStaticTable row +
+  egress PortList, created at bind and destroyed at unbind), the
+  observation to the IF-MIB counters, and the data plane to the
+  802.1Q frame writer; capacity allocation FAMILY-NATIVE — see the
+  capacity-semantics section) and
   `JsonConformanceElementClient` (the conformance client below);
 - `adapters/backhaul/managed.py` — the transactional
   `ManagedBackhaulAdapter` over any element client.
@@ -274,7 +312,7 @@ authorized by an ACR.
 
 ## Verification
 
-`python3 tools/backhaul_selftest.py` — 45 cases covering the brief's
+`python3 tools/backhaul_selftest.py` — 47 cases covering the brief's
 twelve verification bullets AND the PR #23 architect-review
 remediations: the frozen 11-op contract surface, least-authority
 context, happy paths across ALL FOUR technology profiles (data, not
@@ -304,4 +342,12 @@ a real-protocol responder over real UDP (case 42), the production
 SNMP element-client lifecycle with internal compensation (case 43),
 the REAL WORK-012 session authority in the gate (case 44), and the
 preflight hard/diagnostic separation + the DISTINCT
-DATA_PEER_UNREACHABLE status (case 45).
+DATA_PEER_UNREACHABLE status (case 45) — plus the PR #23
+SECOND-review regressions: the production wire-path protocol
+consistency (the AF_PACKET socket created/addressed with the OUTER
+TPID 0x8100 matching the tagged frame bytes; a tagged frame through
+the exact `PacketFrameIo`/`PacketDataSocket` path, case 46) and the
+corrected capacity semantics (allocate/release emit ZERO SNMP PDUs —
+the VLAN row appears only at bind as the bearer's L2 segmentation;
+the family ledger admission still enforces the bps bound; provision
+bounded by the element-reported real ifSpeed, case 47).
