@@ -175,3 +175,17 @@ source address and that the application received the exact return bytes.
 The environment did not permit packet capture, so an independent `[UPF]`
 interface capture is still outstanding; the run does not claim captured
 GTP-U/N3 proof.
+
+The PASS record includes the required provenance fields:
+
+```text
+[PDU] external PDU session ID: 1; Open5GS pdu_state: active
+[UE]  address: 10.45.0.4
+[ROUTE] selected interface: uesimtun0
+[DN]   endpoint: 192.168.100.20:5556; source observed: 10.45.0.4
+[IP]   payload length: 36; payload equality: true
+[IP]   payload SHA-256: emitted by InteropOutcome.payload_sha256
+```
+
+The gate now emits these fields structurally in `InteropOutcome`, so a PASS
+cannot be mistaken for a generic TCP echo result.

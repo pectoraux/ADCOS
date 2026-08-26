@@ -73,6 +73,7 @@ run).
 from __future__ import annotations
 
 import os
+import hashlib
 import socket as _socket
 from dataclasses import dataclass
 from typing import Optional, Tuple
@@ -206,6 +207,11 @@ class InteropOutcome:
     data_peer: Optional[Tuple[str, int]] = None
     payload_len: int = 0
     echo_len: int = 0
+    ue_address: Optional[str] = None
+    selected_interface: Optional[str] = None
+    pdu_session_id: Optional[str] = None
+    payload_sha256: Optional[str] = None
+    payload_equal: bool = False
 
 
 # --------------------------------------------------------------------------
@@ -471,6 +477,11 @@ def run_open5gs_interop(config: Optional[InteropConfig] = None) -> InteropOutcom
                 data_peer=cfg.data_peer,
                 payload_len=len(cfg.payload),
                 echo_len=len(echo),
+                ue_address=cfg.ue_source_address,
+                selected_interface="uesimtun0" if cfg.ue_source_address else None,
+                pdu_session_id=cfg.external_pdu_session_id,
+                payload_sha256=hashlib.sha256(cfg.payload).hexdigest(),
+                payload_equal=(echo == cfg.payload),
             )
 
         peer = getattr(app, "_peer_endpoint", None)
