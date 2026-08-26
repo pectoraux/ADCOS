@@ -477,11 +477,9 @@ def run_open5gs_interop(config: Optional[InteropConfig] = None) -> InteropOutcom
         return InteropOutcome(
             status="PASSED",
             detail=(
-                "real Open5GS interop PASSED: bytes traversed "
-                "AppSession->FiveGCoreManager->SandboxedFiveGCore->"
-                "Open5GSAdapter->real Open5GS SBI (HTTP POST to "
-                "/nudm-uecm + /nausf-auth/5g-aka + /nsmf-pdusession) "
-                "+ real user-plane path (data peer %r)->AppSession.recv; "
+                "real Open5GS interop PASSED: Open5GS /pdu-info observation -> "
+                "adapter-owned evidence -> ADCOS adoption -> AppSession -> "
+                "real user-plane endpoint (data peer %r) -> AppSession.recv; "
                 "payload byte-identical (%d bytes)"
             ) % (peer, len(cfg.payload)),
             sbi_url=cfg.sbi_url,

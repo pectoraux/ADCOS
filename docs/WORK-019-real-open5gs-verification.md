@@ -156,3 +156,22 @@ and the DN endpoint received no connection. The gate returned
 TCP destination. Host packet capture was unavailable without capture
 capability (`tcpdump: Operation not permitted`), so no `[UPF]` or `[IP]`
 payload proof is claimed.
+
+## N6/DN topology correction run
+
+The DN endpoint was placed on the host address used by the Open5GS
+host-network deployment (`192.168.100.20:5556`), rather than an unrelated
+Docker bridge. The policy route for traffic from `10.45.0.4` selected
+`uesimtun0`. The live observe -> adopt gate returned `PASSED` with a
+byte-identical 36-byte payload, and the DN echo server independently logged:
+
+```text
+accepted=('10.45.0.4', <ephemeral-port>)
+payload=b'adcospktpath-real-open5gs-interop-v1'
+```
+
+This proves the DN received the payload with the externally established UE
+source address and that the application received the exact return bytes.
+The environment did not permit packet capture, so an independent `[UPF]`
+interface capture is still outstanding; the run does not claim captured
+GTP-U/N3 proof.
