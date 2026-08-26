@@ -81,3 +81,6 @@ jobs:
 
       - name: Run Wi-Fi/non-3GPP access adapter tests
         run: python3 tools/wifi_selftest.py
+
+      - name: Run backhaul adapter family tests
+        run: python3 tools/backhaul_selftest.py
