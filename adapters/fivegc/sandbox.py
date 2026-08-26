@@ -386,15 +386,27 @@ class SandboxedFiveGCore:
 
     def attach_external_pdu_session(
         self, now: str, *, session_id: str, supi: str, snssai: Any,
-        dnn: Any, evidence: ExternalPduSessionEvidence,
+        dnn: Any, external_pdu_session_id: str,
     ) -> FiveGCoreOpResult:
         return self._mediate(
             now, "attach_external_pdu_session",
             lambda ctx: self._implementation.attach_external_pdu_session(
                 ctx, session_id=session_id, supi=supi, snssai=snssai,
-                dnn=dnn, evidence=evidence,
+                dnn=dnn, external_pdu_session_id=external_pdu_session_id,
             ),
             validate=self._validate_pdu_session_binding,
+        )
+
+    def observe_external_pdu_session(
+        self, now: str, *, external_pdu_session_id: str
+    ) -> FiveGCoreOpResult:
+        return self._mediate(
+            now, "observe_external_pdu_session",
+            lambda ctx: self._implementation.observe_external_pdu_session(
+                ctx, external_pdu_session_id=external_pdu_session_id,
+            ),
+            validate=lambda value: value if isinstance(value, ExternalPduSessionEvidence)
+            else _ContractViolation("observe_external_pdu_session must return ExternalPduSessionEvidence"),
         )
 
     def authenticate(self, now: str, *, pdu_session_ref: str) -> FiveGCoreOpResult:

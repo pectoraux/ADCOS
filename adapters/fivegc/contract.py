@@ -389,13 +389,16 @@ class FiveGCoreContract(abc.ABC):
         supi: str,
         snssai: Snssai,
         dnn: Dnn,
-        evidence: "ExternalPduSessionEvidence",
+        external_pdu_session_id: str,
     ) -> PduSessionBinding:
         """Adopt a PDU session established by an external 5GC."""
-        raise FiveGCoreError(
-            FiveGCoreReasonCode.NF_UNAVAILABLE,
-            "external PDU adoption is not supported",
-        )
+        raise FiveGCoreError(FiveGCoreReasonCode.NF_UNAVAILABLE, "external PDU adoption is not supported")
+
+    def observe_external_pdu_session(
+        self, context: FiveGCoreContext, *, external_pdu_session_id: str
+    ) -> ExternalPduSessionEvidence:
+        """Query the external 5GC and return adapter-produced PDU evidence."""
+        raise FiveGCoreError(FiveGCoreReasonCode.NF_UNAVAILABLE, "external PDU observation is not supported")
 
     @abc.abstractmethod
     def authenticate(
@@ -494,6 +497,7 @@ CONTRACT_OPERATIONS: Tuple[str, ...] = (
     "provision_subscriber",
     "bind_session",
     "attach_external_pdu_session",
+    "observe_external_pdu_session",
     "authenticate",
     "establish_pdu_session",
     "egress_pdu",

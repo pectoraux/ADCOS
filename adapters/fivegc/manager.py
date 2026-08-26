@@ -207,12 +207,12 @@ class FiveGCoreManager:
 
     def attach_external_pdu_session(
         self, *, now: str, session_id: str, supi: str, snssai: Any,
-        dnn: Any, evidence: ExternalPduSessionEvidence,
+        dnn: Any, external_pdu_session_id: str,
     ) -> FiveGCoreOpResult:
         sandbox = self._require_default()
         result = sandbox.attach_external_pdu_session(
             now, session_id=session_id, supi=supi, snssai=snssai,
-            dnn=dnn, evidence=evidence,
+            dnn=dnn, external_pdu_session_id=external_pdu_session_id,
         )
         if result.ok:
             binding = result.value
@@ -224,6 +224,13 @@ class FiveGCoreManager:
                 pdu_session_ref=binding.pdu_session_ref,
             )
         return result
+
+    def observe_external_pdu_session(
+        self, *, now: str, external_pdu_session_id: str
+    ) -> FiveGCoreOpResult:
+        return self._require_default().observe_external_pdu_session(
+            now, external_pdu_session_id=external_pdu_session_id,
+        )
 
     def authenticate(self, *, now: str, pdu_session_ref: str) -> FiveGCoreOpResult:
         record = self._require_binding(pdu_session_ref)

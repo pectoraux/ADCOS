@@ -308,17 +308,23 @@ class PduSessionBinding:
 
 @dataclass(frozen=True)
 class ExternalPduSessionEvidence:
-    """Secret-free evidence for a PDU session established by an external 5GC."""
+    """Adapter-observed, secret-free state from an external 5GC."""
 
     external_pdu_session_id: str
+    supi: Supi
+    dnn: Dnn
+    snssai: Snssai
     ue_ipv4: str
-    data_endpoint: Tuple[str, int]
+    state: str
 
     def to_dict(self) -> dict:
         return {
             "external_pdu_session_id": self.external_pdu_session_id,
+            "supi": self.supi.to_dict(),
+            "dnn": self.dnn.to_dict(),
+            "snssai": self.snssai.to_dict(),
             "ue_ipv4": self.ue_ipv4,
-            "data_endpoint": list(self.data_endpoint),
+            "state": self.state,
         }
 
 

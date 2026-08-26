@@ -74,7 +74,7 @@ from urllib.parse import urlparse
 from .contract import FiveGCoreContext
 from .engine import Reference5GCoreEngine
 from .errors import FiveGCoreError, FiveGCoreReasonCode
-from .model import NfEndpoint, PduSessionView
+from .model import Dnn, ExternalPduSessionEvidence, NfEndpoint, Snssai, Supi, PduSessionView
 
 __all__ = ["Open5GSAdapter"]
 
@@ -223,6 +223,36 @@ class Open5GSAdapter(Reference5GCoreEngine):
     # ------------------------------------------------------------------
     # Real data-plane override (the B3 byte-carrying path)
     # ------------------------------------------------------------------
+
+    def observe_external_pdu_session(
+        self, context: FiveGCoreContext, *, external_pdu_session_id: str
+    ) -> ExternalPduSessionEvidence:
+        """Observe authoritative PDU state through the configured Open5GS SBI."""
+        context.charge(self.STEP_CHARGES["bind_session"])
+        if not external_pdu_session_id:
+            raise FiveGCoreError(FiveGCoreReasonCode.INVALID_INPUT, "external PDU id is required")
+        response = self._http_post(
+            "/nsmf-pdusession/v1/sm-contexts/%s" % external_pdu_session_id,
+            {},
+            method="GET",
+        )
+        try:
+            return ExternalPduSessionEvidence(
+                external_pdu_session_id=external_pdu_session_id,
+                supi=Supi(value=response["supi"]),
+                dnn=Dnn(value=response["dnn"]),
+                snssai=Snssai(
+                    sst=response["snssai"]["sst"],
+                    sd=response["snssai"].get("sd"),
+                ),
+                ue_ipv4=response["ueIpv4"],
+                state=response["state"],
+            )
+        except (KeyError, TypeError, ValueError):
+            raise FiveGCoreError(
+                FiveGCoreReasonCode.NF_UNAVAILABLE,
+                "Open5GS returned incomplete external PDU state",
+            )
 
     def egress_pdu(self, context: FiveGCoreContext, *, pdu_session_ref: str, payload: bytes) -> bytes:
         # Defer to the reference engine for the contract-shape
