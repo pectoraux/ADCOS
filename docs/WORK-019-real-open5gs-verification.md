@@ -147,3 +147,12 @@ UE TUN -> N3 GTP-U -> UPF -> data-network path. A DN echo service reachable
 through the configured UPF route (and `OPEN5GS_DATA_PEER` only as the test
 application endpoint) is still required to capture byte-identical return
 payload evidence.
+
+An attempted independent DN endpoint was started at Docker address
+`172.17.0.3:5555`. The policy route correctly selected `uesimtun0` for
+traffic from `10.45.0.4` to that address, but the real ADCOS socket timed out
+and the DN endpoint received no connection. The gate returned
+`DATA_PEER_UNREACHABLE`; it did not infer UPF traversal from a configured
+TCP destination. Host packet capture was unavailable without capture
+capability (`tcpdump: Operation not permitted`), so no `[UPF]` or `[IP]`
+payload proof is claimed.
