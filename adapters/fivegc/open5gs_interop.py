@@ -135,6 +135,7 @@ class InteropConfig:
     dnn: str = "internet"
     credential_slot_name: str = "subscriber-credentials"
     session_id: str = "sha256:" + "1" * 64
+    external_pdu_session_id: str = "1"
     payload: bytes = DEFAULT_OPEN5GS_INTEROP_PAYLOAD
     instant: str = "2026-06-01T12:00:00Z"
     sbi_probe_timeout: float = 3.0
@@ -153,10 +154,12 @@ class InteropConfig:
                 except ValueError:
                     data_peer = None
         ue_source_address = os.environ.get("OPEN5GS_UE_ADDRESS", "").strip() or None
+        external_pdu_session_id = os.environ.get("OPEN5GS_PDU_SESSION_ID", "1").strip() or "1"
         return cls(
             sbi_url=sbi_url,
             data_peer=data_peer,
             ue_source_address=ue_source_address,
+            external_pdu_session_id=external_pdu_session_id,
         )
 
 
@@ -355,60 +358,38 @@ def run_open5gs_interop(config: Optional[InteropConfig] = None) -> InteropOutcom
     dnn = Dnn(value=cfg.dnn)
 
     try:
-        # Phase 3: real SBI -- provision_subscriber (POST /nudm-uecm).
-        r = mgr.provision_subscriber(
-            now=cfg.instant,
-            supi=cfg.supi,
-            credential_slot_name=cfg.credential_slot_name,
-            subscribed_snssai=snssai,
-            subscribed_dnn=dnn,
+        # Phase 3: observe the externally established PDU from Open5GS.
+        r = mgr.observe_external_pdu_session(
+            now=cfg.instant, external_pdu_session_id=cfg.external_pdu_session_id,
         )
         if not r.ok:
             return InteropOutcome(
                 status="SBI_FAILED",
-                detail="provision_subscriber (POST /nudm-uecm) failed: %s" % r.detail,
+                detail="observe_external_pdu_session (Open5GS SBI) failed: %s" % r.detail,
                 sbi_url=cfg.sbi_url,
                 data_peer=cfg.data_peer,
             )
 
-        # Phase 4: bind_session (no SBI; the binding is local state).
-        r = mgr.bind_session(
+        # Phase 4: adopt only the adapter-produced observation.
+        evidence = r.value
+        r = mgr.attach_external_pdu_session(
             now=cfg.instant,
             session_id=cfg.session_id,
             supi=cfg.supi,
             snssai=snssai,
             dnn=dnn,
+            evidence=evidence,
         )
         if not r.ok:
             return InteropOutcome(
                 status="SBI_FAILED",
-                detail="bind_session failed: %s" % r.detail,
+                detail="attach_external_pdu_session failed: %s" % r.detail,
                 sbi_url=cfg.sbi_url,
                 data_peer=cfg.data_peer,
             )
         pdu_ref = r.value.pdu_session_ref
 
-        # Phase 5: real SBI -- authenticate (POST /nausf-auth/5g-aka).
-        r = mgr.authenticate(now=cfg.instant, pdu_session_ref=pdu_ref)
-        if not r.ok:
-            return InteropOutcome(
-                status="SBI_FAILED",
-                detail="authenticate (POST /nausf-auth/5g-aka) failed: %s" % r.detail,
-                sbi_url=cfg.sbi_url,
-                data_peer=cfg.data_peer,
-            )
-
-        # Phase 6: real SBI -- establish_pdu_session (POST /nsmf-pdusession).
-        r = mgr.establish_pdu_session(now=cfg.instant, pdu_session_ref=pdu_ref)
-        if not r.ok:
-            return InteropOutcome(
-                status="SBI_FAILED",
-                detail="establish_pdu_session (POST /nsmf-pdusession) failed: %s" % r.detail,
-                sbi_url=cfg.sbi_url,
-                data_peer=cfg.data_peer,
-            )
-
-        # Phase 7: app_session -- the adapter attaches a real data
+        # Phase 5: app_session -- the adapter attaches a real data
         # socket IF the SMF returned a dataEndpoint OR a data_peer was
         # configured.
         r = mgr.app_session(now=cfg.instant, session_id=cfg.session_id)

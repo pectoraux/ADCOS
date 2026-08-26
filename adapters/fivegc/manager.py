@@ -93,6 +93,7 @@ class FiveGCoreManager:
         self._default_sandbox: Optional[SandboxedFiveGCore] = None
         self._bindings: Dict[str, _BindingRecord] = {}
         self._events: List[FiveGCEvent] = []
+        self._observations: Dict[str, ExternalPduSessionEvidence] = {}
         self._closed = False
         self._sequence = 0  # event sequence (deterministic)
 
@@ -207,12 +208,19 @@ class FiveGCoreManager:
 
     def attach_external_pdu_session(
         self, *, now: str, session_id: str, supi: str, snssai: Any,
-        dnn: Any, external_pdu_session_id: str,
+        dnn: Any, evidence: ExternalPduSessionEvidence,
     ) -> FiveGCoreOpResult:
+        if not isinstance(evidence, ExternalPduSessionEvidence):
+            raise FiveGCoreError(FiveGCoreReasonCode.INVALID_INPUT, "adapter observation is required")
+        observed = self._observations.get(evidence.external_pdu_session_id)
+        if observed is not evidence:
+            raise FiveGCoreError(FiveGCoreReasonCode.INVALID_INPUT, "external PDU evidence was not observed by this manager")
+        if observed.state.lower() not in ("active", "established"):
+            raise FiveGCoreError(FiveGCoreReasonCode.PDU_SESSION_UNKNOWN, "external PDU is not active")
         sandbox = self._require_default()
         result = sandbox.attach_external_pdu_session(
             now, session_id=session_id, supi=supi, snssai=snssai,
-            dnn=dnn, external_pdu_session_id=external_pdu_session_id,
+            dnn=dnn, evidence=evidence,
         )
         if result.ok:
             binding = result.value
@@ -228,9 +236,12 @@ class FiveGCoreManager:
     def observe_external_pdu_session(
         self, *, now: str, external_pdu_session_id: str
     ) -> FiveGCoreOpResult:
-        return self._require_default().observe_external_pdu_session(
+        result = self._require_default().observe_external_pdu_session(
             now, external_pdu_session_id=external_pdu_session_id,
         )
+        if result.ok:
+            self._observations[external_pdu_session_id] = result.value
+        return result
 
     def authenticate(self, *, now: str, pdu_session_ref: str) -> FiveGCoreOpResult:
         record = self._require_binding(pdu_session_ref)

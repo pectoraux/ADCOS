@@ -386,13 +386,13 @@ class SandboxedFiveGCore:
 
     def attach_external_pdu_session(
         self, now: str, *, session_id: str, supi: str, snssai: Any,
-        dnn: Any, external_pdu_session_id: str,
+        dnn: Any, evidence: ExternalPduSessionEvidence,
     ) -> FiveGCoreOpResult:
         return self._mediate(
             now, "attach_external_pdu_session",
             lambda ctx: self._implementation.attach_external_pdu_session(
                 ctx, session_id=session_id, supi=supi, snssai=snssai,
-                dnn=dnn, external_pdu_session_id=external_pdu_session_id,
+                dnn=dnn, evidence=evidence,
             ),
             validate=self._validate_pdu_session_binding,
         )

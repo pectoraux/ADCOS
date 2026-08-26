@@ -389,9 +389,9 @@ class FiveGCoreContract(abc.ABC):
         supi: str,
         snssai: Snssai,
         dnn: Dnn,
-        external_pdu_session_id: str,
+        evidence: ExternalPduSessionEvidence,
     ) -> PduSessionBinding:
-        """Adopt a PDU session established by an external 5GC."""
+        """Adopt adapter-observed state from an externally established PDU."""
         raise FiveGCoreError(FiveGCoreReasonCode.NF_UNAVAILABLE, "external PDU adoption is not supported")
 
     def observe_external_pdu_session(

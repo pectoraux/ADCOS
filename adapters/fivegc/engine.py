@@ -234,7 +234,7 @@ class Reference5GCoreEngine(FiveGCoreContract):
         supi: str,
         snssai: Snssai,
         dnn: Dnn,
-        external_pdu_session_id: str,
+        evidence: ExternalPduSessionEvidence,
     ) -> PduSessionBinding:
         context.charge(self.STEP_CHARGES["bind_session"])
         if not self._open:
@@ -247,6 +247,11 @@ class Reference5GCoreEngine(FiveGCoreContract):
             )
         self._sequence += 1
         supi_obj = Supi(value=supi)
+        if evidence.supi != supi_obj or evidence.dnn != dnn or evidence.snssai != snssai:
+            raise FiveGCoreError(FiveGCoreReasonCode.INVALID_INPUT, "external PDU evidence does not match request")
+        if evidence.state.lower() not in ("active", "established"):
+            raise FiveGCoreError(FiveGCoreReasonCode.PDU_SESSION_UNKNOWN, "external PDU is not active")
+        external_pdu_session_id = evidence.external_pdu_session_id
         pdu_session_id = PduSessionId(value=external_pdu_session_id)
         binding_id = derive_binding_id(session_id, pdu_session_id)
         pdu_session_ref = derive_pdu_session_ref(binding_id, self._sequence)
@@ -264,7 +269,7 @@ class Reference5GCoreEngine(FiveGCoreContract):
             ue_ipv6="",
             qos_flows=(QosFlowSpec(five_qi=Qfi(value=9), arp_priority=0),),
             smf_instance_id="external:%s" % external_pdu_session_id,
-            data_endpoint=None,
+            data_endpoint=getattr(self, "_data_peer", None),
         )
         self._bindings[pdu_session_ref] = entry
         return binding
