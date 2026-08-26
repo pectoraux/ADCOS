@@ -91,3 +91,36 @@ can traverse the UE TUN/UPF path rather than using an unbound host source.
 This does not claim B1: the current contract still has no operation for
 attaching an already-established external PDU session, and no end-to-end
 ADCOS payload evidence was observed in this run.
+
+## External observation acceptance run
+
+The observe-then-adopt gate was run against the already-running stack with:
+
+```text
+OPEN5GS_INTEROP=1
+OPEN5GS_PEER_KIND=real_open5gs
+OPEN5GS_SBI_URL=http://127.0.0.4:7777
+OPEN5GS_PDU_SESSION_ID=1
+```
+
+Independent fixture evidence was present:
+
+- UERANSIM completed real 5G-AKA registration.
+- Open5GS logged `Number of UPF-Sessions is now 1`.
+- UERANSIM established PDU session PSI 1 and brought up
+  `uesimtun0` at `10.45.0.4`.
+
+The adapter observation request reached the real Open5GS SMF over HTTP/2, but
+Open5GS rejected `GET /nsmf-pdusession/v1/sm-contexts/1`:
+
+```text
+HTTP 400
+{"title":"Invalid HTTP method","detail":"GET","instance":"/sm-contexts/1"}
+```
+
+The Open5GS SMF implementation supports POST create/modify/release handling
+for this resource, not retrieval. Consequently the adapter did not produce
+observation evidence, adoption did not run, and no ADCOS payload was sent.
+This is an honest interoperability blocker: the external fixture is real, but
+the required authoritative observation surface is unavailable through the
+deployed Open5GS SBI.
