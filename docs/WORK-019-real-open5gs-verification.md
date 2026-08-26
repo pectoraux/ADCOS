@@ -73,3 +73,21 @@ operation shape. The deterministic conformance peer remains on HTTP/1.1.
 The live run now reaches Open5GS over HTTP/2 but still returns an SBI failure;
 subscriber database seeding and the complete UERANSIM-driven lifecycle remain
 required before B1 can pass.
+
+## Architect correction-cycle baseline
+
+The external Open5GS/UERANSIM baseline was then established independently:
+
+- A disposable subscriber was seeded in the external Open5GS MongoDB store.
+- UERANSIM gNB completed NG setup over SCTP to the Open5GS AMF.
+- UERANSIM UE completed real 5G-AKA registration.
+- PDU session establishment succeeded with PSI 1.
+- UERANSIM created `uesimtun0` with UE address `10.45.0.4`.
+
+The ADCOS adapter was extended with an explicit `ue_source_address` fixture
+option. When configured, its data socket binds to the externally established
+UE address before connecting to the configured data-network peer, so routing
+can traverse the UE TUN/UPF path rather than using an unbound host source.
+This does not claim B1: the current contract still has no operation for
+attaching an already-established external PDU session, and no end-to-end
+ADCOS payload evidence was observed in this run.

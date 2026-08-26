@@ -97,10 +97,12 @@ class Open5GSAdapter(Reference5GCoreEngine):
         nf_endpoint: NfEndpoint,
         data_peer: Optional[Tuple[str, int]] = None,
         real_open5gs: bool = False,
+        ue_source_address: Optional[str] = None,
     ) -> None:
         super().__init__()
         self._nf_endpoint = nf_endpoint
         self._real_open5gs = real_open5gs
+        self._ue_source_address = ue_source_address
         # Optional override for the user-plane data peer (host, port) --
         # the DN echo host the real Open5GS UPF routes to.  When None
         # (the conformance case), the adapter uses the dataEndpoint the
@@ -261,6 +263,14 @@ class Open5GSAdapter(Reference5GCoreEngine):
         # real 5G Core data peer.
         sock = _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM)
         sock.settimeout(10)
+        if self._ue_source_address is not None:
+            try:
+                sock.bind((self._ue_source_address, 0))
+            except OSError as exc:
+                raise FiveGCoreError(
+                    FiveGCoreReasonCode.FIVEGC_FAILURE,
+                    "UE user-plane source bind failed: %s" % exc,
+                )
         self._real_data_sockets[entry.binding.pdu_session_ref] = sock
         app_session._bind_real_socket(sock, (host, port))
         return app_session

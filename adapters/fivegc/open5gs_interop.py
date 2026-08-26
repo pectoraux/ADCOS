@@ -128,6 +128,7 @@ class InteropConfig:
 
     sbi_url: str = DEFAULT_OPEN5GS_SBI_URL
     data_peer: Optional[Tuple[str, int]] = None
+    ue_source_address: Optional[str] = None
     supi: str = "imsi-001010000000001"
     snssai_sst: int = 1
     snssai_sd: str = "010203"
@@ -151,7 +152,12 @@ class InteropConfig:
                     data_peer = (host, int(port_s))
                 except ValueError:
                     data_peer = None
-        return cls(sbi_url=sbi_url, data_peer=data_peer)
+        ue_source_address = os.environ.get("OPEN5GS_UE_ADDRESS", "").strip() or None
+        return cls(
+            sbi_url=sbi_url,
+            data_peer=data_peer,
+            ue_source_address=ue_source_address,
+        )
 
 
 @dataclass(frozen=True)
@@ -328,6 +334,7 @@ def run_open5gs_interop(config: Optional[InteropConfig] = None) -> InteropOutcom
         nf_endpoint=NfEndpoint(nf_type="SMF", url=cfg.sbi_url),
         data_peer=cfg.data_peer,
         real_open5gs=True,
+        ue_source_address=cfg.ue_source_address,
     )
     mgr = FiveGCoreManager(
         integration_id="adcos:fivegc:open5gs-interop",
