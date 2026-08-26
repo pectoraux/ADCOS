@@ -51,7 +51,19 @@ frozen WORK-022 brief's twelve verification bullets:
   unknown/non-bindable sessions (case 44); and the capability
   preflight separates hard management-plane prerequisites from
   data-plane capability and never-blocking diagnostics, with the
-  DISTINCT DATA_PEER_UNREACHABLE gate status (case 45).
+  DISTINCT DATA_PEER_UNREACHABLE gate status (case 45);
+* the PR #23 second-review remediations (cases 46-47): the packet
+  socket carries the TAGGED wire path (outer TPID 0x8100 demux,
+  0x88B5 only inside the tag) and WORK-008 capacity is honest --
+  family-native ledger admission grounded in the element-reported
+  real ifSpeed, VLAN rows are the bearer's L2 segmentation and never
+  bps reservations;
+* the PR #23 third-review remediation (case 48): a zero/unknown
+  REAL port speed is UNAVAILABLE capacity grounding -- it fails
+  closed at the source (readable-zero ifSpeed / sentinel + zero
+  ifHighSpeed, before any SET) and at the adapter (defense in depth:
+  typed error, successful LINK_UP compensated, no local commit,
+  zero speed can never satisfy a positive declared bps capacity).
 """
 
 from __future__ import annotations
@@ -858,6 +870,33 @@ class _CommitFailureAdapter(ManagedBackhaulAdapter):
                 "injected local commit failure",
             )
         super()._commit_bind_session(binding)
+
+
+class _ZeroPortSpeedElementClient(_RecordingElementClient):
+    """An element-client double that DECLARES real port-speed
+    reporting but delivers a ZERO/unknown speed on a SUCCESSFUL
+    external link_up (the PR #23 third-review fail-closed driver --
+    case_48).  Production clients fail closed at the SOURCE
+    (``_read_port_speed_bps`` never returns zero), so this double
+    models the ADAPTER defense-in-depth leg: a hypothetical future
+    client bug delivering zero must still NEVER admit a declared bps
+    capacity.  ``real_port_speed_bps`` toggles the control leg."""
+
+    label = "zero-port-speed-element"
+
+    reports_real_port_speed = True
+
+    def __init__(self, real_port_speed_bps: int = 0) -> None:
+        super().__init__()
+        self.real_port_speed_bps = real_port_speed_bps
+
+    def link_up(self, *, name, profile, capacity_bps, endpoint_labels):
+        self._record("link_up", name)
+        return ElementLink(
+            key="element-link-zero",
+            far_mac=derive_local_mac("far-zero-speed"),
+            port_speed_bps=self.real_port_speed_bps,
+        )
 
 
 # ==========================================================================
@@ -3879,6 +3918,158 @@ def case_47_capacity_semantics_vlan_is_not_bandwidth() -> Result:
     return ok(name, "capacity semantics corrected: allocate/release emit ZERO SNMP PDUs (the VLAN row appears ONLY at bind as the bearer's L2 segmentation and dies at unbind); the WORK-008 ledger admission still enforces the bps bound with no element traffic; provision is bounded by the element-reported real ifSpeed (over-declaration fails closed, admin state restored)")
 
 
+def case_48_zero_unknown_port_speed_fail_closed() -> Result:
+    """PR #23 THIRD architect-review regression: a zero/unknown REAL
+    port speed is UNAVAILABLE capacity grounding -- it is not a bound
+    and can NEVER satisfy a positive declared bps capacity.
+
+    At the SOURCE the SNMP element client fails CLOSED on a
+    readable-but-zero ifSpeed (RFC 2863 Gauge32 zero = "no bandwidth
+    information available") and on the greater-than-max sentinel with
+    a zero/unknown ifHighSpeed -- BEFORE any SET, so the element is
+    never mutated.  At the ADAPTER (defense in depth, through the
+    FULL mediated path) a declared-real-speed element delivering
+    zero on a SUCCESSFUL external link_up fails provisioning with a
+    typed error, NO local link state commits, and the successful
+    external LINK_UP is COMPENSATED; even the minimum positive
+    declaration (1 bps) is refused; a control leg proves the same
+    stack provisions fine once a REAL positive speed is reported.
+    """
+    name = "case_48_zero_unknown_port_speed_fail_closed"
+    # (0) the honest declarations: the production SNMP target REPORTS
+    # a real port speed; the conformance client (no real port on the
+    # JSON peer) does NOT fake one.
+    if not SnmpEthernetElementClient.reports_real_port_speed:
+        return fail(name, "SNMP target must declare real port-speed reporting")
+    if JsonConformanceElementClient.reports_real_port_speed:
+        return fail(name, "conformance client must not fake a real port speed")
+
+    # ---- (1)/(2) the SOURCE legs: readable-but-UNKNOWN speed fails
+    # closed BEFORE any SET (no external mutation at all). --------
+    responder = _SnmpResponder(if_index=9)
+    try:
+        client = SnmpEthernetElementClient(
+            host="127.0.0.1", port=responder.endpoint[1],
+            community="public", if_index=9, bridge_port=6,
+            egress_if="lo",  # unused on the management-plane legs
+            far_mac=derive_local_mac("far-zero-speed-source"),
+            timeout_s=2.0,
+        )
+        # (1) plain zero ifSpeed: RFC 2863 "no bandwidth information".
+        responder.if_speed = 0
+        responder.requests.clear()
+        try:
+            client.link_up(
+                name="zero-speed", profile=BackhaulProfile.ETHERNET,
+                capacity_bps=1_000_000, endpoint_labels=("port-a",),
+            )
+            return fail(name, "zero ifSpeed link_up accepted")
+        except BackhaulError as exc:
+            if exc.reason != BackhaulReasonCode.BACKHAUL_UNAVAILABLE:
+                return fail(name, "zero ifSpeed wrong reason: %s" % exc.reason)
+        if responder.admin_status != 2:
+            return fail(name, "zero ifSpeed mutated the admin state")
+        if any(tag == 0xA3 for tag, _oid in responder.requests):
+            return fail(name, "zero ifSpeed path emitted a SET PDU")
+        # (2) the greater-than-max sentinel with a ZERO ifHighSpeed:
+        # the Mbps object carries no information either.
+        responder.requests.clear()
+        responder.if_speed = 4294967295  # the RFC 2863 sentinel
+        responder.if_high_speed = 0  # unknown in millions-of-bps
+        try:
+            client.link_up(
+                name="zero-high-speed", profile=BackhaulProfile.ETHERNET,
+                capacity_bps=1_000_000, endpoint_labels=("port-a",),
+            )
+            return fail(name, "sentinel + zero ifHighSpeed link_up accepted")
+        except BackhaulError as exc:
+            if exc.reason != BackhaulReasonCode.BACKHAUL_UNAVAILABLE:
+                return fail(name, "sentinel zero wrong reason: %s" % exc.reason)
+        if responder.admin_status != 2:
+            return fail(name, "sentinel zero mutated the admin state")
+        if any(tag == 0xA3 for tag, _oid in responder.requests):
+            return fail(name, "sentinel zero path emitted a SET PDU")
+    finally:
+        responder.close()
+
+    # ---- (3) the ADAPTER defense-in-depth leg (the FULL mediated
+    # path): a declared-real-speed element delivering ZERO on a
+    # SUCCESSFUL external link_up fails CLOSED -- typed error, the
+    # successful LINK_UP compensated, NO local commit. ------------
+    element = _ZeroPortSpeedElementClient(real_port_speed_bps=0)
+    adapter = ManagedBackhaulAdapter(element=element)
+    mgr = _new_manager(adapter)
+    before = mgr.to_canonical_bytes()
+    refused = mgr.provision_link(
+        now=_NOW,
+        descriptor=_descriptor(name="zero-speed-link"),
+        credential_slot_name=_CRED_SLOT,
+    )
+    if refused.ok:
+        return fail(name, "zero-speed provision accepted")
+    if "backhaul-unavailable" not in refused.detail:
+        return fail(name, "zero-speed provision wrong detail: %s" % refused.detail[:140])
+    if [c[0] for c in element.calls] != ["link_up", "link_down"]:
+        return fail(
+            name, "zero-speed provision did not compensate LINK_UP: %s"
+            % [c[0] for c in element.calls],
+        )
+    if mgr.to_canonical_bytes() != before:
+        return fail(name, "zero-speed provision mutated the manager snapshot")
+    if adapter._links or adapter._element_links:
+        return fail(name, "zero-speed provision committed local link state")
+    if adapter._sequence != 0:
+        return fail(name, "zero-speed provision mutated the engine sequence")
+
+    # (4) zero speed can NEVER satisfy a positive capacity request:
+    # even the MINIMUM positive declaration (1 bps) fails closed.
+    element_tiny = _ZeroPortSpeedElementClient(real_port_speed_bps=0)
+    mgr_tiny = _new_manager(ManagedBackhaulAdapter(element=element_tiny))
+    tiny = mgr_tiny.provision_link(
+        now=_NOW,
+        descriptor=_descriptor(name="zero-speed-tiny", capacity_bps=1),
+        credential_slot_name=_CRED_SLOT,
+    )
+    if tiny.ok:
+        return fail(name, "1 bps declaration satisfied by a zero-speed port")
+    if "backhaul-unavailable" not in tiny.detail:
+        return fail(name, "1 bps refusal wrong detail: %s" % tiny.detail[:140])
+    if [c[0] for c in element_tiny.calls] != ["link_up", "link_down"]:
+        return fail(name, "1 bps refusal did not compensate LINK_UP")
+
+    # (5) the CONTROL: the SAME stack with a REAL positive port speed
+    # provisions fine (the failures above are the zero speed, not the
+    # wiring), and over-declaration against that real speed STILL
+    # fails with capacity-exhausted + compensation.
+    element_ok = _ZeroPortSpeedElementClient(real_port_speed_bps=1_000_000_000)
+    mgr_ok = _new_manager(ManagedBackhaulAdapter(element=element_ok))
+    link_ref = _provision(
+        mgr_ok, name="real-speed-control", capacity_bps=1_000_000_000,
+    )
+    if not link_ref:
+        return fail(name, "control provision failed")
+    over = mgr_ok.provision_link(
+        now=_NOW,
+        descriptor=_descriptor(name="over-control", capacity_bps=2_000_000_000),
+        credential_slot_name=_CRED_SLOT,
+    )
+    if over.ok or "capacity-exhausted" not in over.detail:
+        return fail(name, "control over-declaration wrong: %s" % over.detail[:140])
+    ops = [c[0] for c in element_ok.calls]
+    if ops != ["link_up", "link_up", "link_down"]:
+        return fail(name, "control sequence wrong: %s" % ops)
+
+    return ok(
+        name,
+        "zero/unknown real port speed fails CLOSED: at the source "
+        "(readable-zero ifSpeed / sentinel+zero ifHighSpeed -> typed "
+        "BACKHAUL_UNAVAILABLE BEFORE any SET) and at the adapter "
+        "(defense in depth: typed error, successful LINK_UP "
+        "compensated, no local commit, 1 bps refused); the real-speed "
+        "control provisions and still bounds over-declaration",
+    )
+
+
 # ==========================================================================
 # Entry point
 # ==========================================================================
@@ -3935,6 +4126,8 @@ def main() -> int:
         # PR #23 SECOND architect-review remediation regressions.
         case_46_production_wire_path_protocol_consistency,
         case_47_capacity_semantics_vlan_is_not_bandwidth,
+        # PR #23 THIRD architect-review remediation regression.
+        case_48_zero_unknown_port_speed_fail_closed,
     ]
     results: List[Result] = []
     for case in cases:

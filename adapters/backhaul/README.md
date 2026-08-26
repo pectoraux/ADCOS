@@ -175,7 +175,16 @@ the element-REPORTED real port speed (IF-MIB `ifSpeed`, with
 `ifHighSpeed` carrying the number when `ifSpeed` reports its RFC 2863
 greater-than-max sentinel; a declared capacity above the reported
 port speed fails CLOSED with the prior administrative state
-restored). `allocate`/`release` therefore emit ZERO SNMP PDUs on this
+restored). **A zero/unknown real port speed is UNAVAILABLE capacity
+grounding (PR #23 third review): RFC 2863 defines the `ifSpeed`
+Gauge32 value `0` as "no bandwidth information available" (and the
+greater-than-max sentinel with a zero/unknown `ifHighSpeed` is
+equally unknown), so zero is NOT a bound — it fails CLOSED at the
+source `_read_port_speed_bps` BEFORE any SET, and the adapter
+re-asserts fail-closed with LINK_UP compensation for any client
+declaring `reports_real_port_speed` (defense in depth); zero can
+NEVER satisfy a positive declared bps capacity.**
+`allocate`/`release` therefore emit ZERO SNMP PDUs on this
 target. The `dot1qVlanStaticTable` row the client creates at
 `bind_bearer` (deterministically derived from the adapter's bearer
 nonce, destroyed at `unbind_bearer`) is exactly what IEEE 802.1Q /
@@ -184,7 +193,7 @@ never presented as, and never substituted for, a bps reservation.
 Only an element whose real interface genuinely reserves bandwidth
 may declare `supports_element_side_capacity = True` (the in-repo
 conformance client does — its own protocol models capacity natively,
-which is honest FOR CONFORMANCE). Pinned by selftest cases 43/47.
+which is honest FOR CONFORMANCE). Pinned by selftest cases 43/47/48.
 
 ## Resource model reuse (WORK-008) and IP delegation (WORK-018)
 
@@ -312,7 +321,7 @@ authorized by an ACR.
 
 ## Verification
 
-`python3 tools/backhaul_selftest.py` — 47 cases covering the brief's
+`python3 tools/backhaul_selftest.py` — 48 cases covering the brief's
 twelve verification bullets AND the PR #23 architect-review
 remediations: the frozen 11-op contract surface, least-authority
 context, happy paths across ALL FOUR technology profiles (data, not
@@ -350,4 +359,6 @@ the exact `PacketFrameIo`/`PacketDataSocket` path, case 46) and the
 corrected capacity semantics (allocate/release emit ZERO SNMP PDUs —
 the VLAN row appears only at bind as the bearer's L2 segmentation;
 the family ledger admission still enforces the bps bound; provision
-bounded by the element-reported real ifSpeed, case 47).
+bounded by the element-reported real ifSpeed, case 47; zero/unknown
+real port speed fails closed at the source AND at the adapter with
+LINK_UP compensation and no local commit, case 48).

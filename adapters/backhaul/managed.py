@@ -35,11 +35,13 @@ The PR #23 architect review (Blockers 1 + 2) reshaped this adapter:
 
   - ``provision_link`` -- validate (charge, descriptor validation,
     content-derived ``link_ref``) -> element ``link_up`` -> the
-    REAL-CAPACITY BOUND (the element-reported ``port_speed_bps``
-    must carry the declared capacity; over-declaration fails closed
-    with compensation) -> commit (local link bookkeeping); a commit
-    failure after a successful ``link_up`` compensates with
-    ``link_down``.
+    REAL-CAPACITY BOUND (for elements reporting a real port speed:
+    the element-reported ``port_speed_bps`` must carry the declared
+    capacity, and a ZERO/UNKNOWN speed is UNAVAILABLE grounding --
+    it can never satisfy a positive declared capacity; both fail
+    closed with compensation -- the PR #23 third-review rule) ->
+    commit (local link bookkeeping); a commit failure after a
+    successful ``link_up`` compensates with ``link_down``.
   - ``allocate`` / ``release`` -- validate -> (element
     ``allocate_capacity`` / ``release_capacity`` ONLY when the
     element's external interface REALLY reserves bandwidth --
@@ -200,29 +202,55 @@ class ManagedBackhaulAdapter(ReferenceBackhaulEngine):
             endpoint_labels=list(descriptor.endpoint_labels),
         )
         # Phase 2b: the REAL-CAPACITY BOUND (the PR #23 second-review
-        # Blocker 2 grounding): the element-REPORTED port speed
-        # (IF-MIB ifSpeed/ifHighSpeed on the SNMP target) must carry
-        # the descriptor's declared capacity.  Over-declaration fails
-        # CLOSED with compensation (the port's prior administrative
-        # state is restored) -- the family-native WORK-008 ledger is
-        # never bounded by a number the real port cannot carry.
-        if (
-            element_link.port_speed_bps
-            and descriptor.capacity_bps > element_link.port_speed_bps
-        ):
-            self._compensate(
-                lambda: self._element.link_down(element_link),
-                "LINK_UP over-declared-capacity rollback",
-            )
-            raise BackhaulError(
-                BackhaulReasonCode.CAPACITY_EXHAUSTED,
-                "declared link capacity %d bps exceeds the element-"
-                "reported real port speed %d bps (IF-MIB ifSpeed; the "
-                "element's prior administrative state was restored -- "
-                "the family-native capacity ledger is never bounded by "
-                "a number the real port cannot carry)"
-                % (descriptor.capacity_bps, element_link.port_speed_bps),
-            )
+        # Blocker 2 grounding, closed at the third review): for
+        # elements that REPORT a real port speed
+        # (reports_real_port_speed -- IF-MIB ifSpeed/ifHighSpeed on
+        # the SNMP target), the element-reported speed must carry the
+        # descriptor's declared capacity, and a ZERO/UNKNOWN speed is
+        # UNAVAILABLE capacity grounding -- it is not a bound and can
+        # NEVER satisfy a positive declared bps capacity.  Both fail
+        # CLOSED with compensation (the successful external LINK_UP
+        # is rolled back; the port's prior administrative state is
+        # restored) -- the family-native WORK-008 ledger is never
+        # bounded by a number the real port cannot carry, and never
+        # admits capacity without a real bound.  (Elements that
+        # report no real port-speed datum are exempt from THIS
+        # bound; their capacity honesty rests on their own declared
+        # mechanism -- supports_element_side_capacity.)
+        if self._element.reports_real_port_speed:
+            if element_link.port_speed_bps <= 0:
+                self._compensate(
+                    lambda: self._element.link_down(element_link),
+                    "LINK_UP zero-unknown-port-speed rollback",
+                )
+                raise BackhaulError(
+                    BackhaulReasonCode.BACKHAUL_UNAVAILABLE,
+                    "element %r reports a ZERO/UNKNOWN real port speed "
+                    "(%d bps; RFC 2863 -- ifSpeed Gauge32 zero means NO "
+                    "bandwidth information available): the real-capacity "
+                    "bound is unavailable and zero can never satisfy a "
+                    "positive declared capacity (the successful external "
+                    "LINK_UP was compensated -- the element's prior "
+                    "administrative state was restored)"
+                    % (
+                        self._element.label or type(self._element).__name__,
+                        element_link.port_speed_bps,
+                    ),
+                )
+            if descriptor.capacity_bps > element_link.port_speed_bps:
+                self._compensate(
+                    lambda: self._element.link_down(element_link),
+                    "LINK_UP over-declared-capacity rollback",
+                )
+                raise BackhaulError(
+                    BackhaulReasonCode.CAPACITY_EXHAUSTED,
+                    "declared link capacity %d bps exceeds the element-"
+                    "reported real port speed %d bps (IF-MIB ifSpeed; the "
+                    "element's prior administrative state was restored -- "
+                    "the family-native capacity ledger is never bounded by "
+                    "a number the real port cannot carry)"
+                    % (descriptor.capacity_bps, element_link.port_speed_bps),
+                )
         # Phase 3: commit the local bookkeeping (infallible after
         # validation); a failure compensates on the element.
         try:

@@ -184,7 +184,13 @@ the REAL SNMPv2c client, and the REAL Ethernet frame writer):
                  BackhaulElementClient (one method = one external
                  operation; supports_element_side_capacity declares
                  whether the element's REAL interface reserves
-                 bandwidth -- honest default NO) +
+                 bandwidth -- honest default NO;
+                 reports_real_port_speed declares whether link_up
+                 really reports the port's real capacity -- honest
+                 default NO, and a ZERO/unknown speed on a declaring
+                 client is UNAVAILABLE grounding that fails CLOSED,
+                 never satisfying a positive declared bps capacity
+                 (PR #23 third review)) +
                  SnmpEthernetElementClient (the real SNMP-managed
                  IEEE 802.1Q Ethernet switch: link lifecycle on
                  ifAdminStatus/ifOperStatus + the real ifSpeed/

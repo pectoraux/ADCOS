@@ -131,9 +131,15 @@ class ElementLink:
     ``port_speed_bps`` the element-REPORTED real port capacity in
     bits per second (IF-MIB ``ifSpeed``, with ``ifHighSpeed``
     carrying the number when ``ifSpeed`` reports its greater-than-max
-    sentinel; 0 when the element reports no speed concept) -- the
-    REAL external datum that bounds the family-native WORK-008
-    capacity ledger (the PR #23 second-review Blocker 2 grounding).
+    sentinel) -- the REAL external datum that bounds the
+    family-native WORK-008 capacity ledger (the PR #23 second-review
+    Blocker 2 grounding).  ``0`` means the element reports NO real
+    port-speed datum: for clients declaring
+    ``reports_real_port_speed`` this value is FORBIDDEN (the source
+    client fails closed on zero/unknown speed before any SET, and
+    the adapter re-asserts fail-closed with compensation -- the PR
+    #23 third-review rule: zero/unknown real port speed can never
+    satisfy a positive declared bps capacity).
     """
 
     key: str
@@ -215,6 +221,21 @@ class BackhaulElementClient(abc.ABC):
     models capacity allocation as a first-class operation -- honest
     FOR CONFORMANCE; a VLAN row is NOT such a mechanism and is never
     presented as one).
+
+    PORT-SPEED DECLARATION (the PR #23 third-review rule):
+    ``reports_real_port_speed`` states whether the element's
+    ``link_up`` really REPORTS the port's real capacity as
+    ``ElementLink.port_speed_bps``.  The honest DEFAULT is ``False``
+    (the element exposes no real port-speed datum; ``0`` then simply
+    means "no datum", and capacity grounding rests on the element's
+    OWN declared mechanism above).  A client declaring ``True`` is
+    PROMISING that a successful ``link_up`` never delivers a
+    zero/unknown speed: for such clients the adapter enforces the
+    REAL-CAPACITY BOUND fail-closed -- zero/unknown real port speed
+    is UNAVAILABLE capacity grounding and can NEVER satisfy a
+    positive declared bps capacity (the source client fails closed
+    before any SET; the adapter re-asserts with LINK_UP compensation
+    as defense in depth).
     """
 
     __slots__ = ()
@@ -226,6 +247,11 @@ class BackhaulElementClient(abc.ABC):
     #: element-side bandwidth-reservation mechanism (see the class
     #: docstring).  Honest default: NO.
     supports_element_side_capacity: bool = False
+
+    #: Whether a successful ``link_up`` really reports the port's
+    #: real capacity as ``ElementLink.port_speed_bps`` (see the class
+    #: docstring).  Honest default: NO real port-speed datum.
+    reports_real_port_speed: bool = False
 
     @abc.abstractmethod
     def link_up(
@@ -388,6 +414,17 @@ class SnmpEthernetElementClient(BackhaulElementClient):
     RFC 4363 define it -- never presented as, and never substituted
     for, a bps reservation.
 
+    PORT-SPEED GROUNDING (the PR #23 third-review rule): this client
+    DECLARES ``reports_real_port_speed = True`` -- the IF-MIB
+    ``ifSpeed``/``ifHighSpeed`` read is the REAL capacity datum, and
+    a readable-but-ZERO/unknown speed (RFC 2863 Gauge32 zero = "no
+    bandwidth information available"; the greater-than-max sentinel
+    with a zero/unknown ``ifHighSpeed`` likewise) fails CLOSED in
+    ``_read_port_speed_bps`` BEFORE any SET: the real-capacity bound
+    is unavailable, so no declared bps capacity may be admitted on
+    this port.  A zero speed is never fabricated into a bound and
+    never satisfies a positive capacity request.
+
     Construction carries the real element's coordinates (adapter
     config DATA -- never core state): the SNMP agent endpoint, the
     SNMPv2c community value (management credential MATERIAL: it
@@ -397,6 +434,10 @@ class SnmpEthernetElementClient(BackhaulElementClient):
     PortList, the local egress interface for the frame writer, and
     the far-end frame destination MAC.
     """
+
+    #: The IF-MIB port-speed read is a REAL capacity datum on this
+    #: target (see the class docstring -- the third-review rule).
+    reports_real_port_speed = True
 
     __slots__ = (
         "_snmp", "_if_index", "_bridge_port", "_egress_if",
@@ -469,7 +510,10 @@ class SnmpEthernetElementClient(BackhaulElementClient):
         # the greater-than-max sentinel -- RFC 2863).  The port speed
         # is the REAL external datum that bounds the family-native
         # WORK-008 ledger (never a substitute for element-side rate
-        # enforcement, which this target does not expose).
+        # enforcement, which this target does not expose).  A
+        # zero/UNKNOWN speed fails CLOSED here, BEFORE any SET (the
+        # PR #23 third-review rule: unknown capacity grounding
+        # never proceeds to mutation).
         try:
             prior = self._snmp.get(
                 "%s.%d" % (OID_IF_ADMIN_STATUS, self._if_index)
@@ -742,9 +786,15 @@ class SnmpEthernetElementClient(BackhaulElementClient):
         ``ifSpeed`` in bits per second; when ``ifSpeed`` reports the
         RFC 2863 greater-than-max Gauge32 sentinel, ``ifHighSpeed``
         (millions of bits per second) carries the number.  A port
-        whose speed cannot be read fails CLOSED -- the family-native
-        capacity ledger must never be bounded by a fabricated
-        number."""
+        whose speed cannot be read fails CLOSED, and -- the PR #23
+        third-review rule -- so does a READABLE-but-zero/unknown
+        speed: RFC 2863 defines the Gauge32 value ``0`` as "no
+        bandwidth information available" (and the sentinel with a
+        zero/unknown ``ifHighSpeed`` is equally unknown), so zero is
+        NOT a bound and is NEVER fabricated into one; this method
+        therefore NEVER returns zero or a negative number.  The
+        family-native capacity ledger must never be bounded by a
+        fabricated number."""
         try:
             speed = self._snmp.get(
                 "%s.%d" % (OID_IF_SPEED, self._if_index)
@@ -758,6 +808,16 @@ class SnmpEthernetElementClient(BackhaulElementClient):
                 "refuses to be bounded by a fabricated number)"
                 % self._if_index,
             ) from None
+        if speed <= 0:
+            raise BackhaulError(
+                BackhaulReasonCode.BACKHAUL_UNAVAILABLE,
+                "switch port ifIndex %d reports ifSpeed %d -- RFC 2863 "
+                "Gauge32 zero means NO bandwidth information available; "
+                "the real port capacity is UNKNOWN and the family-native "
+                "capacity ledger refuses to admit any declared capacity "
+                "without a real bound (no SET was attempted)"
+                % (self._if_index, speed),
+            ) from None
         if speed == IF_SPEED_GREATER_THAN_MAX:
             try:
                 high = self._snmp.get(
@@ -770,6 +830,17 @@ class SnmpEthernetElementClient(BackhaulElementClient):
                     "greater-than-max sentinel but has no ifHighSpeed "
                     "object (IF-MIB; the real port capacity cannot be "
                     "established)" % self._if_index,
+                ) from None
+            if high <= 0:
+                raise BackhaulError(
+                    BackhaulReasonCode.BACKHAUL_UNAVAILABLE,
+                    "switch port ifIndex %d reports the ifSpeed "
+                    "greater-than-max sentinel with ifHighSpeed %d -- "
+                    "the real port capacity is UNKNOWN (millions-of-bps "
+                    "object carries no information) and the family-native "
+                    "capacity ledger refuses to admit any declared "
+                    "capacity without a real bound (no SET was attempted)"
+                    % (self._if_index, high),
                 ) from None
             return high * 1_000_000
         return speed
