@@ -83,6 +83,7 @@ from .errors import FiveGCoreError, FiveGCoreReasonCode
 from .manager import FiveGCoreManager
 from .model import Dnn, NfEndpoint, Snssai
 from .open5gs import Open5GSAdapter
+from .interop_env_probe import EnvProbeConfig, probe_open5gs_interop_capability
 
 __all__ = [
     "DEFAULT_OPEN5GS_SBI_URL",
@@ -162,6 +163,13 @@ class InteropOutcome:
     * ``"GATE_DISABLED"`` -- the ``OPEN5GS_INTEROP`` env var is not
       set to ``"1"``; the gate is not enabled (the conformance suite
       case_29 remains the strongest evidence in this run).
+    * ``"FORBIDDEN"`` -- the operator explicitly tagged the peer as
+      an in-repo reference simulator (``OPEN5GS_PEER_KIND`` in
+      ``reference|inrepo|conformance_server|simulator``); the
+      anti-faking guard fired BEFORE any SBI probe.  This is a hard
+      non-acceptance outcome; the gate does NOT fall back to the
+      in-repo conformance server (Architect B1 anti-faking rule,
+      enforced in code rather than prose).
     * ``"UNREACHABLE"`` -- ``OPEN5GS_INTEROP=1`` was set but the
       Open5GS SBI peer is not reachable at ``sbi_url``.  This is a
       verification-environment blocker, NOT a fake-pass; the gate does
@@ -268,8 +276,34 @@ def run_open5gs_interop(config: Optional[InteropConfig] = None) -> InteropOutcom
     """
     cfg = config or InteropConfig.from_env()
 
+    # Phase 0 (B1 hardening, Architect-approved non-semantic follow-up):
+    # anti-faking independence guard + explicit environment-capability
+    # matrix.  The guard fires FORBIDDEN before any SBI probe when the
+    # operator explicitly tags the peer as an in-repo reference
+    # simulator (Architect anti-faking rule, enforced in code rather
+    # than prose).  The matrix is computed once here so the
+    # UNREACHABLE branch below carries the explicit capability table
+    # instead of an opaque SKIP string.  This phase does NOT change
+    # acceptance semantics: it adds no new PASSED path -- FORBIDDEN
+    # and UNREACHABLE are non-acceptance outcomes.
+    probe_report = probe_open5gs_interop_capability(EnvProbeConfig.from_env())
+    if probe_report.forbidden_substitution is not None:
+        return InteropOutcome(
+            status="FORBIDDEN",
+            detail=(
+                "%s -- the gate does NOT fall back to the in-repo "
+                "conformance server (Architect B1 anti-faking rule); "
+                "set OPEN5GS_PEER_KIND=real_open5gs against a real, "
+                "independent 5G Core to proceed"
+            ) % probe_report.forbidden_substitution,
+            sbi_url=cfg.sbi_url,
+            data_peer=cfg.data_peer,
+        )
+
     # Phase 1: probe SBI reachability (fast failure with a clear
-    # cause; no in-repo fallback).
+    # cause; no in-repo fallback).  The UNREACHABLE detail carries the
+    # explicit environment-capability matrix (B1 hardening) so a future
+    # run on capable infrastructure fails or passes unambiguously.
     unreachable = _probe_sbi_reachable(cfg.sbi_url, cfg.sbi_probe_timeout)
     if unreachable is not None:
         return InteropOutcome(
@@ -279,8 +313,9 @@ def run_open5gs_interop(config: Optional[InteropConfig] = None) -> InteropOutcom
                 "verification-environment blocker (the gate does NOT "
                 "fall back to the in-repo conformance server; set "
                 "OPEN5GS_SBI_URL to a reachable real Open5GS SBI URL "
-                "or run Open5GS to close B1)"
-            ) % (cfg.sbi_url, unreachable),
+                "or run Open5GS to close B1).  Environment-capability "
+                "matrix:\n%s"
+            ) % (cfg.sbi_url, unreachable, probe_report.summary()),
             sbi_url=cfg.sbi_url,
             data_peer=cfg.data_peer,
         )

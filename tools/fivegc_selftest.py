@@ -44,6 +44,7 @@ from adapters.fivegc import (  # noqa: E402
     CONTRACT_OPERATIONS,
     AppSession,
     Dnn,
+    EnvProbeConfig,
     FiveGCoreContext,
     FiveGCoreContract,
     FiveGCoreError,
@@ -65,6 +66,7 @@ from adapters.fivegc import (  # noqa: E402
     SubscriberProfileView,
     Supi,
     gate_enabled,
+    probe_open5gs_interop_capability,
     run_open5gs_interop,
 )
 from adapters.fivegc.sandbox import DEFAULT_STEP_BUDGET  # noqa: E402
@@ -581,16 +583,23 @@ def case_19_r5_standards_boundary_audit() -> Result:
     name = "case_19_r5_standards_boundary_audit"
     pkg_dir = os.path.join(_ROOT, "adapters", "fivegc")
     forbidden_import_roots = ("ssl", "cryptography", "crypto", "random", "secrets")
-    # open5gs.py + conformance.py + open5gs_interop.py may use real-
-    # network stdlib (http/socket/urllib).  open5gs_interop.py is the
-    # B1 real-Open5GS interop gate -- it legitimately probes a real
-    # Open5GS SBI peer over a real TCP socket (no in-repo simulator
-    # fallback).  It also needs `os` for the env-var-driven gate
-    # config (OPEN5GS_INTEROP/OPEN5GS_SBI_URL/OPEN5GS_DATA_PEER); the
+    # open5gs.py + conformance.py + open5gs_interop.py +
+    # interop_env_probe.py may use real-network stdlib
+    # (http/socket/urllib).  open5gs_interop.py is the B1 real-Open5GS
+    # interop gate -- it legitimately probes a real Open5GS SBI peer
+    # over a real TCP socket (no in-repo simulator fallback).
+    # interop_env_probe.py is the Architect-approved NON-SEMANTIC gate
+    # hardening: it probes environment capabilities (SCTP/TUN/mongo/
+    # build tools/Open5GS binaries/SBI reachability) and enforces the
+    # anti-faking OPEN5GS_PEER_KIND guard -- it is gate SURFACE, a
+    # sibling of open5gs_interop.py, and uses real sockets + os.environ
+    # for the same gate-config env vars.  Both gate-surface files need
+    # `os` for env-var-driven config (OPEN5GS_INTEROP/OPEN5GS_SBI_URL/
+    # OPEN5GS_DATA_PEER/OPEN5GS_PEER_KIND/OPEN5GS_PROBE_TIMEOUT_S); the
     # sub-scan below rejects os.urandom/system/popen/fork/exec so the
     # `os` import cannot smuggle non-determinism or sandbox escape.
-    real_network_allowed = {"open5gs.py", "conformance.py", "open5gs_interop.py"}
-    env_aware_allowed = {"open5gs_interop.py"}
+    real_network_allowed = {"open5gs.py", "conformance.py", "open5gs_interop.py", "interop_env_probe.py"}
+    env_aware_allowed = {"open5gs_interop.py", "interop_env_probe.py"}
     forbidden_os_calls = ("os.urandom", "os.system", "os.popen", "os.fork", "os.exec", "os.spawn")
     real_network_modules = ("http", "socket", "urllib", "json")
     # Secret-MATERIAL-looking tokens (not credential NAMES cited in
@@ -666,7 +675,7 @@ def case_19_r5_standards_boundary_audit() -> Result:
     interop_src = open(os.path.join(pkg_dir, "open5gs_interop.py"), encoding="utf-8").read().lower()
     if "29.500" not in interop_src:
         return fail(name, "open5gs_interop.py missing TS 29.500 citation")
-    return ok(name, "no forbidden imports; no secret tokens; 3GPP TS cited; real-network stdlib only in open5gs/conformance/open5gs_interop; os.environ-only in env-aware gate")
+    return ok(name, "no forbidden imports; no secret tokens; 3GPP TS cited; real-network stdlib only in open5gs/conformance/open5gs_interop/interop_env_probe; os.environ-only in env-aware gate surface")
 
 
 def case_20_r5_frozen_spec_intact() -> Result:
@@ -996,6 +1005,99 @@ def case_30_b1_real_open5gs_interop_gate() -> Result:
     return fail(name, "Open5GS interop %s: %s" % (outcome.status, outcome.detail))
 
 
+def case_31_b1_gate_hardening_matrix_and_anti_faking() -> Result:
+    """B1 gate-hardening regression (Architect-approved NON-SEMANTIC follow-up).
+
+    Asserts the two approved hardening properties hold in THIS sandbox:
+
+    (1) EXPLICIT environment-capability matrix -- the probe reports the
+        real missing capabilities (sctp/tun/mongo/build_tools) and
+        declares SKIP (not acceptance); the gate's UNREACHABLE detail
+        CARRIES the structured matrix, not an opaque string.
+    (2) HARD anti-faking peer_kind guard -- an EXPLICIT in-repo-simulator
+        assertion (OPEN5GS_PEER_KIND=reference) produces FORBIDDEN at the
+        gate boundary BEFORE any SBI probe (never PASSED, never a silent
+        fallback to the in-repo conformance server).
+
+    Acceptance semantics are PRESERVED: this case never observes PASSED
+    (the sandbox cannot host real Open5GS); it only asserts the honest
+    non-acceptance outcomes (UNREACHABLE + FORBIDDEN) carry the approved
+    hardening diagnostics.
+    """
+    name = "case_31_b1_gate_hardening_matrix_and_anti_faking"
+    env_keys = (
+        "OPEN5GS_INTEROP", "OPEN5GS_PEER_KIND", "OPEN5GS_SBI_URL",
+        "OPEN5GS_DATA_PEER", "OPEN5GS_PROBE_TIMEOUT_S",
+    )
+    saved = {k: os.environ.get(k) for k in env_keys}
+    try:
+        # Leg 1: probe directly -- sandbox is incapable; the matrix must
+        # report the real missing capabilities and declare SKIP.
+        os.environ.pop("OPEN5GS_INTEROP", None)
+        os.environ.pop("OPEN5GS_PEER_KIND", None)
+        os.environ.pop("OPEN5GS_SBI_URL", None)
+        os.environ["OPEN5GS_PROBE_TIMEOUT_S"] = "1.0"
+        report = probe_open5gs_interop_capability(EnvProbeConfig.from_env())
+        if report.forbidden_substitution is not None:
+            return fail(name, "leg1: guard should not fire with unset PEER_KIND; got %s" % report.forbidden_substitution)
+        if report.reachable:
+            return fail(name, "leg1: probe reports reachable=True; expected False (sandbox cannot host real Open5GS)")
+        matrix = report.summary()
+        for entry in ("sctp_n2_ngap", "tun_user_plane", "mongo_hss_udr", "build_tools"):
+            if entry not in matrix:
+                return fail(name, "leg1: matrix missing %r; got:\n%s" % (entry, matrix))
+        if "SKIP" not in matrix or "PASSED" in matrix:
+            return fail(name, "leg1: matrix must declare SKIP and never PASSED; got:\n%s" % matrix)
+
+        # Leg 2: anti-faking guard -- explicit reference-kind must fire
+        # FORBIDDEN (never acceptance).
+        os.environ["OPEN5GS_PEER_KIND"] = "reference"
+        report2 = probe_open5gs_interop_capability(EnvProbeConfig.from_env())
+        if report2.forbidden_substitution is None:
+            return fail(name, "leg2: guard did not fire on OPEN5GS_PEER_KIND=reference")
+        if "FORBIDDEN" not in report2.summary():
+            return fail(name, "leg2: matrix must declare FORBIDDEN; got:\n%s" % report2.summary())
+
+        # Leg 3: integrated gate -- run_open5gs_interop with the
+        # forbidden peer kind must short-circuit to FORBIDDEN BEFORE
+        # any SBI probe (anti-faking enforced at the gate boundary).
+        os.environ["OPEN5GS_INTEROP"] = "1"
+        outcome = run_open5gs_interop()
+        if outcome.status != "FORBIDDEN":
+            return fail(name, "leg3: gate must return FORBIDDEN on reference peer kind; got %s: %s" % (outcome.status, outcome.detail))
+
+        # Leg 4: integrated gate -- real-kind assertion + unreachable
+        # SBI must return UNREACHABLE whose detail CARRIES the explicit
+        # capability matrix (the approved hardening), and must NOT be PASSED.
+        os.environ["OPEN5GS_PEER_KIND"] = "real_open5gs"
+        os.environ["OPEN5GS_SBI_URL"] = "http://127.0.0.1:7777"
+        outcome2 = run_open5gs_interop()
+        if outcome2.status != "UNREACHABLE":
+            return fail(name, "leg4: gate must return UNREACHABLE on unreachable SBI; got %s: %s" % (outcome2.status, outcome2.detail))
+        for entry in ("sctp_n2_ngap", "tun_user_plane"):
+            if entry not in outcome2.detail:
+                return fail(name, "leg4: UNREACHABLE detail must carry matrix entry %r; got:\n%s" % (entry, outcome2.detail))
+
+        # Leg 5: acceptance-semantics preserved -- no leg observed PASSED.
+        for label, st in (("leg3", outcome.status), ("leg4", outcome2.status)):
+            if st == "PASSED":
+                return fail(name, "%s: gate must NEVER report PASSED in this sandbox (acceptance semantics preserved)" % label)
+
+        return ok(
+            name,
+            "matrix emits explicit capabilities on SKIP (sctp/tun/mongo/build_tools); "
+            "anti-faking guard fires FORBIDDEN on OPEN5GS_PEER_KIND=reference; gate "
+            "short-circuits FORBIDDEN before SBI + enriches UNREACHABLE with the matrix; "
+            "no PASSED observed (acceptance semantics preserved)",
+        )
+    finally:
+        for k, v in saved.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+
+
 # ==========================================================================
 # Main
 # ==========================================================================
@@ -1033,6 +1135,7 @@ def main() -> int:
         case_28_failure_isolation_no_secret_leak,
         case_29_b3_real_5gc_interop_conformance,
         case_30_b1_real_open5gs_interop_gate,
+        case_31_b1_gate_hardening_matrix_and_anti_faking,
     ]
     results: List[Result] = []
     for case in cases:

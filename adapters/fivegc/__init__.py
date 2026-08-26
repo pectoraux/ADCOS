@@ -107,6 +107,12 @@ from .model import (
     Supi,
 )
 from .open5gs import Open5GSAdapter
+from .interop_env_probe import (
+    CapabilityReport,
+    Check,
+    EnvProbeConfig,
+    probe_open5gs_interop_capability,
+)
 from .open5gs_interop import (
     DEFAULT_OPEN5GS_INTEROP_PAYLOAD,
     DEFAULT_OPEN5GS_SBI_URL,
@@ -144,6 +150,11 @@ __all__ = [
     "InteropOutcome",
     "gate_enabled",
     "run_open5gs_interop",
+    # B1 gate hardening (env-capability matrix + anti-faking guard)
+    "CapabilityReport",
+    "Check",
+    "EnvProbeConfig",
+    "probe_open5gs_interop_capability",
     # Runtime
     "FiveGCoreManager",
     "SandboxedFiveGCore",
