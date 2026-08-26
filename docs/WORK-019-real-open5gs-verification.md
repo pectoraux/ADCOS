@@ -64,3 +64,12 @@ WORK-019 REAL INTEROPERABILITY = BLOCKED
 The remaining blocker is compatibility between the current production-shaped
 ADCOS SBI requests and the live Open5GS SBI/subscriber configuration. This
 report contains no subscriber secrets, keys, passwords, or tokens.
+
+## Follow-up correction
+
+The adapter was corrected to use Open5GS's required HTTP/2 prior-knowledge
+transport for explicitly enabled real runs and to use the UDM AMF-registration
+operation shape. The deterministic conformance peer remains on HTTP/1.1.
+The live run now reaches Open5GS over HTTP/2 but still returns an SBI failure;
+subscriber database seeding and the complete UERANSIM-driven lifecycle remain
+required before B1 can pass.

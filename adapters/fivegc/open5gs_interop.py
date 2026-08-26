@@ -327,6 +327,7 @@ def run_open5gs_interop(config: Optional[InteropConfig] = None) -> InteropOutcom
     adapter = Open5GSAdapter(
         nf_endpoint=NfEndpoint(nf_type="SMF", url=cfg.sbi_url),
         data_peer=cfg.data_peer,
+        real_open5gs=True,
     )
     mgr = FiveGCoreManager(
         integration_id="adcos:fivegc:open5gs-interop",

@@ -67,6 +67,7 @@ from __future__ import annotations
 import http.client
 import json
 import socket as _socket
+import subprocess
 from typing import Any, Dict, Optional, Tuple
 from urllib.parse import urlparse
 
@@ -95,9 +96,11 @@ class Open5GSAdapter(Reference5GCoreEngine):
         *,
         nf_endpoint: NfEndpoint,
         data_peer: Optional[Tuple[str, int]] = None,
+        real_open5gs: bool = False,
     ) -> None:
         super().__init__()
         self._nf_endpoint = nf_endpoint
+        self._real_open5gs = real_open5gs
         # Optional override for the user-plane data peer (host, port) --
         # the DN echo host the real Open5GS UPF routes to.  When None
         # (the conformance case), the adapter uses the dataEndpoint the
@@ -141,10 +144,22 @@ class Open5GSAdapter(Reference5GCoreEngine):
         # Real HTTP POST to UDM (3GPP TS 29.503 §5.2 -- UE context
         # management).  The peer provisions its OWN subscriber store;
         # the adapter's local store carries only the slot NAME.
-        self._http_post(
-            "/nudm-uecm/v1/%s/registrations" % supi,
-            {"supi": supi, "subscribedSnssai": subscribed_snssai.to_dict()},
-        )
+        if self._real_open5gs:
+            self._http_post(
+                "/nudm-uecm/v1/%s/registrations/amf-3gpp-access" % supi,
+                {
+                    "amfInstanceId": "adcos:fivegc:open5gs",
+                    "deregCallbackUri": "http://127.0.0.1:0/adcos/deregister",
+                    "guami": {"plmnId": {"mcc": "001", "mnc": "01"}, "amfId": "cafe01"},
+                    "ratType": "NR",
+                },
+                method="PUT",
+            )
+        else:
+            self._http_post(
+                "/nudm-uecm/v1/%s/registrations" % supi,
+                {"supi": supi, "subscribedSnssai": subscribed_snssai.to_dict()},
+            )
         return record
 
     def authenticate(self, context: FiveGCoreContext, *, pdu_session_ref: str) -> Any:
@@ -265,7 +280,7 @@ class Open5GSAdapter(Reference5GCoreEngine):
     # Real 3GPP SBi HTTP helper (stdlib http.client; no vendor SDK)
     # ------------------------------------------------------------------
 
-    def _http_post(self, path: str, body: dict) -> dict:
+    def _http_post(self, path: str, body: dict, *, method: str = "POST") -> dict:
         """Make a REAL HTTP POST to the configured 5G Core SBi endpoint
         (3GPP TS 29.500 §4.2).  Real TCP socket, real 3GPP JSON body,
         real HTTP response.  Raises ``NF_UNAVAILABLE`` if the peer is
@@ -278,11 +293,18 @@ class Open5GSAdapter(Reference5GCoreEngine):
                 FiveGCoreReasonCode.INVALID_INPUT,
                 "nf_endpoint url must have a host",
             )
+        payload = json.dumps(body).encode("utf-8")
+        if self._real_open5gs:
+            return self._http2_request(
+                parsed,
+                path,
+                method=method,
+                payload=payload,
+            )
         conn = http.client.HTTPConnection(host, port, timeout=10)
         try:
-            payload = json.dumps(body).encode("utf-8")
             conn.request(
-                "POST", path, body=payload,
+                method, path, body=payload,
                 headers={"Content-Type": "application/json", "Content-Length": str(len(payload))},
             )
             resp = conn.getresponse()
@@ -307,6 +329,80 @@ class Open5GSAdapter(Reference5GCoreEngine):
                 conn.close()
             except OSError:
                 pass
+
+    def _http2_request(
+        self,
+        parsed: Any,
+        path: str,
+        *,
+        method: str,
+        payload: bytes,
+    ) -> dict:
+        """Make an h2c request to Open5GS SBI.
+
+        Open5GS's SBI listener expects HTTP/2 prior knowledge.  The
+        deterministic conformance peer remains on the stdlib HTTP/1.1
+        path above; this branch is enabled only by the explicit real
+        interop gate.
+        """
+        url = "%s://%s%s%s" % (
+            parsed.scheme or "http",
+            parsed.hostname,
+            ":%d" % parsed.port if parsed.port else "",
+            path,
+        )
+        result = subprocess.run(
+            [
+                "curl",
+                "--http2-prior-knowledge",
+                "--silent",
+                "--show-error",
+                "--request",
+                method,
+                "--header",
+                "Content-Type: application/json",
+                "--data-binary",
+                payload,
+                "--write-out",
+                "\n__ADCOS_HTTP_STATUS__%{http_code}",
+                url,
+            ],
+            capture_output=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            raise FiveGCoreError(
+                FiveGCoreReasonCode.NF_UNAVAILABLE,
+                "Open5GS HTTP/2 request failed",
+            )
+        marker = b"\n__ADCOS_HTTP_STATUS__"
+        response_body, separator, status_bytes = result.stdout.rpartition(marker)
+        if not separator:
+            raise FiveGCoreError(
+                FiveGCoreReasonCode.NF_UNAVAILABLE,
+                "Open5GS HTTP/2 response omitted status",
+            )
+        try:
+            status = int(status_bytes.decode("ascii"))
+        except ValueError as exc:
+            raise FiveGCoreError(
+                FiveGCoreReasonCode.NF_UNAVAILABLE,
+                "Open5GS HTTP/2 response had invalid status",
+            ) from exc
+        if status not in (200, 201, 204):
+            raise FiveGCoreError(
+                FiveGCoreReasonCode.NF_UNAVAILABLE,
+                "SBi %s returned HTTP %d" % (path, status),
+            )
+        if not response_body:
+            return {}
+        try:
+            return json.loads(response_body.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise FiveGCoreError(
+                FiveGCoreReasonCode.NF_UNAVAILABLE,
+                "Open5GS HTTP/2 response was not JSON",
+            ) from exc
 
 
 __all__ = ["Open5GSAdapter"]
