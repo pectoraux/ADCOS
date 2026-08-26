@@ -66,7 +66,8 @@ Discipline carried by the whole family:
 
 Package (adapters/backhaul/) -- foundation + mediation/reference
 stage + runtime/session/SDK-bridge stage + conformance/real-interop
-stage:
+stage + the PR #23 production-path stage (the element-client seam,
+the REAL SNMPv2c client, and the REAL Ethernet frame writer):
 - contract.py    BackhaulContract ABC + BackhaulContext immutable
                  least-authority facade (integration_id + injected
                  instant + step budget + read-only SessionReader);
@@ -105,7 +106,9 @@ stage:
                  closed); per-link bearer accounting; one live bearer
                  per session (access change = replacement after
                  release); availability ladders (degrade loudly,
-                 never kill silently); honest capability ladder
+                 never kill silently); honest capability ladder; the
+                 _validate_*/_commit_* split (the transactional
+                 foundation -- public behavior unchanged)
 - manager.py     BackhaulManager -- register_implementation swaps
                  the DEFAULT sandbox only for NEW work
                  (make_default); live bindings, links, and
@@ -154,31 +157,69 @@ stage:
                  far-end echo carrying IEEE 802.3-2018 Ethernet-II
                  frames; honest non-confidential (no real switch, no
                  optical/microwave/satellite terminal, no vendor
-                 element management)
-- managed.py     ManagedBackhaulAdapter -- the production-shaped
-                 adapter (the Open5GSAdapter/N3IWFAdapter analog):
-                 subclasses the reference engine, overrides the
-                 real-network ops (provision_link/allocate/release/
-                 bind_session/unbind_session/observe_link/close with
-                 REAL TCP management-plane exchanges + egress_frame
-                 writing REAL IEEE 802.3-2018-framed payload bytes to
-                 the real wire socket); the real data path is
+                 element management) -- the SEPARATE conformance path,
+                 never the claimed production interop protocol
+- ethernet.py   The REAL Ethernet data plane + frame-shape DATA:
+                 IEEE 802.3-2018 Ethernet-II headers, IEEE 802.1Q-2022
+                 VLAN tags (TPID 0x8100), content-derived locally
+                 administered MAC-shaped addresses, the
+                 AF_PACKET/SOCK_RAW frame writer (the actual L2
+                 egress toward the switch; CAP_NET_RAW-gated, fails
+                 CLOSED), and the packet-socket facade for the app
+                 session's read side
+- snmp.py        The REAL SNMPv2c management-plane client in pure
+                 stdlib: the ASN.1/BER transfer syntax (RFC 2578),
+                 RFC 3416/3417 community framing over UDP, request-id
+                 correlation, error-status + varbind-exception
+                 decoding, and the standard MIB objects (IF-MIB
+                 RFC 2863, Q-BRIDGE-MIB RFC 4363 / PortList RFC 2674,
+                 SNMPv2-MIB sysUpTime RFC 3418)
+- element.py     The element-client seam -- ONE concrete real
+                 production target (PR #23 Blocker 1):
+                 BackhaulElementClient (one method = one external
+                 operation) + SnmpEthernetElementClient (the real
+                 SNMP-managed IEEE 802.1Q Ethernet switch: link
+                 lifecycle on ifAdminStatus/ifOperStatus, capacity
+                 allocation on dot1qVlanStaticTable, bearer binding
+                 on the VLAN egress PortList, observation on the
+                 IF-MIB counters, data plane on the 802.1Q frame
+                 writer) + JsonConformanceElementClient (the
+                 conformance protocol client -- the JSON/TCP peer
+                 above, never the production interop protocol)
+- managed.py     ManagedBackhaulAdapter -- the TRANSACTIONAL
+                 production-shaped adapter (the Open5GSAdapter/
+                 N3IWFAdapter analog): constructed over a
+                 BackhaulElementClient, every mutating operation runs
+                 validate -> REAL external element operation ->
+                 commit local, with compensating rollback where an
+                 external operation can succeed before the local
+                 commit (PR #23 Blocker 2); the real data path is
                  ENCAPSULATED INSIDE the BackhaulAppSession facade
                  the adapter returns (documented `_bind_data_path`
                  internal protocol; NO private capability-escape
-                 hooks onto the adapter); also carries the
-                 Ethernet-II frame helpers (encode/parse/derive-mac)
-                 shared with the conformance peer (the two ends of
-                 the same wire protocol)
+                 hooks onto the adapter)
 - backhaul_interop.py  the B1 real-backhaul interop gate
                  (run_backhaul_interop; environment-gated by
-                 BACKHAUL_INTEROP=1; PASSED only with real
-                 end-to-end bytes; UNREACHABLE is an honest SKIP,
-                 never a fabricated PASS)
+                 BACKHAUL_INTEROP=1; drives the PRODUCTION SNMP
+                 Ethernet path with the REAL WORK-012 session
+                 authority -- an actual SessionStore composed through
+                 the real RoutingEngine/PolicyDecision/TopologyGraph
+                 with read-only reader + gate negative controls;
+                 PASSED only with real end-to-end bytes; the DISTINCT
+                 DATA_PEER_UNREACHABLE status for a verified
+                 management plane with a non-carrying data plane;
+                 UNREACHABLE is an honest SKIP, never a fabricated
+                 PASS)
 - interop_env_probe.py  the environment-capability probe + HARD
                  anti-faking BACKHAUL_PEER_KIND guard (FORBIDDEN on
                  an explicit in-repo-simulator assertion; SKIP never
-                 converts to acceptance)
+                 converts to acceptance); the preflight SEPARATES
+                 the hard management-plane prerequisite (a REAL SNMP
+                 GET sysUpTime round-trip) from the data-plane
+                 capability prerequisites (packet socket / egress
+                 interface / far-end MAC) and the never-blocking
+                 diagnostics (wired interfaces, management userspace,
+                 terminal daemons)
 - serialization.py  canonical-JSON for the outward-facing state
 - errors.py      BackhaulError + BackhaulReasonCode + BackhaulFailure
 
@@ -198,6 +239,15 @@ from .contract import (
     SessionReader,
     SessionView,
 )
+from .element import (
+    BackhaulElementClient,
+    ElementAllocation,
+    ElementBearer,
+    ElementLink,
+    ElementObservation,
+    JsonConformanceElementClient,
+    SnmpEthernetElementClient,
+)
 from .engine import MAX_BEARERS_PER_SESSION, RATE_KINDS_BPS, ReferenceBackhaulEngine
 from .errors import (
     BACKHAUL_PREFIX,
@@ -205,19 +255,23 @@ from .errors import (
     BackhaulFailure,
     BackhaulReasonCode,
 )
+from .ethernet import (
+    ETHERTYPE_EXPERIMENTAL,
+    TPID_8021Q,
+    check_packet_socket_capability,
+    derive_local_mac,
+    encode_8021q_frame,
+    encode_ethernet_ii_frame,
+    parse_8021q_frame,
+    parse_ethernet_ii_header,
+)
 from .interop_env_probe import (
     CapabilityReport,
     Check,
     EnvProbeConfig as BackhaulEnvProbeConfig,
     probe_backhaul_interop_capability,
 )
-from .managed import (
-    ETHERTYPE_EXPERIMENTAL,
-    ManagedBackhaulAdapter,
-    derive_local_mac,
-    encode_ethernet_ii_frame,
-    parse_ethernet_ii_header,
-)
+from .managed import ManagedBackhaulAdapter
 from .manager import DEFAULT_INTEGRATION_ID, BackhaulManager
 from .model import (
     AllocationState,
@@ -246,10 +300,26 @@ from .sandbox import (
 )
 from .serialization import to_canonical_bytes
 from .session import BackhaulAppSession
+from .snmp import (
+    OID_DOT1Q_VLAN_STATIC_EGRESS_PORTS,
+    OID_DOT1Q_VLAN_STATIC_ROW_STATUS,
+    OID_IF_ADMIN_STATUS,
+    OID_IF_OPER_STATUS,
+    OID_SYS_UPTIME,
+    SnmpV2cClient,
+    SnmpValue,
+    oid_decode,
+    oid_encode,
+    port_list_clear,
+    port_list_set,
+    port_list_test,
+)
 from .backhaul_interop import (
     InteropConfig as BackhaulInteropConfig,
     InteropOutcome as BackhaulInteropOutcome,
+    SessionAuthority as BackhaulSessionAuthority,
     gate_enabled as backhaul_gate_enabled,
+    real_session_authority,
     run_backhaul_interop,
 )
 from .validation import (
@@ -281,10 +351,34 @@ __all__ = [
     # Implementations
     "ReferenceBackhaulEngine",
     "ManagedBackhaulAdapter",
+    # The element-client seam (the production SNMP Ethernet target +
+    # the conformance JSON/TCP client)
+    "BackhaulElementClient",
+    "SnmpEthernetElementClient",
+    "JsonConformanceElementClient",
+    "ElementLink",
+    "ElementAllocation",
+    "ElementBearer",
+    "ElementObservation",
+    # Real SNMPv2c client (RFC 3416/3417 in stdlib)
+    "SnmpV2cClient",
+    "SnmpValue",
+    "oid_encode",
+    "oid_decode",
+    "port_list_set",
+    "port_list_clear",
+    "port_list_test",
+    "OID_IF_ADMIN_STATUS",
+    "OID_IF_OPER_STATUS",
+    "OID_SYS_UPTIME",
+    "OID_DOT1Q_VLAN_STATIC_EGRESS_PORTS",
+    "OID_DOT1Q_VLAN_STATIC_ROW_STATUS",
     # Conformance / real interop
     "ReferenceBackhaulConformanceServer",
     "BackhaulInteropConfig",
     "BackhaulInteropOutcome",
+    "BackhaulSessionAuthority",
+    "real_session_authority",
     "backhaul_gate_enabled",
     "run_backhaul_interop",
     "BackhaulEnvProbeConfig",
@@ -321,11 +415,16 @@ __all__ = [
     # Engine constants (WORK-008 rate-kind reuse, bearer bound)
     "RATE_KINDS_BPS",
     "MAX_BEARERS_PER_SESSION",
-    # Wire frame helpers (adapter/peer-side DATA; IEEE 802.3-2018)
+    # Wire frame helpers (adapter/peer-side DATA; IEEE 802.3-2018 +
+    # IEEE 802.1Q-2022)
     "ETHERTYPE_EXPERIMENTAL",
+    "TPID_8021Q",
     "encode_ethernet_ii_frame",
     "parse_ethernet_ii_header",
+    "encode_8021q_frame",
+    "parse_8021q_frame",
     "derive_local_mac",
+    "check_packet_socket_capability",
     # Errors
     "BackhaulError",
     "BackhaulFailure",

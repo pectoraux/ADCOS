@@ -102,7 +102,7 @@ import socket as _socket
 import threading
 from typing import Any, Dict, Tuple
 
-from .managed import (
+from .ethernet import (
     ETHERTYPE_EXPERIMENTAL,
     frame_payload_offset,
     parse_ethernet_ii_header,

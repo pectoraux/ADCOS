@@ -364,13 +364,33 @@ class ReferenceBackhaulEngine(BackhaulContract):
             )
         self._open = True
 
-    def provision_link(
+    # ------------------------------------------------------------------
+    # Validate/commit split (the PR #23 architect-review transactional
+    # discipline): every mutating operation is split into a
+    # ``_validate_*`` phase (budget charge + fail-closed validation +
+    # content-derivation, NO state mutation) and a ``_commit_*`` phase
+    # (pure local bookkeeping that cannot fail after a successful
+    # validation).  The public contract methods run validate -> commit
+    # back-to-back (byte-identical external behavior); the managed
+    # adapter (:mod:`adapters.backhaul.managed`) inserts the REAL
+    # external element operation between the two phases so a failed
+    # remote operation leaves local state byte-for-byte unchanged:
+    #
+    #     validate -> perform real external operation -> commit local
+    #
+    # with compensating rollback at the adapter seam when an external
+    # operation succeeds but the local commit fails (defensive;
+    # commits are infallible by construction after validation).
+    # ------------------------------------------------------------------
+
+    def _validate_provision_link(
         self,
         context: BackhaulContext,
         *,
         descriptor: LinkDescriptor,
         credential_slot_name: str,
     ) -> LinkView:
+        """Validate + derive (NO mutation): the provision_link phase 1."""
         context.charge(STEP_CHARGES["provision_link"])
         self._require_open()
         if not isinstance(descriptor, LinkDescriptor):
@@ -393,7 +413,7 @@ class ReferenceBackhaulEngine(BackhaulContract):
                 "link profile already provisioned (identical canonical "
                 "content)",
             )
-        link_view = LinkView(
+        return LinkView(
             link_ref=link_ref,
             name=descriptor.name,
             profile=descriptor.profile,
@@ -402,10 +422,37 @@ class ReferenceBackhaulEngine(BackhaulContract):
             endpoint_labels=descriptor.endpoint_labels,
             state=LinkState.ACTIVE,
         )
-        self._links[link_ref] = _LinkEntry(link_view, credential_slot_name)
+
+    def _commit_provision_link(
+        self, link_view: LinkView, credential_slot_name: str
+    ) -> None:
+        """Commit the local link bookkeeping (phase 2; infallible after
+        a successful ``_validate_provision_link``)."""
+        if link_view.link_ref in self._links:  # defensive re-assert
+            raise BackhaulError(
+                BackhaulReasonCode.BINDING_EXISTS,
+                "link profile already provisioned (identical canonical "
+                "content)",
+            )
+        self._links[link_view.link_ref] = _LinkEntry(
+            link_view, credential_slot_name
+        )
+
+    def provision_link(
+        self,
+        context: BackhaulContext,
+        *,
+        descriptor: LinkDescriptor,
+        credential_slot_name: str,
+    ) -> LinkView:
+        link_view = self._validate_provision_link(
+            context, descriptor=descriptor,
+            credential_slot_name=credential_slot_name,
+        )
+        self._commit_provision_link(link_view, credential_slot_name)
         return link_view
 
-    def allocate(
+    def _validate_allocate(
         self,
         context: BackhaulContext,
         *,
@@ -414,6 +461,7 @@ class ReferenceBackhaulEngine(BackhaulContract):
         quantity_base: int,
         purpose: str,
     ) -> BackhaulAllocation:
+        """Validate + derive the allocation (NO mutation)."""
         context.charge(STEP_CHARGES["allocate"])
         self._require_open()
         link = self._require_link(link_ref)
@@ -459,9 +507,11 @@ class ReferenceBackhaulEngine(BackhaulContract):
                     link.link_view.capacity_bps,
                 ),
             )
-        self._sequence += 1
+        # Derive with the NEXT sequence number WITHOUT mutating the
+        # counter (the commit phase performs the increment; the pair
+        # runs back-to-back with no intervening engine mutation).
         allocation_ref = derive_allocation_ref(
-            link_ref, kind, quantity_base, purpose, self._sequence
+            link_ref, kind, quantity_base, purpose, self._sequence + 1
         )
         allocation = BackhaulAllocation(
             allocation_ref=allocation_ref,
@@ -476,16 +526,49 @@ class ReferenceBackhaulEngine(BackhaulContract):
                 BackhaulReasonCode.BINDING_EXISTS,
                 "allocation already exists",
             )
-        self._allocations[allocation_ref] = _AllocationEntry(allocation)
-        link.allocations[allocation_ref] = quantity_base
         return allocation
 
-    def release(
+    def _commit_allocate(self, allocation: BackhaulAllocation) -> None:
+        """Commit the local allocation bookkeeping (infallible after a
+        successful ``_validate_allocate``)."""
+        if allocation.allocation_ref in self._allocations:  # defensive
+            raise BackhaulError(
+                BackhaulReasonCode.BINDING_EXISTS,
+                "allocation already exists",
+            )
+        self._sequence += 1
+        self._allocations[allocation.allocation_ref] = _AllocationEntry(
+            allocation
+        )
+        link = self._links.get(allocation.link_ref)
+        if link is not None:
+            link.allocations[allocation.allocation_ref] = (
+                allocation.quantity_base
+            )
+
+    def allocate(
+        self,
+        context: BackhaulContext,
+        *,
+        link_ref: str,
+        kind: str,
+        quantity_base: int,
+        purpose: str,
+    ) -> BackhaulAllocation:
+        allocation = self._validate_allocate(
+            context, link_ref=link_ref, kind=kind,
+            quantity_base=quantity_base, purpose=purpose,
+        )
+        self._commit_allocate(allocation)
+        return allocation
+
+    def _validate_release(
         self,
         context: BackhaulContext,
         *,
         allocation_ref: str,
-    ) -> None:
+    ) -> _AllocationEntry:
+        """Validate the release (NO mutation); returns the live entry."""
         context.charge(STEP_CHARGES["release"])
         validate_opaque_ref(allocation_ref, "alloc")
         entry = self._allocations.get(allocation_ref)
@@ -495,12 +578,25 @@ class ReferenceBackhaulEngine(BackhaulContract):
                 "allocation %s not found (already released?)"
                 % allocation_ref,
             )
+        return entry
+
+    def _commit_release(self, entry: _AllocationEntry) -> None:
+        """Commit the local release (infallible after validation)."""
         link = self._links.get(entry.allocation.link_ref)
         if link is not None:
-            link.allocations.pop(allocation_ref, None)
+            link.allocations.pop(entry.allocation.allocation_ref, None)
         entry.released = True
 
-    def bind_session(
+    def release(
+        self,
+        context: BackhaulContext,
+        *,
+        allocation_ref: str,
+    ) -> None:
+        entry = self._validate_release(context, allocation_ref=allocation_ref)
+        self._commit_release(entry)
+
+    def _validate_bind_session(
         self,
         context: BackhaulContext,
         *,
@@ -510,6 +606,7 @@ class ReferenceBackhaulEngine(BackhaulContract):
         path_ref: str = "",
         requirements: Optional[Mapping[str, Any]] = None,
     ) -> BackhaulBinding:
+        """Validate + derive the binding (NO mutation)."""
         context.charge(STEP_CHARGES["bind_session"])
         self._require_open()
         if not isinstance(session_id, str) or not session_id:
@@ -573,10 +670,10 @@ class ReferenceBackhaulEngine(BackhaulContract):
         # Content-derive the backhaul BEARER identity (the W022
         # identity invariant: distinct from the sacred session_id by
         # construction -- the session_id is hash INPUT, never ref
-        # text).
-        self._sequence += 1
+        # text).  Derived with the NEXT sequence number WITHOUT
+        # mutating the counter (the commit phase increments).
         bearer_ref = derive_bearer_ref(
-            session_id, link_ref, endpoint_label, self._sequence
+            session_id, link_ref, endpoint_label, self._sequence + 1
         )
         binding_id = derive_binding_id(session_id, bearer_ref)
         binding = BackhaulBinding(
@@ -594,9 +691,56 @@ class ReferenceBackhaulEngine(BackhaulContract):
                 BackhaulReasonCode.BINDING_EXISTS,
                 "bearer already exists for session",
             )
-        self._bindings[bearer_ref] = _BindingEntry(binding)
-        link.bearers[bearer_ref] = session_id
         return binding
+
+    def _commit_bind_session(self, binding: BackhaulBinding) -> None:
+        """Commit the local binding bookkeeping (infallible after a
+        successful ``_validate_bind_session``)."""
+        if binding.bearer_ref in self._bindings:  # defensive re-assert
+            raise BackhaulError(
+                BackhaulReasonCode.BINDING_EXISTS,
+                "bearer already exists for session",
+            )
+        self._sequence += 1
+        self._bindings[binding.bearer_ref] = _BindingEntry(binding)
+        link = self._links.get(binding.link_ref)
+        if link is not None:
+            link.bearers[binding.bearer_ref] = binding.session_id
+
+    def bind_session(
+        self,
+        context: BackhaulContext,
+        *,
+        session_id: str,
+        link_ref: str,
+        endpoint_label: str,
+        path_ref: str = "",
+        requirements: Optional[Mapping[str, Any]] = None,
+    ) -> BackhaulBinding:
+        binding = self._validate_bind_session(
+            context, session_id=session_id, link_ref=link_ref,
+            endpoint_label=endpoint_label, path_ref=path_ref,
+            requirements=requirements,
+        )
+        self._commit_bind_session(binding)
+        return binding
+
+    def _validate_unbind_session(
+        self,
+        context: BackhaulContext,
+        *,
+        bearer_ref: str,
+    ) -> _BindingEntry:
+        """Validate the unbind (NO mutation); returns the live entry."""
+        context.charge(STEP_CHARGES["unbind_session"])
+        return self._live_bearer(bearer_ref)
+
+    def _commit_unbind_session(self, entry: _BindingEntry) -> None:
+        """Commit the local unbind (infallible after validation)."""
+        entry.state = BearerState.RELEASED
+        link = self._links.get(entry.binding.link_ref)
+        if link is not None:
+            link.bearers.pop(entry.binding.bearer_ref, None)
 
     def unbind_session(
         self,
@@ -604,12 +748,10 @@ class ReferenceBackhaulEngine(BackhaulContract):
         *,
         bearer_ref: str,
     ) -> None:
-        context.charge(STEP_CHARGES["unbind_session"])
-        entry = self._live_bearer(bearer_ref)
-        entry.state = BearerState.RELEASED
-        link = self._links.get(entry.binding.link_ref)
-        if link is not None:
-            link.bearers.pop(bearer_ref, None)
+        entry = self._validate_unbind_session(
+            context, bearer_ref=bearer_ref
+        )
+        self._commit_unbind_session(entry)
 
     def observe_link(
         self,
@@ -631,13 +773,17 @@ class ReferenceBackhaulEngine(BackhaulContract):
             )
         )
 
-    def egress_frame(
+    def _validate_egress_frame(
         self,
         context: BackhaulContext,
         *,
         bearer_ref: str,
         payload: bytes,
-    ) -> bytes:
+    ) -> Tuple[_BindingEntry, _LinkEntry]:
+        """Validate the egress (NO mutation -- the deterministic
+        tx/rx counters are NOT incremented here; they are committed
+        only after the real data-plane write succeeds in a managed
+        adapter)."""
         context.charge(STEP_CHARGES["egress_frame"])
         self._require_open()
         if not isinstance(payload, (bytes, bytearray)):
@@ -650,9 +796,28 @@ class ReferenceBackhaulEngine(BackhaulContract):
         # path CLOSED (BACKHAUL_UNAVAILABLE) -- the backhaul path
         # degrades loudly and never drops frames silently.
         self._require_active(link, operation="egress_frame")
-        # Deterministic measured counters (generic WORK-016 vocabulary).
-        link.tx_bytes += len(payload)
-        link.rx_bytes += len(payload)
+        return entry, link
+
+    def _commit_egress_frame(
+        self, entry: _BindingEntry, link: _LinkEntry, payload_len: int
+    ) -> None:
+        """Commit the deterministic measured counters (generic
+        WORK-016 vocabulary; committed only after the bytes actually
+        traversed the path)."""
+        link.tx_bytes += payload_len
+        link.rx_bytes += payload_len
+
+    def egress_frame(
+        self,
+        context: BackhaulContext,
+        *,
+        bearer_ref: str,
+        payload: bytes,
+    ) -> bytes:
+        entry, link = self._validate_egress_frame(
+            context, bearer_ref=bearer_ref, payload=payload
+        )
+        self._commit_egress_frame(entry, link, len(payload))
         # In-memory model: return the payload bytes byte-identical
         # (the deterministic data path; the conformance peer carries
         # the real bytes over a real backhaul path).
@@ -701,12 +866,13 @@ class ReferenceBackhaulEngine(BackhaulContract):
             return "DEGRADED"
         return "FAILED"
 
-    def close(
+    def _validate_close(
         self,
         context: BackhaulContext,
         *,
         link_ref: str,
-    ) -> None:
+    ) -> _LinkEntry:
+        """Validate the close (NO mutation); returns the live link."""
         context.charge(STEP_CHARGES["close"])
         link = self._require_link(link_ref)
         # Fails closed while outstanding: live bearers and live
@@ -728,7 +894,21 @@ class ReferenceBackhaulEngine(BackhaulContract):
                 "before closing (close fails closed while allocations "
                 "are outstanding)" % live_allocations,
             )
+        return link
+
+    def _commit_close(self, link_ref: str) -> None:
+        """Commit the local link teardown (infallible after
+        validation)."""
         del self._links[link_ref]
+
+    def close(
+        self,
+        context: BackhaulContext,
+        *,
+        link_ref: str,
+    ) -> None:
+        self._validate_close(context, link_ref=link_ref)
+        self._commit_close(link_ref)
 
     # ------------------------------------------------------------------
     # Informational surfaces (NOT contract operations)

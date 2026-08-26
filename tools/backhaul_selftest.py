@@ -39,7 +39,19 @@ frozen WORK-022 brief's twelve verification bullets:
   (cases 37-38 -- the BACKHAUL_INTEROP gate never fakes success; the
   BACKHAUL_PEER_KIND anti-faking guard fires FORBIDDEN before any
   probe; SKIP never converts to acceptance);
-* W020 independence + family independence (cases 19, 21).
+* W020 independence + family independence (cases 19, 21);
+* the PR #23 architect-review remediations (cases 40-45): failed
+  EXTERNAL operations leave local state byte-for-byte unchanged
+  (validate -> external -> commit, with compensating rollback --
+  case 40/41); the production path is ONE concrete real target -- a
+  real SNMP-managed IEEE 802.1Q Ethernet switch, exercised at both
+  the REAL SNMPv2c protocol layer and the element-client lifecycle
+  layer over real UDP sockets (cases 42/43); the B1 gate's session
+  authority is the REAL WORK-012 SessionStore composition, rejecting
+  unknown/non-bindable sessions (case 44); and the capability
+  preflight separates hard management-plane prerequisites from
+  data-plane capability and never-blocking diagnostics, with the
+  DISTINCT DATA_PEER_UNREACHABLE gate status (case 45).
 """
 
 from __future__ import annotations
@@ -63,6 +75,7 @@ from adapters.backhaul import (  # noqa: E402
     CONTRACT_OPERATIONS,
     DEFAULT_STEP_BUDGET,
     ETHERTYPE_EXPERIMENTAL,
+    TPID_8021Q,
     ManagedBackhaulAdapter,
     ReferenceBackhaulConformanceServer,
     ReferenceBackhaulEngine,
@@ -72,6 +85,7 @@ from adapters.backhaul import (  # noqa: E402
     STEP_CHARGES,
     BackhaulContext,
     BackhaulContract,
+    BackhaulElementClient,
     BackhaulError,
     BackhaulFailure,
     BackhaulManager,
@@ -81,12 +95,29 @@ from adapters.backhaul import (  # noqa: E402
     BackhaulEnvProbeConfig,
     BackhaulInteropConfig,
     BackhaulLinkObservation,
+    BearerState,
+    ElementAllocation,
+    ElementBearer,
+    ElementLink,
+    ElementObservation,
+    JsonConformanceElementClient,
     LinkDescriptor,
     LinkMetricName,
+    OID_SYS_UPTIME,
+    SnmpEthernetElementClient,
+    SnmpV2cClient,
+    SnmpValue,
+    encode_8021q_frame,
     encode_ethernet_ii_frame,
+    parse_8021q_frame,
     parse_ethernet_ii_header,
+    derive_binding_id,
     derive_local_mac,
+    oid_encode,
+    port_list_set,
+    port_list_test,
     probe_backhaul_interop_capability,
+    real_session_authority,
     run_backhaul_interop,
     backhaul_gate_enabled,
 )
@@ -508,6 +539,301 @@ def _established_session():
     return store, sid
 
 
+class _SnmpResponder:
+    """A REAL-protocol SNMPv2c agent TEST DOUBLE: an in-test UDP server
+    that speaks actual RFC 3416/3417 BER bytes (version/community
+    framing, GetRequest/SetRequest/Response PDUs, error-status
+    decoding, SNMPv2 varbind exceptions) against the family's REAL
+    SNMP client.
+
+    It is a TEST DOUBLE, not a real managed Ethernet switch, and is
+    NEVER claimed as real-element interoperability (LOCK-024): it
+    exists so the REAL protocol client and the production element
+    client's transactional semantics can be regression-tested
+    deterministically over real UDP sockets.  Scriptable failure
+    modes: ``oper_stuck`` (ifOperStatus never comes up),
+    ``row_not_active`` (createAndGo lands notInService),
+    ``generr_on_set`` (error-status genErr on every SET),
+    ``garbage`` (non-BER bytes), ``silent`` (no answer).
+    """
+
+    def __init__(self, *, if_index: int = 1, community: str = "public") -> None:
+        from adapters.backhaul.snmp import _BerReader  # test reach-around
+
+        self._reader_cls = _BerReader
+        self._community = community
+        self._if_index = if_index
+        self.mode = "normal"
+        # The stateful in-memory MIB (schema-level DATA only).
+        self.admin_status = 2  # ifAdminStatus: down
+        self.oper_status = 2  # ifOperStatus: down
+        self.rx_octets = 0
+        self.tx_octets = 0
+        self.rx_errors = 0
+        self.tx_errors = 0
+        # vlan id -> {"rowStatus": int, "egress": bytes}
+        self.vlans = {}
+        self.requests = []  # (pdu_tag, oid) audit log
+        import socket as _s
+        import threading as _t
+
+        self._sock = _s.socket(_s.AF_INET, _s.SOCK_DGRAM)
+        self._sock.bind(("127.0.0.1", 0))
+        self._port = self._sock.getsockname()[1]
+        self._running = True
+        self._thread = _t.Thread(target=self._loop, daemon=True)
+        self._thread.start()
+
+    @property
+    def endpoint(self):
+        return ("127.0.0.1", self._port)
+
+    def close(self) -> None:
+        self._running = False
+        try:
+            self._sock.close()
+        except OSError:
+            pass
+        self._thread.join(timeout=2)
+
+    # -- protocol machinery (real BER bytes both ways) ---------------
+
+    @staticmethod
+    def _tlv(tag: int, content: bytes) -> bytes:
+        return bytes((tag, len(content))) + content
+
+    def _loop(self) -> None:
+        import socket as _s
+
+        while self._running:
+            try:
+                data, addr = self._sock.recvfrom(65536)
+            except OSError:
+                break
+            except _s.timeout:
+                continue
+            if self.mode == "silent":
+                continue
+            if self.mode == "garbage":
+                try:
+                    self._sock.sendto(b"not-ber-at-all", addr)
+                except OSError:
+                    pass
+                continue
+            try:
+                response = self._handle(data)
+            except Exception:  # noqa: BLE001 -- the double never crashes
+                response = None
+            if response is not None:
+                try:
+                    self._sock.sendto(response, addr)
+                except OSError:
+                    pass
+
+    def _handle(self, data: bytes):
+        R = self._reader_cls
+        reader = R(data)
+        tag, body, _ = reader.read_tlv()
+        if tag != 0x30 or not reader.eof():
+            return None
+        inner = R(body)
+        _t, version_raw, _ = inner.read_tlv()
+        _t, community_raw, _ = inner.read_tlv()
+        if community_raw.decode("utf-8", "replace") != self._community:
+            return None
+        pdu_tag, pdu_body, _ = inner.read_tlv()
+        if pdu_tag not in (0xA0, 0xA3):  # GetRequest / SetRequest
+            return None
+        pdu = R(pdu_body)
+        _t, rid, _ = pdu.read_tlv()
+        _t, _es, _ = pdu.read_tlv()
+        _t, _ei, _ = pdu.read_tlv()
+        _t, vbl, _ = pdu.read_tlv()
+        listing = R(vbl)
+        _t, vb, _ = listing.read_tlv()
+        vb_reader = R(vb)
+        _t, name_raw, _ = vb_reader.read_tlv()
+        from adapters.backhaul.snmp import oid_decode
+
+        oid = oid_decode(name_raw)
+        name_tl = self._tlv(0x06, name_raw)
+        self.requests.append((pdu_tag, oid))
+        # SET: apply (with the scriptable failure mode).
+        if pdu_tag == 0xA3:
+            if self.mode == "generr_on_set":
+                return self._response(rid, name_tl, None, error_status=5)
+            _vt, value_raw, _ = vb_reader.read_tlv()
+            self._apply_set(oid, value_raw)
+        # GET: resolve.
+        value = self._resolve_get(oid)
+        if value is None:
+            # SNMPv2 varbind exception: noSuchInstance.
+            value_tl = bytes((0x81, 0x00))
+        else:
+            vtag, vcontent = value
+            value_tl = self._tlv(vtag, vcontent)
+        return self._response(rid, name_tl, value_tl)
+
+    def _response(self, rid: bytes, name_tl: bytes, value_tl, error_status=0):
+        error_tl = self._tlv(0x02, bytes((error_status,)))
+        varbind = self._tlv(0x30, name_tl + (value_tl or bytes((0x05, 0x00))))
+        varbinds = self._tlv(0x30, varbind)
+        pdu = self._tlv(0xA2, self._tlv(0x02, rid) + error_tl +
+                        self._tlv(0x02, b"\x00") + varbinds)
+        community = self._community.encode("utf-8")
+        return self._tlv(
+            0x30, self._tlv(0x02, b"\x01") +
+            self._tlv(0x04, community) + pdu
+        )
+
+    def _apply_set(self, oid: str, value_raw: bytes) -> None:
+        from adapters.backhaul.snmp import (
+            OID_DOT1Q_VLAN_STATIC_EGRESS_PORTS,
+            OID_DOT1Q_VLAN_STATIC_ROW_STATUS,
+        )
+
+        if oid == "1.3.6.1.2.1.2.2.1.7.%d" % self._if_index:
+            self.admin_status = int.from_bytes(value_raw, "big")
+            if self.mode != "oper_stuck":
+                # The port comes up operationally when brought up.
+                self.oper_status = 1 if self.admin_status == 1 else 2
+        elif oid.startswith(OID_DOT1Q_VLAN_STATIC_ROW_STATUS + "."):
+            vid = int(oid.rsplit(".", 1)[1])
+            value = int.from_bytes(value_raw, "big")
+            if value == 6:  # destroy
+                self.vlans.pop(vid, None)
+            elif value == 4:  # createAndGo
+                self.vlans[vid] = {
+                    "rowStatus": 2 if self.mode == "row_not_active" else 1,
+                    "egress": b"",
+                }
+            else:
+                if vid in self.vlans:
+                    self.vlans[vid]["rowStatus"] = value
+        elif oid.startswith(OID_DOT1Q_VLAN_STATIC_EGRESS_PORTS + "."):
+            vid = int(oid.rsplit(".", 1)[1])
+            if vid in self.vlans:
+                self.vlans[vid]["egress"] = value_raw
+
+    def _resolve_get(self, oid: str):
+        from adapters.backhaul.snmp import (
+            OID_DOT1Q_VLAN_STATIC_EGRESS_PORTS,
+            OID_DOT1Q_VLAN_STATIC_ROW_STATUS,
+        )
+
+        if oid == "1.3.6.1.2.1.1.3.0":
+            return (0x43, (4242).to_bytes(4, "big"))  # sysUpTime (TimeTicks)
+        if oid == "1.3.6.1.2.1.2.2.1.7.%d" % self._if_index:
+            return (0x02, bytes((self.admin_status,)))
+        if oid == "1.3.6.1.2.1.2.2.1.8.%d" % self._if_index:
+            return (0x02, bytes((self.oper_status,)))
+        if oid == "1.3.6.1.2.1.2.2.1.10.%d" % self._if_index:
+            return (0x41, self.rx_octets.to_bytes(4, "big"))
+        if oid == "1.3.6.1.2.1.2.2.1.16.%d" % self._if_index:
+            return (0x41, self.tx_octets.to_bytes(4, "big"))
+        if oid == "1.3.6.1.2.1.2.2.1.14.%d" % self._if_index:
+            return (0x41, self.rx_errors.to_bytes(4, "big"))
+        if oid == "1.3.6.1.2.1.2.2.1.20.%d" % self._if_index:
+            return (0x41, self.tx_errors.to_bytes(4, "big"))
+        if oid.startswith(OID_DOT1Q_VLAN_STATIC_ROW_STATUS + "."):
+            vid = int(oid.rsplit(".", 1)[1])
+            if vid in self.vlans:
+                return (0x02, bytes((self.vlans[vid]["rowStatus"],)))
+            return None
+        if oid.startswith(OID_DOT1Q_VLAN_STATIC_EGRESS_PORTS + "."):
+            vid = int(oid.rsplit(".", 1)[1])
+            if vid in self.vlans:
+                return (0x04, self.vlans[vid]["egress"])
+            return None
+        return None
+
+
+class _RecordingElementClient(BackhaulElementClient):
+    """An in-memory element-client double that RECORDS every call
+    (the external-seam fault-injection double for the compensating
+    rollback regression -- case_41)."""
+
+    label = "recording-element"
+
+    def __init__(self) -> None:
+        self.calls = []
+
+    def _record(self, op: str, *args) -> None:
+        self.calls.append((op,) + args)
+
+    def link_up(self, *, name, profile, capacity_bps, endpoint_labels):
+        self._record("link_up", name)
+        return ElementLink(key="element-link-1", far_mac=derive_local_mac("far"))
+
+    def link_down(self, link):
+        self._record("link_down", link.key)
+
+    def allocate_capacity(self, link, *, kind, quantity_base, purpose, nonce):
+        self._record("allocate_capacity", nonce)
+        return ElementAllocation(key="element-alloc-1")
+
+    def release_capacity(self, allocation):
+        self._record("release_capacity", allocation.key)
+
+    def bind_bearer(self, link, *, endpoint_label):
+        self._record("bind_bearer", endpoint_label)
+        return ElementBearer(
+            key="element-bearer-1", far_mac=derive_local_mac("far")
+        )
+
+    def unbind_bearer(self, bearer):
+        self._record("unbind_bearer", bearer.key)
+
+    def observe(self, link):
+        self._record("observe", link.key)
+        return ElementObservation(True, 0, 0, 0, 0)
+
+    def write_frame(self, bearer, *, dst_mac, src_mac, payload):
+        self._record("write_frame", bytes(payload))
+
+    def open_data_socket(self, bearer, *, local_mac):
+        self._record("open_data_socket", bearer.key)
+        return None
+
+    def close_data_socket(self, bearer):
+        self._record("close_data_socket", bearer.key)
+
+
+class _CommitFailureAdapter(ManagedBackhaulAdapter):
+    """The managed adapter with INJECTED local-commit failures (the
+    defensive compensating-rollback regression driver -- case_41):
+    the external operation succeeds, the local commit fails, and the
+    adapter MUST compensate on the element."""
+
+    def __init__(self, element, fail: Tuple[str, ...]) -> None:
+        super().__init__(element=element)
+        self._fail = set(fail)
+
+    def _commit_provision_link(self, link_view, credential_slot_name):
+        if "provision_link" in self._fail:
+            raise BackhaulError(
+                BackhaulReasonCode.ILLEGAL_STATE,
+                "injected local commit failure",
+            )
+        super()._commit_provision_link(link_view, credential_slot_name)
+
+    def _commit_allocate(self, allocation):
+        if "allocate" in self._fail:
+            raise BackhaulError(
+                BackhaulReasonCode.ILLEGAL_STATE,
+                "injected local commit failure",
+            )
+        super()._commit_allocate(allocation)
+
+    def _commit_bind_session(self, binding):
+        if "bind_session" in self._fail:
+            raise BackhaulError(
+                BackhaulReasonCode.ILLEGAL_STATE,
+                "injected local commit failure",
+            )
+        super()._commit_bind_session(binding)
+
+
 # ==========================================================================
 # Cases
 # ==========================================================================
@@ -835,11 +1161,12 @@ def case_11_identity_separation() -> Result:
     # The model rejects a collapsed binding at construction.
     from adapters.backhaul.model import BackhaulBinding
 
+    honest_bearer = "backhaul:bearer:" + "a" * 32
     try:
         BackhaulBinding(
             session_id=_SESSION_ID,
-            bearer_ref="backhaul:bearer:" + "a" * 32,
-            binding_id="backhaul:binding:" + "b" * 32,
+            bearer_ref=honest_bearer,
+            binding_id=derive_binding_id(_SESSION_ID, honest_bearer),
             link_ref=link_ref,
             endpoint_label=_ENDPOINT,
             profile=BackhaulProfile.ETHERNET,
@@ -851,8 +1178,8 @@ def case_11_identity_separation() -> Result:
     try:
         BackhaulBinding(
             session_id="backhaul:bearer:" + "a" * 32,
-            bearer_ref="backhaul:bearer:" + "a" * 32,
-            binding_id="backhaul:binding:" + "b" * 32,
+            bearer_ref=honest_bearer,
+            binding_id=derive_binding_id(honest_bearer, honest_bearer),
             link_ref=link_ref,
             endpoint_label=_ENDPOINT,
             profile=BackhaulProfile.ETHERNET,
@@ -862,7 +1189,53 @@ def case_11_identity_separation() -> Result:
         return fail(name, "collapsed binding accepted by the model")
     except BackhaulError:
         pass
-    return ok(name, "session/link/bearer/allocation identity axes pairwise distinct; model enforces separation")
+    # STRUCTURAL content-derivation (the PR #23 review, secondary
+    # correction 1): a TAMPERED binding_id (right shape, wrong
+    # content) is rejected by the model at construction.
+    try:
+        BackhaulBinding(
+            session_id=_SESSION_ID,
+            bearer_ref=honest_bearer,
+            binding_id="backhaul:binding:" + "b" * 32,  # tampered
+            link_ref=link_ref,
+            endpoint_label=_ENDPOINT,
+            profile=BackhaulProfile.ETHERNET,
+            path_ref="",
+            closed=False,
+        )
+        return fail(name, "tampered binding_id accepted by the model")
+    except BackhaulError as exc:
+        if exc.reason != BackhaulReasonCode.INVALID_INPUT:
+            return fail(name, "wrong tamper reason: %s" % exc.reason)
+    # And the sandbox seam re-asserts the same invariant (a hostile
+    # implementation returning a mismatched key is a contract
+    # violation -- pinned by the seam re-check directly).
+    from adapters.backhaul.sandbox import SandboxedBackhaul
+
+    sandbox = SandboxedBackhaul(
+        _CrashingImpl(),
+        integration_id="adcos:backhaul:tamper",
+        step_budget=100,
+        session_reader=None,
+    )
+    sandbox.open(_T0)
+    forged = BackhaulBinding(
+        session_id=_SESSION_ID,
+        bearer_ref=honest_bearer,
+        binding_id=derive_binding_id(_SESSION_ID, honest_bearer),
+        link_ref=link_ref,
+        endpoint_label=_ENDPOINT,
+        profile=BackhaulProfile.ETHERNET,
+        path_ref="",
+        closed=False,
+    )
+    object.__setattr__(
+        forged, "binding_id", "backhaul:binding:" + "c" * 32
+    )  # bypass the frozen dataclass to simulate a hostile subclass
+    verdict = sandbox._validate_binding(forged)
+    if not hasattr(verdict, "detail") or "binding_id" not in verdict.detail:
+        return fail(name, "sandbox seam accepted a forged binding_id: %r" % verdict)
+    return ok(name, "session/link/bearer/allocation identity axes pairwise distinct; binding_id content-derivation is STRUCTURAL (model + seam + tamper regression); model enforces separation")
 
 
 def case_12_session_collapse_rejected() -> Result:
@@ -884,7 +1257,11 @@ def case_12_session_collapse_rejected() -> Result:
         if exc.reason != BackhaulReasonCode.ACCESS_SESSION_COLLAPSE:
             return fail(name, "wrong collapse reason: %s" % exc.reason)
     # A hostile implementation returning another session's bearer ref
-    # is rejected (defense in depth at the manager).
+    # is rejected -- and with the PR #23 structural binding_id
+    # invariant, the collapse cannot even be CONSTRUCTED: the model
+    # rejects it inside the implementation, the sandbox isolates the
+    # raise into a typed failure VALUE, and the mediated bind fails
+    # (defense in depth now runs model -> sandbox -> manager).
     hostile = _CrossSessionImpl()
     mgr2 = _new_manager(hostile)
     link_ref2 = _provision(mgr2, name="hostile-link")
@@ -892,15 +1269,12 @@ def case_12_session_collapse_rejected() -> Result:
         now=_NOW, session_id=_SESSION_ID, link_ref=link_ref2,
         endpoint_label=_ENDPOINT,
     )
-    try:
-        mgr2.bind_session(
-            now=_NOW, session_id=_SESSION_ID_2, link_ref=link_ref2,
-            endpoint_label=_ENDPOINT,
-        )
+    hostile_result = mgr2.bind_session(
+        now=_NOW, session_id=_SESSION_ID_2, link_ref=link_ref2,
+        endpoint_label=_ENDPOINT,
+    )
+    if hostile_result.ok:
         return fail(name, "cross-session bearer reuse accepted")
-    except BackhaulError as exc:
-        if exc.reason != BackhaulReasonCode.ACCESS_SESSION_COLLAPSE:
-            return fail(name, "wrong cross-session reason: %s" % exc.reason)
     # A backhaul change is a REPLACEMENT after release: the SAME
     # session re-binds to a NEW bearer_ref.
     mgr3 = _new_manager(ReferenceBackhaulEngine())
@@ -917,7 +1291,7 @@ def case_12_session_collapse_rejected() -> Result:
     ).value
     if b2.session_id != _SESSION_ID or b2.bearer_ref == b1.bearer_ref:
         return fail(name, "rebind did not preserve the session / mint a new bearer")
-    return ok(name, "collapse rejected both caller-side and impl-side; re-home = replacement after release (same session_id, NEW bearer_ref)")
+    return ok(name, "collapse rejected caller-side and structurally (the model rejects collapsed bindings at construction; the sandbox isolates the raise); re-home = replacement after release (same session_id, NEW bearer_ref)")
 
 
 def case_13_requirements_smuggling_rejected() -> Result:
@@ -1146,22 +1520,27 @@ def case_19_standards_boundary_audit() -> Result:
     pkg_dir = os.path.join(_ROOT, "adapters", "backhaul")
     forbidden_import_roots = ("ssl", "cryptography", "crypto", "random", "secrets")
     # conformance.py + managed.py + backhaul_interop.py +
-    # interop_env_probe.py may use real-network stdlib
-    # (socket/json/struct/threading).  backhaul_interop.py is the B1
-    # real-backhaul interop gate -- it legitimately probes a real
-    # managed element over a real TCP socket (no in-repo simulator
-    # fallback).  interop_env_probe.py is the anti-faking gate
-    # surface: it probes environment capabilities and enforces the
-    # BACKHAUL_PEER_KIND guard -- it is gate SURFACE, a sibling of
-    # backhaul_interop.py, and uses real sockets + os.environ for the
-    # same gate-config env vars.  Both gate-surface files need `os`
-    # for env-var-driven config (BACKHAUL_INTEROP/BACKHAUL_ENDPOINT/
-    # BACKHAUL_DATA_PEER/BACKHAUL_PEER_KIND/BACKHAUL_PROBE_TIMEOUT_S);
-    # the sub-scan below rejects os.urandom/system/popen/fork/exec so
-    # the `os` import cannot smuggle non-determinism or sandbox escape.
+    # interop_env_probe.py + element.py + ethernet.py + snmp.py may
+    # use real-network stdlib (socket/json/struct/threading): the
+    # conformance peer + adapters use real sockets; snmp.py is the
+    # REAL SNMPv2c client (real UDP); ethernet.py is the real
+    # AF_PACKET frame writer/reader; element.py holds the
+    # element-client seam (production SNMP target + conformance
+    # JSON/TCP client).  backhaul_interop.py is the B1
+    # real-backhaul interop gate -- it legitimately drives the real
+    # element over real sockets and composes the REAL WORK-012
+    # session authority (the same sessions/routing/policy/topology
+    # imports the accepted WORK-016 AdapterRuntime uses).
+    # interop_env_probe.py is the anti-faking gate surface: it
+    # probes environment capabilities and enforces the
+    # BACKHAUL_PEER_KIND guard.  Both gate-surface files need `os`
+    # for env-var-driven config (BACKHAUL_INTEROP/
+    # BACKHAUL_SNMP_ENDPOINT/BACKHAUL_PEER_KIND/...); the sub-scan
+    # below rejects os.urandom/system/popen/fork/exec so the `os`
+    # import cannot smuggle non-determinism or sandbox escape.
     real_network_allowed = {
         "conformance.py", "managed.py", "backhaul_interop.py",
-        "interop_env_probe.py",
+        "interop_env_probe.py", "element.py", "ethernet.py", "snmp.py",
     }
     env_aware_allowed = {"backhaul_interop.py", "interop_env_probe.py"}
     forbidden_os_calls = (
@@ -1255,7 +1634,29 @@ def case_19_standards_boundary_audit() -> Result:
     probe_src = _src("interop_env_probe.py")
     if "g.709" not in probe_src:
         return fail(name, "interop_env_probe.py missing ITU-T G.709 citation")
-    return ok(name, "no forbidden imports/secret/vendor/RAN tokens; standards cited (IEEE 802.3/802.1Q, ITU-T G.709, ITU-R); real-network stdlib only in conformance/managed/interop/gate; os.environ-only in env-aware gate surface")
+    # The PR #23 production-path modules cite their REAL standards:
+    # SNMP (RFC 3416/3417 framing + RFC 2578 BER), IF-MIB (RFC 2863),
+    # Q-BRIDGE-MIB (RFC 4363 / PortList RFC 2674), and the IEEE
+    # 802.1Q VLAN tag + 802.3 frame shapes.
+    snmp_src = _src("snmp.py")
+    for citation in ("rfc 3416", "rfc 3417", "rfc 2578", "rfc 2863",
+                     "rfc 4363", "rfc 2674"):
+        if citation not in snmp_src:
+            return fail(name, "snmp.py missing %s citation" % citation.upper())
+    eth_src = _src("ethernet.py")
+    for citation in ("802.3-2018", "802.1q-2022", "0x8100"):
+        if citation not in eth_src:
+            return fail(name, "ethernet.py missing %r citation" % citation)
+    elem_src = _src("element.py")
+    for citation in ("rfc 2863", "rfc 4363", "snmpv2c", "802.1q"):
+        if citation not in elem_src:
+            return fail(name, "element.py missing %s citation" % citation.upper())
+    interop_src = _src("backhaul_interop.py")
+    if "sessionstore" not in interop_src:
+        return fail(name, "backhaul_interop.py must compose the REAL WORK-012 SessionStore (Blocker 3)")
+    if "snmp" not in interop_src.lower():
+        return fail(name, "backhaul_interop.py must drive the SNMP production path (Blocker 1)")
+    return ok(name, "no forbidden imports/secret/vendor/RAN tokens; standards cited (IEEE 802.3/802.1Q, ITU-T G.709, ITU-R, RFC 3416/3417/2578/2863/4363/2674); real-network stdlib confined to the conformance/adapter/element/SNMP/gate modules; os.environ-only in env-aware gate surface")
 
 
 def case_20_frozen_spec_intact() -> Result:
@@ -1501,12 +1902,20 @@ def case_24_w011_path_reference_consumption() -> Result:
         )
         if r2.ok:
             return fail(name, "malformed path_ref accepted: %r" % bad)
-    # The family imports NOTHING from routing (path references are
+    # The FAMILY imports NOTHING from routing (path references are
     # consumed as opaque DATA; never re-derived or scored -- no second
-    # routing engine).
+    # routing engine).  The interop GATE (backhaul_interop.py) is the
+    # sanctioned exception: per the PR #23 architect review (Blocker
+    # 3), the gate composes the REAL WORK-011/WORK-012 pieces for the
+    # REAL session authority -- driving the actual RoutingEngine/
+    # SessionStore the application path uses is the OPPOSITE of a
+    # second engine (the family's contract/engine/manager/sandbox/
+    # bridge modules remain routing-free; the gate is env-gated
+    # verification surface, exactly like the selftest and the W016
+    # AdapterRuntime composition).
     pkg_dir = os.path.join(_ROOT, "adapters", "backhaul")
     for fname in sorted(os.listdir(pkg_dir)):
-        if not fname.endswith(".py"):
+        if not fname.endswith(".py") or fname == "backhaul_interop.py":
             continue
         with open(os.path.join(pkg_dir, fname), "r", encoding="utf-8") as f:
             source = f.read()
@@ -1519,7 +1928,17 @@ def case_24_w011_path_reference_consumption() -> Result:
             elif isinstance(node, ast.ImportFrom):
                 if (node.module or "").split(".")[0] == "routing":
                     return fail(name, "%s imports from routing (second routing engine)" % fname)
-    return ok(name, "WORK-011 path fingerprints consumed verbatim as opaque DATA; malformed rejected; the family imports no routing engine")
+    # The gate composes the REAL engine (WORK-011 + WORK-012) --
+    # importing the actual routing/sessions modules, never defining
+    # its own path/session derivation.
+    with open(os.path.join(pkg_dir, "backhaul_interop.py"), encoding="utf-8") as f:
+        gate_src = f.read()
+    for real_import in ("from routing import", "from sessions import"):
+        if real_import not in gate_src:
+            return fail(name, "backhaul_interop.py must import the REAL %s composition (Blocker 3)" % real_import.split()[1])
+    if "def derive_path" in gate_src or "RoutingEngine(" not in gate_src:
+        return fail(name, "backhaul_interop.py must drive the REAL RoutingEngine, never a private derivation")
+    return ok(name, "WORK-011 path fingerprints consumed verbatim as opaque DATA; malformed rejected; the family imports no routing engine (the interop GATE composes the REAL WORK-011/WORK-012 pieces for real session authority)")
 
 
 def case_25_authority_session_reader_read_only() -> Result:
@@ -1764,7 +2183,9 @@ def case_34_real_conformance_byte_path() -> Result:
     try:
         # leg 1: ManagedBackhaulAdapter -> real conformance element.
         adapter1 = ManagedBackhaulAdapter(
-            control_endpoint=server.control_endpoint,
+            element=JsonConformanceElementClient(
+                control_endpoint=server.control_endpoint,
+            ),
         )
         mgr = BackhaulManager(
             integration_id="adcos:backhaul:a4",
@@ -1866,7 +2287,9 @@ def case_34_real_conformance_byte_path() -> Result:
         # satellite binding keeps its owning sandbox (the facade's
         # socket is still open, so the egress still carries bytes).
         adapter2 = ManagedBackhaulAdapter(
-            control_endpoint=server.control_endpoint,
+            element=JsonConformanceElementClient(
+                control_endpoint=server.control_endpoint,
+            ),
         )
         adapter2.label = "managed-leg3"
         r = mgr.register_implementation(
@@ -2232,7 +2655,9 @@ def case_36_architect_authority_path() -> Result:
     server = ReferenceBackhaulConformanceServer()
     try:
         adapter = ManagedBackhaulAdapter(
-            control_endpoint=server.control_endpoint,
+            element=JsonConformanceElementClient(
+                control_endpoint=server.control_endpoint,
+            ),
         )
         real_mgr = BackhaulManager(
             integration_id="adcos:backhaul:encap",
@@ -2283,27 +2708,30 @@ def case_37_b1_real_backhaul_interop_gate() -> Result:
     name = "case_37_b1_real_backhaul_interop_gate"
     # Gate OFF (the default): a transparent SKIP disclosure, never a
     # fabricated PASS.
-    for var in ("BACKHAUL_INTEROP", "BACKHAUL_ENDPOINT",
-                "BACKHAUL_DATA_PEER", "BACKHAUL_PEER_KIND"):
+    for var in ("BACKHAUL_INTEROP", "BACKHAUL_SNMP_ENDPOINT",
+                "BACKHAUL_SNMP_COMMUNITY", "BACKHAUL_IFINDEX",
+                "BACKHAUL_BRIDGE_PORT", "BACKHAUL_EGRESS_IF",
+                "BACKHAUL_L2_FAR_MAC", "BACKHAUL_PROBE_TIMEOUT_S",
+                "BACKHAUL_PEER_KIND"):
         os.environ.pop(var, None)
     if backhaul_gate_enabled():
         return fail(name, "gate enabled without BACKHAUL_INTEROP=1")
     outcome = run_backhaul_interop(
-        BackhaulInteropConfig(element_endpoint="", data_peer="")
+        BackhaulInteropConfig(snmp_endpoint="")
     )
     if outcome.status != "UNREACHABLE":
         return fail(name, "gate-off outcome must be UNREACHABLE (a transparent SKIP disclosure), got %s" % outcome.status)
     if "not configured" not in outcome.detail:
         return fail(name, "gate-off detail must disclose the blocker: %s" % outcome.detail[:120])
-    # Gate ON + an unreachable real element: UNREACHABLE with the
-    # explicit environment-capability matrix (never a PASS, never a
-    # fallback to the in-repo peer).
+    # Gate ON + an unreachable real element (management plane): the
+    # probe's REAL SNMP GET sysUpTime round-trip fails against a dead
+    # UDP port -> UNREACHABLE with the explicit environment-capability
+    # matrix (never a PASS, never a fallback to the in-repo peer).
     try:
         os.environ["BACKHAUL_INTEROP"] = "1"
         outcome2 = run_backhaul_interop(
             BackhaulInteropConfig(
-                element_endpoint="127.0.0.1:1",  # nothing listens here
-                data_peer="",
+                snmp_endpoint="127.0.0.1:1",  # nothing answers SNMP here
                 timeout_s=0.3,
             )
         )
@@ -2317,7 +2745,7 @@ def case_37_b1_real_backhaul_interop_gate() -> Result:
             return fail(name, "the gate fabricated a PASS")
     finally:
         os.environ.pop("BACKHAUL_INTEROP", None)
-    return ok(name, "gate off -> transparent SKIP disclosure; gate on + unreachable element -> UNREACHABLE with the explicit capability matrix (never a PASS)")
+    return ok(name, "gate off -> transparent SKIP disclosure; gate on + dead SNMP endpoint -> UNREACHABLE with the explicit capability matrix (never a PASS)")
 
 
 def case_38_b1_gate_hardening_and_anti_faking() -> Result:
@@ -2330,7 +2758,7 @@ def case_38_b1_gate_hardening_and_anti_faking() -> Result:
         os.environ["BACKHAUL_PEER_KIND"] = kind
         try:
             report = probe_backhaul_interop_capability(
-                BackhaulEnvProbeConfig(element_endpoint="127.0.0.1:1")
+                BackhaulEnvProbeConfig(snmp_endpoint="127.0.0.1:1")
             )
             if report.forbidden_substitution is None:
                 return fail(name, "peer kind %r not forbidden" % kind)
@@ -2346,16 +2774,20 @@ def case_38_b1_gate_hardening_and_anti_faking() -> Result:
     os.environ["BACKHAUL_PEER_KIND"] = "real_element"
     try:
         report2 = probe_backhaul_interop_capability(
-            BackhaulEnvProbeConfig(element_endpoint="127.0.0.1:1")
+            BackhaulEnvProbeConfig(snmp_endpoint="127.0.0.1:1")
         )
         if report2.forbidden_substitution is not None:
             return fail(name, "real_element assertion incorrectly forbidden")
         if report2.reachable:
             return fail(name, "unreachable endpoint reported reachable")
-        # The capability matrix names its checks.
+        # The capability matrix names its checks: the HARD management
+        # prerequisite (snmp_endpoint), the DATA-PLANE capability
+        # prerequisites, and the DIAGNOSTICS.
         names = {c.name for c in report2.checks}
-        for expected in ("wired_interfaces", "element_mgmt_tools",
-                         "terminal_daemons", "element_endpoint"):
+        for expected in ("snmp_endpoint", "packet_socket",
+                         "egress_interface", "l2_far_mac",
+                         "wired_interfaces", "element_mgmt_tools",
+                         "terminal_daemons"):
             if expected not in names:
                 return fail(name, "capability matrix missing %r" % expected)
         if "SKIP" not in report2.summary():
@@ -2367,7 +2799,7 @@ def case_38_b1_gate_hardening_and_anti_faking() -> Result:
     os.environ["BACKHAUL_PEER_KIND"] = "reference"
     try:
         outcome = run_backhaul_interop(
-            BackhaulInteropConfig(element_endpoint="127.0.0.1:1", timeout_s=0.3)
+            BackhaulInteropConfig(snmp_endpoint="127.0.0.1:1", timeout_s=0.3)
         )
         if outcome.status != "FORBIDDEN":
             return fail(name, "gate must be FORBIDDEN on an in-repo peer assertion, got %s" % outcome.status)
@@ -2411,6 +2843,695 @@ def case_39_w020_independence() -> Result:
     # compose at the composition root / selftest, never inside a
     # family).
     return ok(name, "no RAN vocabulary and no adapters.ran import anywhere in the family (W020 stays out of the dependency chain)")
+
+
+# ==========================================================================
+# PR #23 architect-review remediation regressions (cases 40-45)
+# ==========================================================================
+
+
+def case_40_transactional_remote_failure_leaves_state_unchanged() -> Result:
+    """Blocker 2 regression: failed EXTERNAL operations leave the
+    local manager-visible state byte-for-byte equivalent to the
+    pre-call state (validate -> perform external operation -> commit
+    local -- a failed remote operation never commits).
+
+    Every failure below is a REAL socket failure (TCP connection
+    refused against a closed port / a real write onto a closed
+    socket), driven through the FULL mediated path
+    (manager -> sandbox -> adapter -> element client).
+    """
+    name = "case_40_transactional_remote_failure_leaves_state_unchanged"
+    dead = ("127.0.0.1", 1)  # nothing listens here: connection refused
+
+    def _mgr_with(element) -> Tuple[BackhaulManager, ManagedBackhaulAdapter]:
+        adapter = ManagedBackhaulAdapter(element=element)
+        mgr = BackhaulManager(
+            integration_id="adcos:backhaul:txn",
+            session_reader=_TestSessionReader(),
+        )
+        r = mgr.register_implementation(
+            adapter, label="txn-%d" % id(adapter), make_default=True, now=_T0,
+        )
+        assert r.ok, r.detail
+        return mgr, adapter
+
+    # ---- (1) LINK_UP failure: no local link, byte-for-byte state ----
+    mgr, adapter = _mgr_with(
+        JsonConformanceElementClient(control_endpoint=dead, timeout_s=0.5)
+    )
+    before = mgr.to_canonical_bytes()
+    r = mgr.provision_link(
+        now=_NOW, descriptor=_descriptor(name="txn-link"),
+        credential_slot_name=_CRED_SLOT,
+    )
+    if r.ok:
+        return fail(name, "provision against a dead element succeeded")
+    if mgr.to_canonical_bytes() != before:
+        return fail(name, "LINK_UP failure mutated the manager snapshot")
+    if adapter._links:
+        return fail(name, "LINK_UP failure left a local link")
+    if adapter._sequence != 0:
+        return fail(name, "LINK_UP failure mutated the engine sequence")
+
+    # ---- (2) ALLOCATE / BIND failure mid-flight (server dies) -------
+    server = ReferenceBackhaulConformanceServer()
+    try:
+        mgr2, adapter2 = _mgr_with(
+            JsonConformanceElementClient(
+                control_endpoint=server.control_endpoint,
+            )
+        )
+        link_ref = _provision(mgr2, name="txn-live")
+        # Kill the element between provision and allocate.
+        server.close()
+        before2 = mgr2.to_canonical_bytes()
+        r2 = mgr2.allocate(
+            now=_NOW, link_ref=link_ref, kind="backhaul",
+            quantity_base=_RESERVE, purpose="txn",
+        )
+        if r2.ok:
+            return fail(name, "ALLOCATE against a dead element succeeded")
+        if mgr2.to_canonical_bytes() != before2:
+            return fail(name, "ALLOCATE failure mutated the manager snapshot")
+        if link_ref not in adapter2._links:
+            return fail(name, "ALLOCATE failure dropped the live link")
+        if adapter2._links[link_ref].allocations:
+            return fail(name, "ALLOCATE failure left a phantom reservation")
+        if adapter2._sequence != 0:
+            return fail(name, "ALLOCATE failure mutated the engine sequence")
+        # BIND failure after the element died: same discipline.
+        r3 = mgr2.bind_session(
+            now=_NOW, session_id=_SESSION_ID, link_ref=link_ref,
+            endpoint_label=_ENDPOINT,
+        )
+        if r3.ok:
+            return fail(name, "BIND against a dead element succeeded")
+        if mgr2.to_canonical_bytes() != before2:
+            return fail(name, "BIND failure mutated the manager snapshot")
+        if adapter2._bindings:
+            return fail(name, "BIND failure left a phantom bearer")
+        # UNBIND / RELEASE / LINK_DOWN failures need LIVE state first:
+        # rebuild with a fresh server.
+        server2 = ReferenceBackhaulConformanceServer()
+        try:
+            mgr3, adapter3 = _mgr_with(
+                JsonConformanceElementClient(
+                    control_endpoint=server2.control_endpoint,
+                )
+            )
+            link_ref3 = _provision(mgr3, name="txn-live2")
+            alloc3 = _allocate(mgr3, link_ref3)
+            binding3 = _provision_bind(mgr3, _SESSION_ID, link_ref=link_ref3)
+            # Attach the real wire socket (the facade's data path).
+            app = mgr3.app_session(now=_NOW, session_id=_SESSION_ID)
+            assert app.ok, app.detail
+            session = app.value
+            session.connect("far-endpoint")
+            before3 = mgr3.to_canonical_bytes()
+            # Kill the element; then UNBIND / RELEASE / LINK_DOWN all
+            # fail against the dead control plane -- and each failure
+            # must leave the live local state EXACTLY as it was.
+            server2.close()
+            r4 = mgr3.unbind_session(
+                now=_NOW, bearer_ref=binding3.bearer_ref,
+            )
+            if r4.ok:
+                return fail(name, "UNBIND against a dead element succeeded")
+            if mgr3.to_canonical_bytes() != before3:
+                return fail(name, "UNBIND failure mutated the manager snapshot")
+            entry = adapter3._bindings[binding3.bearer_ref]
+            if entry.state != BearerState.BOUND:
+                return fail(name, "UNBIND failure released the local bearer")
+            r5 = mgr3.release(now=_NOW, allocation_ref=alloc3)
+            if r5.ok:
+                return fail(name, "RELEASE against a dead element succeeded")
+            if mgr3.to_canonical_bytes() != before3:
+                return fail(name, "RELEASE failure mutated the manager snapshot")
+            if not adapter3._allocations[alloc3].allocation:
+                return fail(name, "RELEASE failure dropped the local allocation")
+            r6 = mgr3.close_link(now=_NOW, link_ref=link_ref3)
+            if r6.ok:
+                return fail(name, "LINK_DOWN against a dead element succeeded")
+            if mgr3.to_canonical_bytes() != before3:
+                return fail(name, "LINK_DOWN failure mutated the manager snapshot")
+            if link_ref3 not in adapter3._links:
+                return fail(name, "LINK_DOWN failure dropped the local link")
+            # ---- (3) wire-write failure: counters committed ONLY on
+            # success -- a failed real write leaves the deterministic
+            # tx/rx counters byte-for-byte unchanged.
+            wire_sock = next(iter(adapter3._element._wire_sockets.values()))
+            wire_sock.close()  # a real closed-socket write failure
+            r7 = mgr3.egress_frame(
+                now=_NOW, bearer_ref=binding3.bearer_ref, payload=_PAYLOAD,
+            )
+            if r7.ok:
+                return fail(name, "egress onto a closed wire socket succeeded")
+            if mgr3.to_canonical_bytes() != before3:
+                return fail(name, "wire-write failure mutated the manager snapshot")
+            link_entry = adapter3._links[link_ref3]
+            if link_entry.tx_bytes != 0 or link_entry.rx_bytes != 0:
+                return fail(
+                    name,
+                    "wire-write failure committed counters (tx=%d rx=%d)"
+                    % (link_entry.tx_bytes, link_entry.rx_bytes),
+                )
+        finally:
+            server2.close()
+    finally:
+        server.close()
+    return ok(name, "LINK_UP/ALLOCATE/BIND/UNBIND/RELEASE/LINK_DOWN/wire-write failures (all REAL socket failures) each leave the manager snapshot + engine state byte-for-byte unchanged (validate -> external -> commit)")
+
+
+def case_41_compensating_rollback_on_commit_failure() -> Result:
+    """Blocker 2 regression (the compensating-rollback half): when an
+    external operation SUCCEEDS but the local commit fails, the
+    adapter compensates on the element (LINK_UP->LINK_DOWN,
+    ALLOCATE->RELEASE, BIND->UNBIND) and the original error
+    propagates -- no half state on either side.
+    """
+    name = "case_41_compensating_rollback_on_commit_failure"
+
+    # (1) provision_link: external link_up succeeds, commit fails ->
+    # compensating link_down recorded, no local link.
+    client = _RecordingElementClient()
+    adapter = _CommitFailureAdapter(client, fail=("provision_link",))
+    mgr = BackhaulManager(
+        integration_id="adcos:backhaul:rollback",
+        session_reader=_TestSessionReader(),
+    )
+    r = mgr.register_implementation(
+        adapter, label="rollback-1", make_default=True, now=_T0
+    )
+    assert r.ok, r.detail
+    before = mgr.to_canonical_bytes()
+    r = mgr.provision_link(
+        now=_NOW, descriptor=_descriptor(name="rollback-link"),
+        credential_slot_name=_CRED_SLOT,
+    )
+    if r.ok:
+        return fail(name, "injected commit failure did not fail the op")
+    if mgr.to_canonical_bytes() != before:
+        return fail(name, "compensated provision mutated the manager snapshot")
+    if adapter._links:
+        return fail(name, "compensated provision left a local link")
+    ops = [c[0] for c in client.calls]
+    if ops != ["link_up", "link_down"]:
+        return fail(name, "provision rollback sequence wrong: %s" % ops)
+
+    # (2) allocate: external allocate_capacity succeeds, commit fails
+    # -> compensating release_capacity recorded.
+    client2 = _RecordingElementClient()
+    adapter2 = _CommitFailureAdapter(client2, fail=("allocate",))
+    mgr2 = BackhaulManager(
+        integration_id="adcos:backhaul:rollback2",
+        session_reader=_TestSessionReader(),
+    )
+    mgr2.register_implementation(
+        adapter2, label="rollback-2", make_default=True, now=_T0
+    )
+    link_ref = _provision(mgr2, name="rollback-link-2")
+    before2 = mgr2.to_canonical_bytes()
+    r2 = mgr2.allocate(
+        now=_NOW, link_ref=link_ref, kind="backhaul",
+        quantity_base=_RESERVE, purpose="rollback",
+    )
+    if r2.ok:
+        return fail(name, "injected allocate commit failure did not fail")
+    if mgr2.to_canonical_bytes() != before2:
+        return fail(name, "compensated allocate mutated the manager snapshot")
+    ops2 = [c[0] for c in client2.calls]
+    if ops2 != ["link_up", "allocate_capacity", "release_capacity"]:
+        return fail(name, "allocate rollback sequence wrong: %s" % ops2)
+
+    # (3) bind_session: external bind_bearer succeeds, commit fails
+    # -> compensating unbind_bearer recorded.
+    client3 = _RecordingElementClient()
+    adapter3 = _CommitFailureAdapter(client3, fail=("bind_session",))
+    mgr3 = BackhaulManager(
+        integration_id="adcos:backhaul:rollback3",
+        session_reader=_TestSessionReader(),
+    )
+    mgr3.register_implementation(
+        adapter3, label="rollback-3", make_default=True, now=_T0
+    )
+    link_ref3 = _provision(mgr3, name="rollback-link-3")
+    _allocate(mgr3, link_ref3)
+    before3 = mgr3.to_canonical_bytes()
+    r3 = mgr3.bind_session(
+        now=_NOW, session_id=_SESSION_ID, link_ref=link_ref3,
+        endpoint_label=_ENDPOINT,
+    )
+    if r3.ok:
+        return fail(name, "injected bind commit failure did not fail")
+    if mgr3.to_canonical_bytes() != before3:
+        return fail(name, "compensated bind mutated the manager snapshot")
+    if adapter3._bindings:
+        return fail(name, "compensated bind left a local bearer")
+    ops3 = [c[0] for c in client3.calls]
+    if ops3 != [
+        "link_up", "allocate_capacity", "bind_bearer", "unbind_bearer",
+    ]:
+        return fail(name, "bind rollback sequence wrong: %s" % ops3)
+
+    # (4) the control: with NO injected failures the same double flows
+    # end-to-end (external ops + commits succeed).
+    client4 = _RecordingElementClient()
+    adapter4 = _CommitFailureAdapter(client4, fail=())
+    mgr4 = BackhaulManager(
+        integration_id="adcos:backhaul:rollback4",
+        session_reader=_TestSessionReader(),
+    )
+    mgr4.register_implementation(
+        adapter4, label="rollback-4", make_default=True, now=_T0
+    )
+    link_ref4 = _provision(mgr4, name="rollback-link-4")
+    _allocate(mgr4, link_ref4)
+    bound = _provision_bind(mgr4, _SESSION_ID, link_ref=link_ref4)
+    if not bound.bearer_ref.startswith("backhaul:bearer:"):
+        return fail(name, "control flow did not bind a bearer")
+    r4 = mgr4.egress_frame(
+        now=_NOW, bearer_ref=bound.bearer_ref, payload=_PAYLOAD,
+    )
+    if not r4.ok:
+        return fail(name, "control egress failed: %s" % r4.detail)
+    if client4.calls.count(("write_frame", _PAYLOAD)) != 1:
+        return fail(name, "control write_frame not recorded once: %s" % (client4.calls,))
+    return ok(name, "commit failures after successful external ops trigger compensating link_down/release_capacity/unbind_bearer (recorded at the element seam) and never leave half state; the control flow succeeds end-to-end")
+
+
+def case_42_real_snmp_protocol_client() -> Result:
+    """Blocker 1 regression (the protocol layer): the REAL SNMPv2c
+    client against a REAL-protocol responder over real UDP sockets --
+    RFC 3416/3417 framing, BER reference vectors, error-status
+    decoding, varbind exceptions, timeouts, malformed responses --
+    plus the IEEE 802.1Q frame encoder.
+    """
+    name = "case_42_real_snmp_protocol_client"
+    # (1) hand-verified BER reference vectors (X.690 transfer syntax).
+    if oid_encode("1.3.6.1.2.1.1.3.0").hex() != "06082b06010201010300":
+        return fail(name, "OID BER vector mismatch")
+    if SnmpValue.integer(1).content != b"\x01" or SnmpValue.integer(4).content != b"\x04":
+        return fail(name, "INTEGER BER vector mismatch")
+    if SnmpValue.integer(128).content != b"\x00\x80":
+        return fail(name, "INTEGER high-bit BER vector mismatch")
+    # (2) the RFC 2674 PortList convention: port 1 = MSB of octet 0.
+    bitmap = port_list_set(b"", 1)
+    if bitmap != b"\x80" or not port_list_test(bitmap, 1):
+        return fail(name, "PortList port 1 mismatch")
+    bitmap = port_list_set(bitmap, 9)
+    if bitmap != b"\x80\x80" or not port_list_test(bitmap, 9) or port_list_test(bitmap, 2):
+        return fail(name, "PortList port 9 mismatch")
+    # (3) the IEEE 802.1Q frame shape: TPID 0x8100 after the MACs, the
+    # 12-bit VID, the inner ethertype, byte-exact round-trip.
+    dst = bytes.fromhex("0200aabbccdd")
+    src = derive_local_mac("backhaul:bearer:" + "a" * 32)
+    frame = encode_8021q_frame(dst, src, 1234, b"payload-x")
+    if frame[12:14] != b"\x81\x00":
+        return fail(name, "802.1Q TPID not at the tag position")
+    d2, s2, vid, ethertype, payload = parse_8021q_frame(frame)
+    if (d2, s2, vid, ethertype, payload) != (dst, src, 1234, ETHERTYPE_EXPERIMENTAL, b"payload-x"):
+        return fail(name, "802.1Q frame round-trip mismatch: %r" % ((vid, ethertype, payload),))
+    if encode_8021q_frame(dst, src, 1234, b"p") != encode_8021q_frame(dst, src, 1234, b"p"):
+        return fail(name, "802.1Q encoding not deterministic")
+    # (4) the real protocol round-trips against the responder.
+    responder = _SnmpResponder()
+    try:
+        client = SnmpV2cClient(
+            host="127.0.0.1", port=responder.endpoint[1],
+            community="public", timeout_s=2.0,
+        )
+        v = client.get(OID_SYS_UPTIME)
+        if v.tag != 0x43 or v.as_int() != 4242:
+            return fail(name, "GET sysUpTime mismatch: tag=0x%02X" % v.tag)
+        responder.admin_status = 2
+        echoed = client.set(
+            "1.3.6.1.2.1.2.2.1.7.1", SnmpValue.integer(1)
+        )
+        if echoed.as_int() != 1:
+            return fail(name, "SET ifAdminStatus echo mismatch")
+        if responder.admin_status != 1:
+            return fail(name, "SET did not land in the agent's MIB")
+        # (5) noSuchInstance (SNMPv2 varbind exception) -> typed error.
+        try:
+            client.get("1.3.6.1.2.1.2.2.1.8.99")
+            return fail(name, "noSuchInstance not surfaced")
+        except BackhaulError as exc:
+            if "noSuchInstance" not in exc.detail:
+                return fail(name, "noSuchInstance detail wrong: %s" % exc.detail)
+        # (6) error-status (genErr on SET) -> typed error.
+        responder.mode = "generr_on_set"
+        try:
+            client.set("1.3.6.1.2.1.2.2.1.7.1", SnmpValue.integer(1))
+            return fail(name, "genErr not surfaced")
+        except BackhaulError as exc:
+            if "genErr" not in exc.detail:
+                return fail(name, "genErr detail wrong: %s" % exc.detail)
+        responder.mode = "normal"
+        # (7) malformed response (non-BER bytes) -> typed error.
+        responder.mode = "garbage"
+        try:
+            client.get(OID_SYS_UPTIME)
+            return fail(name, "malformed response not surfaced")
+        except BackhaulError as exc:
+            if "malformed" not in exc.detail:
+                return fail(name, "malformed detail wrong: %s" % exc.detail)
+        responder.mode = "normal"
+    finally:
+        responder.close()
+    # (8) timeout against a silent agent -> typed error.
+    silent = _SnmpResponder()
+    try:
+        silent.mode = "silent"
+        client2 = SnmpV2cClient(
+            host="127.0.0.1", port=silent.endpoint[1],
+            community="public", timeout_s=0.3,
+        )
+        try:
+            client2.get(OID_SYS_UPTIME)
+            return fail(name, "timeout not surfaced")
+        except BackhaulError as exc:
+            if "timeout" not in exc.detail.lower():
+                return fail(name, "timeout detail wrong: %s" % exc.detail)
+    finally:
+        silent.close()
+    # (9) deterministic request ids (a counter starting at 1).
+    fresh = SnmpV2cClient(host="127.0.0.1", port=1, community="public",
+                          timeout_s=0.05)
+    if fresh._request_id != 0:
+        return fail(name, "request-id counter not deterministic")
+    return ok(name, "real SNMPv2c client: BER vectors + PortList + 802.1Q frames + real UDP GET/SET round-trips + noSuchInstance/genErr/malformed/timeout all typed; deterministic request ids")
+
+
+def case_43_snmp_ethernet_element_client_lifecycle() -> Result:
+    """Blocker 1 regression (the element layer): the PRODUCTION
+    element client -- the real SNMP-managed IEEE 802.1Q Ethernet
+    switch path -- drives its full lifecycle over real SNMP bytes
+    (IF-MIB ifAdminStatus/ifOperStatus link bring-up with the
+    compensating admin restore; Q-BRIDGE-MIB dot1qVlanStaticTable
+    createAndGo/destroy; the egress PortList bearer bind/unbind; the
+    IF-MIB counter observation), with the honest target-specific
+    admission rule (bind requires a live VLAN) and deterministic VID
+    derivation.
+    """
+    name = "case_43_snmp_ethernet_element_client_lifecycle"
+    responder = _SnmpResponder(if_index=4)
+    try:
+        client = SnmpEthernetElementClient(
+            host="127.0.0.1", port=responder.endpoint[1],
+            community="public", if_index=4, bridge_port=3,
+            egress_if="lo",  # unused on the management-plane legs
+            far_mac=bytes.fromhex("0200aabbccdd"), timeout_s=2.0,
+        )
+        # bind-before-allocate fails closed (the honest admission rule).
+        link_pre = ElementLink(
+            key="ifindex:4", far_mac=b"\x02\x00\x00\x00\x00\x01",
+            prior_admin_status=2, if_index=4,
+        )
+        try:
+            client.bind_bearer(link_pre, endpoint_label="port-a")
+            return fail(name, "bind without a live allocation accepted")
+        except BackhaulError as exc:
+            if exc.reason != BackhaulReasonCode.ILLEGAL_STATE:
+                return fail(name, "wrong admission reason: %s" % exc.reason)
+        # link_up: GET admin(2) -> SET up -> GET oper(up) confirmed.
+        link = client.link_up(
+            name="eth-1", profile=BackhaulProfile.ETHERNET,
+            capacity_bps=1000, endpoint_labels=("port-a",),
+        )
+        if link.prior_admin_status != 2:
+            return fail(name, "link_up did not snapshot the prior admin state")
+        if responder.admin_status != 1 or responder.oper_status != 1:
+            return fail(name, "link_up did not bring the port up on the agent")
+        # allocate: deterministic VID + createAndGo -> active verified.
+        alloc = client.allocate_capacity(
+            link, kind="backhaul", quantity_base=100, purpose="test",
+            nonce="nonce-1",
+        )
+        if alloc.vlan_id not in responder.vlans:
+            return fail(name, "allocate did not create the VLAN row")
+        if responder.vlans[alloc.vlan_id]["rowStatus"] != 1:
+            return fail(name, "VLAN row not active")
+        # deterministic VID: same nonce -> same vid on a fresh client.
+        client_b = SnmpEthernetElementClient(
+            host="127.0.0.1", port=responder.endpoint[1],
+            community="public", if_index=4, bridge_port=3,
+            egress_if="lo", far_mac=b"\x02\x00\x00\x00\x00\x01",
+            timeout_s=2.0,
+        )
+        probe_alloc = client_b._derive_vlan_id("nonce-1")
+        if probe_alloc != alloc.vlan_id:
+            return fail(name, "VID derivation not deterministic")
+        # bind: the bridge port lands in the VLAN's egress PortList.
+        bearer = client.bind_bearer(link, endpoint_label="port-a")
+        if bearer.vlan_id != alloc.vlan_id:
+            return fail(name, "bearer carries the wrong VLAN")
+        egress = responder.vlans[alloc.vlan_id]["egress"]
+        if not port_list_test(egress, 3):
+            return fail(name, "bridge port not in the egress PortList: %r" % egress)
+        # observe: the IF-MIB counters (generic vocabulary mapping).
+        responder.rx_octets = 111
+        responder.tx_octets = 222
+        responder.rx_errors = 3
+        obs = client.observe(link)
+        if not obs.state_up or obs.rx_bytes != 111 or obs.tx_bytes != 222 or obs.rx_errors != 3:
+            return fail(name, "observation mismatch: %r" % (obs,))
+        # unbind: the bit clears.
+        client.unbind_bearer(bearer)
+        if port_list_test(responder.vlans[alloc.vlan_id]["egress"], 3):
+            return fail(name, "unbind did not clear the egress PortList")
+        # release: destroy + verified gone.
+        client.release_capacity(alloc)
+        if alloc.vlan_id in responder.vlans:
+            return fail(name, "release did not destroy the VLAN row")
+        # link_down: ownership-aware restore (prior was down(2)).
+        client.link_down(link)
+        if responder.admin_status != 2:
+            return fail(name, "link_down did not restore the prior admin state")
+
+        # ---- failure legs with internal compensation ---------------
+        # (a) ifOperStatus never comes up: link_up compensates by
+        # restoring the prior administrative state.
+        responder.mode = "oper_stuck"
+        responder.admin_status = 2
+        responder.oper_status = 2
+        try:
+            client.link_up(
+                name="eth-2", profile=BackhaulProfile.ETHERNET,
+                capacity_bps=1000, endpoint_labels=("port-a",),
+            )
+            return fail(name, "oper-stuck link_up succeeded")
+        except BackhaulError:
+            pass
+        if responder.admin_status != 2:
+            return fail(
+                name,
+                "oper-stuck link_up did not restore the admin state (%d)"
+                % responder.admin_status,
+            )
+        responder.mode = "normal"
+        # (b) createAndGo lands notInService: allocate compensates by
+        # destroying the half-created row.
+        responder.mode = "row_not_active"
+        responder.admin_status = 2
+        responder.oper_status = 2
+        link2 = client.link_up(
+            name="eth-3", profile=BackhaulProfile.ETHERNET,
+            capacity_bps=1000, endpoint_labels=("port-a",),
+        )
+        try:
+            client.allocate_capacity(
+                link2, kind="backhaul", quantity_base=100,
+                purpose="test", nonce="nonce-2",
+            )
+            return fail(name, "row-not-active allocate succeeded")
+        except BackhaulError:
+            pass
+        if responder.vlans:
+            return fail(name, "row-not-active allocate left a half-created row")
+        responder.mode = "normal"
+    finally:
+        responder.close()
+    return ok(name, "production SNMP element client: real IF-MIB/Q-BRIDGE-MIB lifecycle over real SNMP bytes (link_up/allocate/bind/observe/unbind/release/link_down + admission rule + deterministic VID), with internal compensation on both failure legs")
+
+
+def case_44_real_w012_session_authority_in_gate() -> Result:
+    """Blocker 3 regression: the B1 gate's session authority is the
+    REAL WORK-012 SessionStore composition (a real routing decision
+    over a real topology graph drives session creation; the reader is
+    the read-only facade over that real store) -- unknown and
+    non-bindable (TERMINATED) sessions are REJECTED, only real
+    ESTABLISHED sessions bind, and the fabricated universal
+    secureable reader is gone from the gate source.
+    """
+    name = "case_44_real_w012_session_authority_in_gate"
+    authority = real_session_authority()
+    # (1) the reader answers from REAL session state.
+    view = authority.reader.lookup(authority.live_session_id)
+    if view is None or not view.secureable:
+        return fail(name, "live ESTABLISHED session not secureable")
+    if view.session_id != authority.live_session_id:
+        return fail(name, "reader returned a different session id")
+    terminated = authority.reader.lookup(authority.terminated_session_id)
+    if terminated is not None and terminated.secureable:
+        return fail(name, "TERMINATED session must not be secureable")
+    if authority.reader.lookup("sha256:" + "e" * 64) is not None:
+        return fail(name, "unknown session id must not resolve")
+    # (2) the mediated path enforces it: unknown/TERMINATED binds
+    # fail with SESSION_NOT_SECUREABLE BEFORE any external operation.
+    mgr = _new_manager(ReferenceBackhaulEngine(),
+                       session_reader=authority.reader)
+    link_ref = _provision(mgr, name="authority-link")
+    for label, sid in (
+        ("unknown", "sha256:" + "e" * 64),
+        ("terminated", authority.terminated_session_id),
+    ):
+        r = mgr.bind_session(
+            now=_NOW, session_id=sid, link_ref=link_ref,
+            endpoint_label=_ENDPOINT,
+        )
+        if r.ok:
+            return fail(name, "%s session bound -- authority fabricated" % label)
+        if r.failure is None or r.failure.reason_code != BackhaulReasonCode.SESSION_NOT_SECUREABLE:
+            return fail(name, "%s session wrong failure: %s" % (label, r.detail))
+    # (3) the LIVE real session binds and carries bytes.
+    r = mgr.bind_session(
+        now=_NOW, session_id=authority.live_session_id,
+        link_ref=link_ref, endpoint_label=_ENDPOINT,
+    )
+    if not r.ok:
+        return fail(name, "live real session did not bind: %s" % r.detail)
+    r2 = mgr.egress_frame(
+        now=_NOW, bearer_ref=r.value.bearer_ref, payload=_PAYLOAD,
+    )
+    if not r2.ok:
+        return fail(name, "live real session egress failed: %s" % r2.detail)
+    # (4) the real store's events prove the composition drove the REAL
+    # session lifecycle (created -> authorized -> established).
+    events_by_sid = dict(authority.store.snapshot()["events"])
+    events = [
+        e["event_type"] for e in events_by_sid[authority.live_session_id]
+    ]
+    if events[:3] != ["created", "authorized", "established"]:
+        return fail(name, "real session lifecycle events wrong: %s" % events[:3])
+    terminated_events = [
+        e["event_type"]
+        for e in events_by_sid[authority.terminated_session_id]
+    ]
+    if "terminated" not in terminated_events:
+        return fail(name, "terminated control session lacks its terminal event: %s" % terminated_events)
+    # (5) source discipline: the gate fabricates no universal
+    # secureable reader (the Blocker 3 anti-pattern is gone).
+    gate_path = os.path.join(_ROOT, "adapters", "backhaul", "backhaul_interop.py")
+    with open(gate_path, encoding="utf-8") as f:
+        gate_src = f.read()
+    if "secureable=True" in gate_src:
+        return fail(name, "the gate still fabricates a universal secureable reader")
+    if "SessionStore()" not in gate_src:
+        return fail(name, "the gate does not compose the real SessionStore")
+    return ok(name, "the gate's session authority is the REAL WORK-012 SessionStore composition: unknown/TERMINATED rejected (SESSION_NOT_SECUREABLE, pre-external), real ESTABLISHED binds and carries bytes, the real lifecycle events prove the composition, and no fabricated secureable reader remains")
+
+
+def case_45_preflight_separation_and_distinct_status() -> Result:
+    """Secondary corrections 3 + 4 regression: the capability preflight
+    SEPARATES hard management-plane prerequisites (the real SNMP
+    endpoint round-trip) from data-plane capability prerequisites and
+    from never-blocking diagnostics (a reachable real element stays
+    reachable despite absent snmpget/daemons); and the gate reports
+    the DISTINCT DATA_PEER_UNREACHABLE status when the management
+    plane is verified over real SNMP but the data plane cannot carry
+    (never a fabricated PASS).
+    """
+    name = "case_45_preflight_separation_and_distinct_status"
+    responder = _SnmpResponder()
+    try:
+        # (1) preflight separation: a REAL SNMP-answering endpoint is
+        # reachable even though the diagnostics are absent in this
+        # sandbox (no snmpget, no daemons) -- they never block.
+        report = probe_backhaul_interop_capability(
+            BackhaulEnvProbeConfig(
+                snmp_endpoint="127.0.0.1:%d" % responder.endpoint[1],
+                egress_if="lo",
+                far_mac="02:11:22:33:44:55",
+                timeout_s=1.0,
+            )
+        )
+        if not report.reachable:
+            return fail(
+                name,
+                "real SNMP endpoint not reachable (diagnostics must never "
+                "block): %s" % report.summary(),
+            )
+        tools = report.check("element_mgmt_tools")
+        daemons = report.check("terminal_daemons")
+        if tools.status == "PASS" or daemons.status == "PASS":
+            return fail(name, "diagnostic premise wrong (sandbox has the tools?)")
+        if report.data_plane_ready:
+            return fail(
+                name,
+                "data-plane readiness reported without CAP_NET_RAW "
+                "(this sandbox cannot create AF_PACKET sockets)",
+            )
+        # (2) the DISTINCT DATA_PEER_UNREACHABLE outcome: the gate's
+        # full control-plane flow over REAL SNMP (link_up + VLAN
+        # createAndGo + egress PortList bind + the real session
+        # authority + negative controls + clean teardown), then the
+        # honest data-plane blocker -- never a PASS.
+        for var in ("BACKHAUL_INTEROP", "BACKHAUL_PEER_KIND"):
+            os.environ.pop(var, None)
+        outcome = run_backhaul_interop(
+            BackhaulInteropConfig(
+                snmp_endpoint="127.0.0.1:%d" % responder.endpoint[1],
+                community="public",
+                if_index=1,
+                bridge_port=1,
+                egress_if="lo",
+                far_mac="02:11:22:33:44:55",
+                timeout_s=1.0,
+            )
+        )
+        if outcome.status != "DATA_PEER_UNREACHABLE":
+            return fail(
+                name,
+                "management-plane-verified gate must report the DISTINCT "
+                "DATA_PEER_UNREACHABLE, got %s (%s)"
+                % (outcome.status, outcome.detail[:160]),
+            )
+        if outcome.status == "PASSED":
+            return fail(name, "the gate fabricated a PASS")
+        if "real SNMP management-plane interop verified" not in outcome.detail:
+            return fail(name, "outcome detail missing the verified-management-plane disclosure")
+        if "CAPABILITY" not in outcome.detail:
+            return fail(name, "outcome detail missing the capability matrix")
+        # (3) the gate's REAL SNMP exchanges happened (the responder's
+        # audit log proves the management-plane verbs traversed real
+        # BER bytes) and the element was left CLEAN (admin restored,
+        # VLAN destroyed, egress cleared -- the transactional teardown).
+        verbs = [oid for _tag, oid in responder.requests]
+        if not any("2.2.1.7." in oid for oid in verbs):
+            return fail(name, "no ifAdminStatus exchange recorded: %s" % verbs[:8])
+        if not any(oid.startswith("1.3.6.1.2.1.17.7.1.4.3.1.5.") for oid in verbs):
+            return fail(name, "no dot1qVlanStaticRowStatus exchange recorded")
+        if not any(oid.startswith("1.3.6.1.2.1.17.7.1.4.3.1.2.") for oid in verbs):
+            return fail(name, "no dot1qVlanStaticEgressPorts exchange recorded")
+        if responder.admin_status != 2:
+            return fail(name, "gate teardown did not restore ifAdminStatus: %d" % responder.admin_status)
+        if responder.vlans:
+            return fail(name, "gate teardown left VLAN rows behind: %s" % sorted(responder.vlans))
+    finally:
+        responder.close()
+    # (4) a dead management endpoint is UNREACHABLE (the hard
+    # prerequisite), not DATA_PEER_UNREACHABLE.
+    report2 = probe_backhaul_interop_capability(
+        BackhaulEnvProbeConfig(
+            snmp_endpoint="127.0.0.1:1", timeout_s=0.3,
+        )
+    )
+    if report2.reachable:
+        return fail(name, "dead SNMP endpoint reported reachable")
+    if report2.check("snmp_endpoint").status != "UNREACHABLE":
+        return fail(name, "dead endpoint must be an snmp_endpoint UNREACHABLE check")
+    return ok(name, "preflight separates hard management checks (real SNMP round-trip) from data-plane capability and never-blocking diagnostics; the gate reports the DISTINCT DATA_PEER_UNREACHABLE with the management plane verified over real SNMP and the element left clean; a dead endpoint stays UNREACHABLE")
 
 
 # ==========================================================================
@@ -2459,6 +3580,13 @@ def main() -> int:
         case_37_b1_real_backhaul_interop_gate,
         case_38_b1_gate_hardening_and_anti_faking,
         case_39_w020_independence,
+        # PR #23 architect-review remediation regressions.
+        case_40_transactional_remote_failure_leaves_state_unchanged,
+        case_41_compensating_rollback_on_commit_failure,
+        case_42_real_snmp_protocol_client,
+        case_43_snmp_ethernet_element_client_lifecycle,
+        case_44_real_w012_session_authority_in_gate,
+        case_45_preflight_separation_and_distinct_status,
     ]
     results: List[Result] = []
     for case in cases:

@@ -125,7 +125,10 @@ SandboxedBackhaul        (BaseException isolation, contract-shape
         |                 validation, W022 identity checks, frozen
         |                 per-op step charging)
         v
-BackhaulContract implementation
+ManagedBackhaulAdapter  (transactional seam: validate -> external
+        |                 element operation -> commit local, with
+        v                 compensating rollback)
+BackhaulElementClient    (the real element's ACTUAL external interfaces)
 ```
 
 There is no path from the SDK surface around the family mediator:
@@ -133,6 +136,30 @@ the sandbox exposes no data-path/capability accessor onto the
 implementation (no `getattr` reach-around of any kind — pinned by the
 selftest's structural + source scan), and the bridge cannot call a
 concrete implementation because it holds no reference to one.
+
+## Transactional element semantics (PR #23 architect review)
+
+Every mutating adapter operation follows the architect's rule:
+
+```
+validate -> perform real external operation -> commit local
+```
+
+The reference engine splits each operation into a `_validate_*` phase
+(budget charge + fail-closed validation + content derivation, NO
+state mutation) and an infallible `_commit_*` phase; the managed
+adapter performs the ELEMENT operation between them. A failed remote
+operation therefore leaves the local manager-visible state
+byte-for-byte equivalent to the pre-call state (`provision_link`,
+`allocate`, `release`, `bind_session`, `unbind_session`,
+`egress_frame` — whose deterministic counters move only after the
+real wire write succeeds — and `close`), with explicit compensating
+rollback (LINK_DOWN / RELEASE / UNBIND) where an external operation
+could succeed before the local commit. The element clients apply the
+same discipline INTERNALLY (e.g. an SNMP link_up that fails its
+ifOperStatus confirmation restores the prior ifAdminStatus; a VLAN
+createAndGo that does not reach active destroys the half-created
+row). Pinned by selftest cases 40–41.
 
 ## Resource model reuse (WORK-008) and IP delegation (WORK-018)
 
@@ -150,41 +177,80 @@ IP-delegation audit). Routing stays WORK-011's authority: path
 references cross as opaque `sha256:` DATA recorded on the binding,
 never re-derived or scored.
 
-## Real fixed/backhaul interoperability (bullet 10)
+## Real fixed/backhaul interoperability — ONE concrete production target (bullet 10 + PR #23 Blocker 1)
 
-`adapters/backhaul/conformance.py` — a REAL managed-element-shaped
-peer: a real TCP management-plane control socket carrying the
-managed-element lifecycle message-schema SHAPES (LINK_UP → ALLOCATE →
-BIND → UNBIND → RELEASE → LINK_DOWN → OBSERVE_LINK) and a real TCP
-wire socket carrying IEEE 802.3-2018 Ethernet-II frames (dst MAC |
-src MAC | EtherType | payload — the frame shape as DATA per
-LOCK-018); honest NOT a real switch, NOT an optical/microwave/
-satellite terminal, NOT vendor element management.
-`adapters/backhaul/managed.py` — the production-shaped
-`ManagedBackhaulAdapter` (the Open5GSAdapter/N3IWFAdapter analog):
-it runs the real TCP management exchanges and writes the
-application's payload as a real Ethernet-II-framed byte stream to the
-real wire socket; pointing it at a real managed backhaul element is
-an endpoint config change, not a core change. The selftest proves the
-full byte path `BackhaulAppSession -> BackhaulManager ->
-SandboxedBackhaul -> ManagedBackhaulAdapter -> real peer -> recv`
-byte-identical, plus a real OBSERVE_LINK round-trip against the
-peer's own counters and last-seen frame-header evidence, plus an
-in-family Ethernet→satellite link re-home carrying the SAME
-session_id (session identity survives access/backhaul changes).
+**The production path** (PR #23): a real SNMP-managed IEEE 802.1Q
+Ethernet switch, driven through its ACTUAL external interfaces —
 
-## Real backhaul interoperability gate (bullet 11, frozen W022 acceptance)
+- `adapters/backhaul/snmp.py` — a REAL SNMPv2c client in pure stdlib:
+  the ASN.1/BER transfer syntax (RFC 2578), the RFC 3416/3417 PDU
+  framing over UDP, request-id correlation, error-status decoding,
+  and the standard MIB objects every managed switch exposes — IF-MIB
+  (RFC 2863) `ifAdminStatus`/`ifOperStatus` + the interface counters,
+  Q-BRIDGE-MIB (RFC 4363) `dot1qVlanStaticRowStatus` /
+  `dot1qVlanStaticEgressPorts` (the RFC 2674 PortList bitmap), and
+  SNMPv2-MIB `sysUpTime` (RFC 3418) for reachability probing;
+- `adapters/backhaul/ethernet.py` — the REAL Ethernet data plane:
+  IEEE 802.1Q-2022-tagged IEEE 802.3-2018 Ethernet-II frames written
+  onto a real interface through an `AF_PACKET`/`SOCK_RAW` socket
+  (requires `CAP_NET_RAW`; the absence fails CLOSED with a typed
+  error), plus the frame-shape helpers as cited DATA;
+- `adapters/backhaul/element.py` — the element-client seam:
+  `BackhaulElementClient` (one method = one external operation) with
+  `SnmpEthernetElementClient` (the production client: the link
+  lifecycle maps to ifAdminStatus/ifOperStatus, the capacity
+  allocation to a dot1qVlanStaticTable row, the bearer binding to the
+  VLAN's egress PortList, the observation to the IF-MIB counters, and
+  the data plane to the 802.1Q frame writer) and
+  `JsonConformanceElementClient` (the conformance client below);
+- `adapters/backhaul/managed.py` — the transactional
+  `ManagedBackhaulAdapter` over any element client.
+
+**The conformance path** (deterministic architectural evidence —
+NOT the production interop protocol): `conformance.py` — a REAL
+managed-element-shaped peer: a real TCP management-plane control
+socket carrying the managed-element lifecycle message-schema SHAPES
+(LINK_UP → ALLOCATE → BIND → UNBIND → RELEASE → LINK_DOWN →
+OBSERVE_LINK) and a real TCP wire socket carrying IEEE 802.3-2018
+Ethernet-II frames; honest NOT a real switch, NOT an optical/
+microwave/satellite terminal, NOT vendor element management. The
+selftest proves the full byte path `BackhaulAppSession ->
+BackhaulManager -> SandboxedBackhaul -> ManagedBackhaulAdapter ->
+conformance client -> real peer -> recv` byte-identical, plus a real
+OBSERVE_LINK round-trip against the peer's own counters and
+last-seen frame-header evidence, plus an in-family Ethernet→satellite
+link re-home carrying the SAME session_id.
+
+## Real backhaul interoperability gate (bullet 11, frozen W022 acceptance + PR #23 Blockers 1/3)
 
 `adapters/backhaul/backhaul_interop.py` — the environment-gated REAL
-interop suite (`BACKHAUL_INTEROP=1` +
-`BACKHAUL_ENDPOINT`/`BACKHAUL_DATA_PEER`).
+interop suite (`BACKHAUL_INTEROP=1` + the SNMP target's coordinates:
+`BACKHAUL_SNMP_ENDPOINT`, `BACKHAUL_SNMP_COMMUNITY`,
+`BACKHAUL_IFINDEX`, `BACKHAUL_BRIDGE_PORT`, `BACKHAUL_EGRESS_IF`,
+`BACKHAUL_L2_FAR_MAC`). It drives the PRODUCTION path (the
+SNMP-managed Ethernet switch) with the REAL WORK-012 session
+authority: the gate composes an actual `SessionStore` driven by a
+real `RoutingEngine`/`PolicyDecision` over a `TopologyGraph` (the
+application-path composition), hands the manager a read-only
+`SessionReader` facade backed by that real store, and runs its own
+negative controls (unknown and TERMINATED session ids are REJECTED
+before any external operation) before the positive bind.
+
 `adapters/backhaul/interop_env_probe.py` — the environment-capability
-probe (wired interfaces / element-management tooling / terminal
-daemons / endpoint reachability) + the HARD anti-faking
-`BACKHAUL_PEER_KIND` guard: an explicit in-repo-simulator assertion
-is FORBIDDEN before any probe; a SKIP is a transparent
-verification-environment blocker and NEVER a fabricated PASS. See the
-interop runbook in that module.
+probe + the HARD anti-faking `BACKHAUL_PEER_KIND` guard (an explicit
+in-repo-simulator assertion is FORBIDDEN before any probe). The
+preflight SEPARATES hard management-plane prerequisites (a REAL SNMP
+GET `sysUpTime` round-trip against the configured agent) from
+data-plane capability prerequisites (raw packet socket / egress
+interface / far-end MAC — driving the DISTINCT
+`DATA_PEER_UNREACHABLE` gate status) and from never-blocking
+DIAGNOSTICS (carrier-up wired interfaces, element-management
+userspace, terminal daemons — a reachable real element never becomes
+UNREACHABLE merely because `snmpget` or a local daemon is absent).
+A SKIP is a transparent verification-environment blocker and NEVER a
+fabricated PASS. See the interop runbook in that module (it documents
+the real-switch + far-end L2 echo responder setup that closes the
+gate with byte-identical evidence).
 
 ## Determinism
 
@@ -208,26 +274,34 @@ authorized by an ACR.
 
 ## Verification
 
-`python3 tools/backhaul_selftest.py` — 39 cases covering the brief's
-twelve verification bullets: the frozen 11-op contract surface,
-least-authority context, happy paths across ALL FOUR technology
-profiles (data, not branching), identity separation +
-collapse/smuggling rejection (including truncated-digest fragments),
-credential isolation, availability/capacity ladders, leaky-facade
-rejection, per-binding ownership across implementation swaps, the
-standards-boundary audit (imports/secret/vendor tokens + citations),
-frozen `spec/` byte identity, no-core-backhaul-leakage + family
-independence, the WORK-018 IP-delegation audit, WORK-008
-resource-unit reuse by reference, WORK-011 path-reference
-consumption, read-only reader facades, pinned step charges, same-impl
-+ cross-impl determinism + PYTHONHASHSEED variation, BaseException/
-contract-shape/budget/secret-leak failure isolation, the real
-conformance byte path (framed wire + peer-owned observation + the
-Ethernet→satellite re-home of the SAME session_id), the WORK-016 SDK
-nine-op bridge over the family MANAGER (proven by the manager's
-canonical event history), the architect-anchored authority path
-regressions (no sandbox escape hatch; the implementation's facade
-returned verbatim; two-layer BaseException isolation through the
-bridge; the real data path encapsulated inside the returned facade),
-the environment-gated real interop gate + anti-faking hardening, and
-the W020-independence audit.
+`python3 tools/backhaul_selftest.py` — 45 cases covering the brief's
+twelve verification bullets AND the PR #23 architect-review
+remediations: the frozen 11-op contract surface, least-authority
+context, happy paths across ALL FOUR technology profiles (data, not
+branching), identity separation + collapse/smuggling rejection
+(including truncated-digest fragments), credential isolation,
+availability/capacity ladders, leaky-facade rejection, per-binding
+ownership across implementation swaps, the standards-boundary audit
+(imports/secret/vendor tokens + citations), frozen `spec/` byte
+identity, no-core-backhaul-leakage + family independence, the
+WORK-018 IP-delegation audit, WORK-008 resource-unit reuse by
+reference, WORK-011 path-reference consumption, read-only reader
+facades, pinned step charges, same-impl + cross-impl determinism +
+PYTHONHASHSEED variation, BaseException/contract-shape/budget/
+secret-leak failure isolation, the real conformance byte path (framed
+wire + peer-owned observation + the Ethernet→satellite re-home of the
+SAME session_id), the WORK-016 SDK nine-op bridge over the family
+MANAGER (proven by the manager's canonical event history), the
+architect-anchored authority path regressions (no sandbox escape
+hatch; the implementation's facade returned verbatim; two-layer
+BaseException isolation through the bridge; the real data path
+encapsulated inside the returned facade), the environment-gated real
+interop gate + anti-faking hardening, the W020-independence audit —
+plus the PR #23 regressions: transactional remote failures leave
+local state byte-for-byte unchanged (case 40), compensating rollback
+on commit failure (case 41), the REAL SNMPv2c protocol client against
+a real-protocol responder over real UDP (case 42), the production
+SNMP element-client lifecycle with internal compensation (case 43),
+the REAL WORK-012 session authority in the gate (case 44), and the
+preflight hard/diagnostic separation + the DISTINCT
+DATA_PEER_UNREACHABLE status (case 45).

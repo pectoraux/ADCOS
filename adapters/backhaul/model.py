@@ -486,6 +486,23 @@ class BackhaulBinding:
                 BackhaulReasonCode.INVALID_INPUT,
                 "binding_id must be a non-empty string",
             )
+        # STRUCTURAL content-derivation check (the PR #23 architect
+        # review, secondary correction 1): the binding_id is not free
+        # text -- it MUST equal derive_binding_id(session_id,
+        # bearer_ref).  A tampered or miscomputed id is rejected at
+        # construction (the sandbox re-asserts the same invariant at
+        # the seam, so a hostile subclass cannot smuggle a fabricated
+        # binding key into manager state).
+        if self.binding_id != derive_binding_id(
+            self.session_id, self.bearer_ref
+        ):
+            raise BackhaulError(
+                BackhaulReasonCode.INVALID_INPUT,
+                "binding_id must equal the content-derived "
+                "derive_binding_id(session_id, bearer_ref) -- a tampered "
+                "or miscomputed binding key is rejected (the binding id "
+                "is structural, never free text)",
+            )
         object.__setattr__(
             self, "endpoint_label", validate_endpoint_label(self.endpoint_label)
         )
@@ -536,6 +553,7 @@ class BackhaulLinkObservation:
                 BackhaulReasonCode.INVALID_INPUT,
                 "samples must be a tuple of (metric, value) pairs",
             )
+        valid_metrics = LinkMetricName.values()
         for sample in self.samples:
             if not isinstance(sample, tuple) or len(sample) != 2:
                 raise BackhaulError(
@@ -547,6 +565,21 @@ class BackhaulLinkObservation:
                 raise BackhaulError(
                     BackhaulReasonCode.INVALID_INPUT,
                     "sample metric names must be non-empty strings",
+                )
+            # STRUCTURAL vocabulary check (the PR #23 architect
+            # review, secondary correction 2): metric names MUST be
+            # the generic WORK-016 link-metric vocabulary -- arbitrary
+            # technology-specific names are rejected at the model
+            # seam (the sandbox re-asserts at the mediation seam;
+            # technology-specific counters stay inside implementations
+            # and are reported through these generic measures).
+            if name not in valid_metrics:
+                raise BackhaulError(
+                    BackhaulReasonCode.INVALID_INPUT,
+                    "sample metric %r is not in the generic WORK-016 "
+                    "link-metric vocabulary %s (technology-specific "
+                    "counters stay inside implementations)"
+                    % (name, list(valid_metrics)),
                 )
             if (
                 isinstance(value, bool)

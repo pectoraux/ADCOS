@@ -82,7 +82,9 @@ from .model import (
     BackhaulAllocation,
     BackhaulBinding,
     BackhaulLinkObservation,
+    LinkMetricName,
     LinkView,
+    derive_binding_id,
 )
 from .session import BackhaulAppSession
 from .validation import assert_ref_session_separation, validate_opaque_ref
@@ -368,6 +370,19 @@ class SandboxedBackhaul:
                 "malformed or embeds session identity (W022 identity "
                 "invariant); value discarded"
             )
+        # Structural content-derivation re-assert (the PR #23 review,
+        # secondary correction 1): the binding key MUST equal
+        # derive_binding_id(session_id, bearer_ref) -- a hostile
+        # subclass cannot smuggle a fabricated binding key into
+        # manager state even by bypassing the model constructor.
+        if value.binding_id != derive_binding_id(
+            value.session_id, value.bearer_ref
+        ):
+            return _ContractViolation(
+                "bind_session returned a binding whose binding_id is not "
+                "the content-derived derive_binding_id(session_id, "
+                "bearer_ref) (tampered binding key); value discarded"
+            )
         return value
 
     def _validate_observation(self, value: Any) -> Any:
@@ -375,6 +390,21 @@ class SandboxedBackhaul:
             return _ContractViolation(
                 "observe_link must return a BackhaulLinkObservation"
             )
+        # Generic metric vocabulary re-assert (the PR #23 review,
+        # secondary correction 2): every sample metric must be the
+        # generic WORK-016 link-metric vocabulary (the model enforces
+        # at construction; the seam re-checks structurally).
+        valid_metrics = LinkMetricName.values()
+        for sample in value.samples:
+            name = sample[0]
+            if name not in valid_metrics:
+                return _ContractViolation(
+                    "observe_link returned a sample metric %r outside "
+                    "the generic WORK-016 link-metric vocabulary %s "
+                    "(technology-specific counters stay inside "
+                    "implementations); value discarded"
+                    % (name, list(valid_metrics))
+                )
         return value
 
     def _validate_bytes(self, value: Any) -> Any:
