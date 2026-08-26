@@ -127,6 +127,7 @@ class InteropConfig:
     """
 
     sbi_url: str = DEFAULT_OPEN5GS_SBI_URL
+    info_url: str = "http://127.0.0.4:9090"
     data_peer: Optional[Tuple[str, int]] = None
     ue_source_address: Optional[str] = None
     supi: str = "imsi-001010000000001"
@@ -144,6 +145,7 @@ class InteropConfig:
     @classmethod
     def from_env(cls) -> "InteropConfig":
         sbi_url = os.environ.get("OPEN5GS_SBI_URL", DEFAULT_OPEN5GS_SBI_URL).strip() or DEFAULT_OPEN5GS_SBI_URL
+        info_url = os.environ.get("OPEN5GS_INFO_URL", "http://127.0.0.4:9090").strip()
         data_peer_str = os.environ.get("OPEN5GS_DATA_PEER", "").strip()
         data_peer: Optional[Tuple[str, int]] = None
         if data_peer_str:
@@ -157,6 +159,7 @@ class InteropConfig:
         external_pdu_session_id = os.environ.get("OPEN5GS_PDU_SESSION_ID", "1").strip() or "1"
         return cls(
             sbi_url=sbi_url,
+            info_url=info_url,
             data_peer=data_peer,
             ue_source_address=ue_source_address,
             external_pdu_session_id=external_pdu_session_id,
@@ -338,6 +341,7 @@ def run_open5gs_interop(config: Optional[InteropConfig] = None) -> InteropOutcom
         data_peer=cfg.data_peer,
         real_open5gs=True,
         ue_source_address=cfg.ue_source_address,
+        info_url=cfg.info_url,
     )
     mgr = FiveGCoreManager(
         integration_id="adcos:fivegc:open5gs-interop",

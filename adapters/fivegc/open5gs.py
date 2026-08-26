@@ -98,11 +98,13 @@ class Open5GSAdapter(Reference5GCoreEngine):
         data_peer: Optional[Tuple[str, int]] = None,
         real_open5gs: bool = False,
         ue_source_address: Optional[str] = None,
+        info_url: Optional[str] = None,
     ) -> None:
         super().__init__()
         self._nf_endpoint = nf_endpoint
         self._real_open5gs = real_open5gs
         self._ue_source_address = ue_source_address
+        self._info_url = info_url
         # Optional override for the user-plane data peer (host, port) --
         # the DN echo host the real Open5GS UPF routes to.  When None
         # (the conformance case), the adapter uses the dataEndpoint the
@@ -231,28 +233,53 @@ class Open5GSAdapter(Reference5GCoreEngine):
         context.charge(self.STEP_CHARGES["bind_session"])
         if not external_pdu_session_id:
             raise FiveGCoreError(FiveGCoreReasonCode.INVALID_INPUT, "external PDU id is required")
-        response = self._http_post(
-            "/nsmf-pdusession/v1/sm-contexts/%s" % external_pdu_session_id,
-            {},
-            method="GET",
-        )
+        if not self._info_url:
+            raise FiveGCoreError(FiveGCoreReasonCode.NF_UNAVAILABLE, "Open5GS info API URL is not configured")
+        response = self._http_info_get("/pdu-info")
         try:
+            matches = []
+            for item in response["items"]:
+                for pdu in item["pdu"]:
+                    if str(pdu["psi"]) == external_pdu_session_id:
+                        matches.append((item, pdu))
+            if len(matches) != 1:
+                raise ValueError("external PDU was not uniquely observed")
+            item, pdu = matches[0]
             return ExternalPduSessionEvidence(
                 external_pdu_session_id=external_pdu_session_id,
-                supi=Supi(value=response["supi"]),
-                dnn=Dnn(value=response["dnn"]),
+                supi=Supi(value=item["supi"]),
+                dnn=Dnn(value=pdu["dnn"]),
                 snssai=Snssai(
-                    sst=response["snssai"]["sst"],
-                    sd=response["snssai"].get("sd"),
+                    sst=pdu["snssai"]["sst"],
+                    sd=pdu["snssai"].get("sd"),
                 ),
-                ue_ipv4=response["ueIpv4"],
-                state=response["state"],
+                ue_ipv4=pdu["ipv4"],
+                state=pdu["pdu_state"],
             )
         except (KeyError, TypeError, ValueError):
             raise FiveGCoreError(
                 FiveGCoreReasonCode.NF_UNAVAILABLE,
                 "Open5GS returned incomplete external PDU state",
             )
+
+    def _http_info_get(self, path: str) -> dict:
+        parsed = urlparse(self._info_url or "")
+        if parsed.hostname is None:
+            raise FiveGCoreError(FiveGCoreReasonCode.INVALID_INPUT, "Open5GS info URL must have a host")
+        conn = http.client.HTTPConnection(parsed.hostname, parsed.port or 80, timeout=10)
+        try:
+            conn.request("GET", path)
+            resp = conn.getresponse()
+            data = resp.read()
+            if resp.status != 200:
+                raise FiveGCoreError(FiveGCoreReasonCode.NF_UNAVAILABLE, "Open5GS info API returned HTTP %d" % resp.status)
+            return json.loads(data.decode("utf-8"))
+        except FiveGCoreError:
+            raise
+        except (OSError, ValueError):
+            raise FiveGCoreError(FiveGCoreReasonCode.NF_UNAVAILABLE, "Open5GS info API unavailable")
+        finally:
+            conn.close()
 
     def egress_pdu(self, context: FiveGCoreContext, *, pdu_session_ref: str, payload: bytes) -> bytes:
         # Defer to the reference engine for the contract-shape

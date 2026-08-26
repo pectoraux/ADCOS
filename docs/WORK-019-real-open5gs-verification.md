@@ -119,8 +119,31 @@ HTTP 400
 ```
 
 The Open5GS SMF implementation supports POST create/modify/release handling
-for this resource, not retrieval. Consequently the adapter did not produce
-observation evidence, adoption did not run, and no ADCOS payload was sent.
-This is an honest interoperability blocker: the external fixture is real, but
-the required authoritative observation surface is unavailable through the
-deployed Open5GS SBI.
+for this resource, not retrieval. This confirmed that SMF SBI was the wrong
+observation surface; the correction below uses Open5GS's supported info API.
+
+## `/pdu-info` observation correction
+
+Open5GS's supported vendor-specific observation surface is the metrics info
+API, not SMF SBI retrieval. With `OPEN5GS_INFO_URL=http://127.0.0.4:9090`,
+the adapter successfully observed the live fixture from `GET /pdu-info`:
+
+```text
+SUPI: imsi-999700000000001
+PSI: 1
+DNN: internet
+S-NSSAI: SST 1 / SD ffffff
+UE IPv4: 10.45.0.4
+PDU state: active
+```
+
+The manager then accepted the exact adapter-produced observation and created
+the ADCOS session-to-external-PDU binding. This proves the authoritative
+observe -> adopt path against real Open5GS/UERANSIM state.
+
+The final application payload leg remains blocked in this fixture run because
+Open5GS does not expose a TCP `data_endpoint`; the user plane is the real
+UE TUN -> N3 GTP-U -> UPF -> data-network path. A DN echo service reachable
+through the configured UPF route (and `OPEN5GS_DATA_PEER` only as the test
+application endpoint) is still required to capture byte-identical return
+payload evidence.
