@@ -17,12 +17,20 @@ surface:
   019 AppSocket/AppSession audits).
 
 The session INTERNALLY maps a standard ``send()`` to the binding's
-established N3IWF tunnel via the manager (the manager passes itself in
-at construction through the private ``_bind_manager`` hook).  This
-internal routing metadata is private to the session instance; it is
-never exposed as a public attribute (the field names are
-underscore-prefixed and never appear in the public method signatures
-or in any ADCOS/Wi-Fi-token-shaped attribute name).
+established N3IWF tunnel via the manager (the manager binds the
+egress routing onto the facade AFTER the sandbox validated it,
+through the private ``_bind_manager`` hook -- the facade itself is
+the implementation's AUTHORITATIVE object, returned to the
+application verbatim).  This internal routing metadata is private to
+the session instance; it is never exposed as a public attribute (the
+field names are underscore-prefixed and never appear in the public
+method signatures or in any ADCOS/Wi-Fi-token-shaped attribute
+name).  A real tunnel data path (when the owning implementation has
+one) is ENCAPSULATED INSIDE this facade -- attached by the
+implementation before the facade crosses the sandbox seam -- so the
+application's standard connect/send/recv/close carry bytes over the
+REAL access path without any bare socket ever crossing a seam
+(the accepted WORK-019 ``AppSession`` pattern).
 
 The byte path (the WORK-021 data path): the application's bytes
 traverse ``WifiAppSession.send`` -> ``WifiManager.egress_frame`` ->
@@ -31,7 +39,7 @@ traverse ``WifiAppSession.send`` -> ``WifiManager.egress_frame`` ->
 that traversed the contract path come back through ``recv()`` -- in
 the deterministic reference model the tunnel path echoes them
 byte-identically; on a real path the peer's inbound bytes arrive
-through the same facade.
+through the same facade's private real socket.
 """
 
 from __future__ import annotations
@@ -222,12 +230,15 @@ class WifiAppSession:
         self._manager = manager
 
     def _bind_data_path(self, sock: Any, peer_endpoint: Any) -> None:
-        """Internal (environment-gated real interop): the conformance
-        peer / real Wi-Fi/N3IWF path attaches a real data socket and
-        its configured peer endpoint so the application's standard
+        """Internal (environment-gated real interop): the OWNING
+        implementation attaches a real data socket and its configured
+        peer endpoint to the facade IT RETURNS from its mediated
+        ``app_session`` operation, so the application's standard
         connect/send/recv/close carry bytes over a real access path.
-        The socket and endpoint are PRIVATE routing metadata; they
-        never appear in the public surface, and the app path imports
+        The socket and endpoint are PRIVATE routing metadata owned by
+        THIS facade (the accepted WORK-019 ``_bind_real_socket``
+        pattern); they never appear in the public surface, no bare
+        socket ever crosses the sandbox seam, and the app path imports
         NO ADCOS/Wi-Fi symbol."""
         self._real_socket = sock
         self._peer_endpoint = peer_endpoint

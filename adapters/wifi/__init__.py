@@ -78,10 +78,13 @@ Package (adapters/wifi/) -- foundation + mediation/reference stage
 - sandbox.py     SandboxedWifi -- BaseException->typed value,
                  contract-shape validation (incl. the W021 identity
                  separation re-asserted at the seam + leaky
-                 app-session rejection), deterministic step budget
+                 app-session rejection + the exact WifiAppSession
+                 facade type), deterministic step budget
                  with the frozen module-level STEP_CHARGES table (the
                  family's pinnable surface), consecutive-failure
-                 health accounting
+                 health accounting; NO capability-escape surface of
+                 any kind onto the implementation (no getattr hooks,
+                 no data-path accessors)
 - engine.py      ReferenceWifiEngine -- deterministic Wi-Fi/non-3GPP
                  access reference model; honest non-confidential (no
                  real Wi-Fi stack, no real N3IWF, no IPsec, no radio,
@@ -96,24 +99,36 @@ Package (adapters/wifi/) -- foundation + mediation/reference stage
                  guards (requirements-map identity smuggling and
                  cross-binding session collapse rejected caller-side
                  fail-closed); tunnel-scoped ops dispatch through
-                 the owning binding's sandbox; byte-stable snapshot
+                 the owning binding's sandbox; app_session returns
+                 the implementation's sandbox-validated facade
+                 VERBATIM (with the egress routing bound -- never a
+                 manager-constructed second facade, never a
+                 data-path extraction); byte-stable snapshot
                  (implementation labels stay out -- B2)
 - session.py     WifiAppSession -- ordinary app facade (connect/send/
                  recv/close with a standard destination string; NO
                  ADCOS/Wi-Fi API in the app path -- LOCK-019 analog);
                  the manager-routed byte path
                  App->WifiAppSession->WifiManager->SandboxedWifi->
-                 implementation->recv; the documented `_bind_data_path`
-                 internal protocol (mediated by the sandbox's
-                 data_path_for_binding hook) attaches a REAL tunnel
-                 data socket for the environment-gated real interop
-                 path
+                 implementation->recv.  The facade is the
+                 IMPLEMENTATION'S AUTHORITATIVE object (the sandbox
+                 validates it isinstance-exactly; the manager returns
+                 it verbatim with the egress routing bound); a real
+                 tunnel data path is ENCAPSULATED INSIDE the facade
+                 via the documented `_bind_data_path` internal
+                 protocol (attached by the owning implementation
+                 before the facade crosses the seam -- the accepted
+                 WORK-019 `_bind_real_socket` pattern; NO bare socket
+                 ever crosses a seam)
 - bridge.py      WifiTechnologyAdapter -- the WORK-016 Adapter SDK
                  bridge: subclasses the accepted
                  adapters.contract.AdapterContract (the frozen
-                 nine-op surface) over a WifiContract implementation;
-                 thin translation, NO state beyond impl+label, fresh
-                 WifiContext per call (SDK budget single authority);
+                 nine-op surface) over the family RUNTIME
+                 (WifiManager) -- the architect-reviewed authority
+                 path AdapterRuntime -> bridge -> manager -> sandbox
+                 -> implementation; the bridge holds a MANAGER
+                 reference and NOTHING else (no implementation
+                 reference, no contexts, no state beyond the label);
                  the ONLY import crossing the family boundary is
                  ``from ..contract import AdapterContext,
                  AdapterContract``
@@ -129,8 +144,11 @@ Package (adapters/wifi/) -- foundation + mediation/reference stage
                  (authenticate/establish_tunnel/egress_frame/
                  app_session/observe_external_association/close) with
                  REAL UDP control exchanges + REAL TCP tunnel-data
-                 writes; documented `_data_path_for_binding`
-                 internal protocol for the mediated real data path
+                 writes; the real data path is ENCAPSULATED INSIDE
+                 the WifiAppSession facade the adapter returns
+                 (documented `_bind_data_path` internal protocol;
+                 NO private capability-escape hooks onto the
+                 adapter)
 - wifi_interop.py  the B1 real-Wi-Fi/N3IWF interop gate
                  (run_wifi_interop; environment-gated by
                  WIFI_INTEROP=1; PASSED only with real end-to-end

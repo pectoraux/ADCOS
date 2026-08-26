@@ -29,7 +29,14 @@ WORK-021 brief's nine verification bullets:
 * environment-gated real interoperability with anti-faking behavior
   (cases 34-35: the WIFI_INTEROP gate never fakes success; the
   WIFI_PEER_KIND anti-faking guard fires FORBIDDEN before any
-  probe; SKIP never converts to acceptance).
+  probe; SKIP never converts to acceptance);
+* the PR #22 architect-review authority-path corrections, as pinnable
+  regressions (case_36: no sandbox escape hatch -- structural +
+  source scan; the manager returns the implementation's
+  sandbox-validated app-session facade VERBATIM (object identity);
+  the W016 bridge adapts the family MANAGER, with the family
+  sandbox's BaseException isolation provably in the path; the real
+  data path encapsulated INSIDE the returned facade).
 
 The a4 conformance byte path (case_31) proves bytes traverse the
 WifiAppSession -> WifiManager -> SandboxedWifi -> N3IWFAdapter ->
@@ -46,7 +53,7 @@ import hashlib
 import os
 import subprocess
 import sys
-from typing import List, Optional, Tuple
+from typing import Any, List, Optional, Tuple
 
 # Make the repository root importable.
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -83,8 +90,10 @@ from adapters.wifi import (  # noqa: E402
 )
 
 # WORK-016 SDK surface (the accepted generic adapter SDK this family
-# bridges onto -- case_32 drives the family THROUGH the SDK runtime).
+# bridges onto -- case_32/case_36 drive the family THROUGH the SDK
+# runtime).
 from adapters import (  # noqa: E402
+    AdapterContext,
     AdapterDescriptor,
     AdapterRuntime,
     AdapterSecurityState,
@@ -173,6 +182,30 @@ class _TestApProfileReader(ApProfileReader):
             ap_name=ap_name,
             ssid_names=(_SSID,),
             credential_slot_name=_CRED_SLOT,
+        )
+
+
+class _StoreSessionReader(SessionReader):
+    """A REAL read-only WORK-012 session reader over a SessionStore
+    (the composition root's wiring for the SDK-bridge composition in
+    case_32/case_36): the family manager verifies the session through
+    the SAME store the SDK runtime verifies bindability against.
+    Replaces the pre-redesign bridge's fabricated passthrough reader
+    (which echoed secureable=True for ANY session id) with a real
+    lookup."""
+
+    def __init__(self, store) -> None:
+        self._store = store
+
+    def lookup(self, session_id: str) -> Optional[SessionView]:
+        session = self._store.get(session_id)
+        if session is None:
+            return None
+        return SessionView(
+            session_id=session.session_id,
+            secureable=session.state in ("ESTABLISHED", "DEGRADED"),
+            initiator_node_id=session.binding.source_node_id,
+            responder_node_id=session.binding.destination_node_id,
         )
 
 
@@ -270,6 +303,23 @@ class _SecondImpl(ReferenceWifiEngine):
     canonical state -- R6)."""
 
     label = "second-impl-engine"
+
+
+class _FacadeCapturingImpl(ReferenceWifiEngine):
+    """An implementation that records the WifiAppSession facade its
+    app_session operation returns (the verbatim-return proof: the
+    manager must return THAT OBJECT, never a re-constructed facade)."""
+
+    label = "facade-capturing-impl"
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.returned_facades: List[Any] = []
+
+    def app_session(self, context, *, session_id):
+        facade = super().app_session(context, session_id=session_id)
+        self.returned_facades.append(facade)
+        return facade
 
 
 # fivegc test doubles (case_33 -- the mixed-access composition point).
@@ -1189,7 +1239,7 @@ def case_23_authority_session_reader_read_only() -> Result:
         return fail(name, "SessionReader exposes beyond lookup: %s" % sorted(surface))
     view = reader.lookup(_SESSION_ID)
     try:
-        view.secureable = False  # type: ignore[misc]
+        view.secureable = False  # type: ignore[misc, union-attr]
         return fail(name, "SessionView is mutable")
     except Exception:
         pass
@@ -1442,7 +1492,19 @@ def case_32_w016_sdk_bridge_nine_op_surface() -> Result:
     """The WORK-016 SDK bridge: the family ON the accepted generic
     nine-op Adapter SDK surface (driven THROUGH the SDK runtime, with
     the SDK's own sandbox mediating -- the brief's "using the accepted
-    WORK-016 Adapter SDK as the generic bridge")."""
+    WORK-016 Adapter SDK as the generic bridge").
+
+    The architect-reviewed authority path (PR #22 redesign): the
+    bridge adapts the family RUNTIME (WifiManager), never the
+    WifiContract implementation -- AdapterRuntime -> bridge ->
+    manager -> SandboxedWifi -> implementation.  The composition root
+    registers the implementation with the manager FIRST (the family
+    access path comes up at manager registration), then constructs
+    the bridge over the manager, then registers the bridge on the SDK
+    runtime; the family-side session verification is the manager's
+    REAL read-only SessionReader over the same WORK-012 store the SDK
+    runtime verifies against (the bridge fabricates no session
+    facts)."""
     name = "case_32_w016_sdk_bridge_nine_op_surface"
     from adapters.wifi import WifiTechnologyAdapter
 
@@ -1476,19 +1538,47 @@ def case_32_w016_sdk_bridge_nine_op_surface() -> Result:
             attested=False,
         ),
     )
+    # The composition root's wiring: the family runtime is constructed
+    # FIRST, the implementation is registered with it (opening + health
+    # probing it through the family sandbox), and the bridge is built
+    # OVER THE MANAGER.  The family-side session verification is a
+    # REAL read-only reader over the same WORK-012 store the SDK
+    # runtime verifies bindability against -- the bridge asserts no
+    # session facts of its own.
     engine = ReferenceWifiEngine()
-    bridge = WifiTechnologyAdapter(engine, label="wifi-sdk-bridge")
+    mgr = WifiManager(
+        integration_id="adcos:wifi:sdk-bridge",
+        session_reader=_StoreSessionReader(store),
+        ap_profile_reader=_TestApProfileReader(),
+    )
+    r = mgr.register_implementation(
+        engine, label="wifi-sdk", make_default=True, now=_T0,
+    )
+    if not r.ok:
+        return fail(name, "family register_implementation failed: %s" % r.detail)
+    bridge = WifiTechnologyAdapter(mgr, label="wifi-sdk-bridge")
+    # The bridge holds a MANAGER reference and NOTHING else -- no
+    # implementation reference, no fabricated session reader, no
+    # context-construction state.
+    if "_implementation" in vars(bridge):
+        return fail(name, "bridge holds an implementation reference")
+    if set(vars(bridge)) != {"_manager", "label"}:
+        return fail(name, "bridge carries state beyond manager+label: %s"
+                    % sorted(vars(bridge)))
     runtime.register(descriptor, bridge, now=_T0)
     if runtime.adapter_ids() != (adapter_id,):
         return fail(name, "bridge not registered on the SDK runtime")
-    # SDK open -> family open.
-    r = runtime.open_adapter(adapter_id, now=_NOW)
-    if not r.ok:
-        return fail(name, "SDK open failed: %s" % r.failure)
-    # SDK capabilities -> the family's honest capability ladder,
-    # FILTERED to the descriptor's declared set (the runtime never
-    # lets an implementation inflate exposure beyond its
-    # registration declaration -- exposure is by reference).
+    # SDK open -> a MEDIATED manager health probe (the family access
+    # path came up at manager registration; SDK open verifies it is
+    # observable through the mediated path).
+    sdk_r = runtime.open_adapter(adapter_id, now=_NOW)
+    if not sdk_r.ok:
+        return fail(name, "SDK open failed: %s" % sdk_r.failure)
+    # SDK capabilities -> the manager's informational capability ladder
+    # (derived from MEDIATED manager state), FILTERED to the
+    # descriptor's declared set (the runtime never lets an
+    # implementation inflate exposure beyond its registration
+    # declaration -- exposure is by reference).
     caps_before = runtime.capabilities(adapter_id, now=_NOW)
     if "capability.profile.wifi.non-3gpp-access" not in caps_before:
         return fail(name, "boundary capabilities missing pre-allocation: %s" % (caps_before,))
@@ -1498,19 +1588,22 @@ def case_32_w016_sdk_bridge_nine_op_surface() -> Result:
     # before any provisioned AP: HEALTHY requires an ACTIVE SSID).
     obs_before = runtime.observe(adapter_id, now=_NOW)
     if not obs_before.ok:
-        return fail(name, "SDK observe failed: %s" % obs_before.detail)
+        return fail(
+            name, "SDK observe failed: %s"
+            % (obs_before.failure.detail if obs_before.failure else "?")
+        )
     samples = {s.metric: s.value for s in obs_before.value}
     if samples.get("link-up") != 0:
         return fail(name, "link-up must be 0 with an empty AP store: %s" % samples)
-    # SDK allocate -> family provision_ap (the opaque wifi:ap:<hex>
+    # SDK allocate -> manager provision_ap (the opaque wifi:ap:<hex>
     # technology ref; the runtime keeps it internal -- recover it from
     # the engine for the bind coordinates).
-    r = runtime.allocate(
+    sdk_r = runtime.allocate(
         adapter_id, kind="coverage", quantity=4, unit="count",
         purpose="lobby-ap", now=_NOW,
     )
-    if not r.ok:
-        return fail(name, "SDK allocate failed: %s" % (r.failure.detail if r.failure else "?"))
+    if not sdk_r.ok:
+        return fail(name, "SDK allocate failed: %s" % (sdk_r.failure.detail if sdk_r.failure else "?"))
     ap_refs = sorted(engine._aps)  # test reach-around
     if len(ap_refs) != 1 or not ap_refs[0].startswith("wifi:ap:"):
         return fail(name, "allocate did not provision exactly one AP: %s" % (ap_refs,))
@@ -1522,35 +1615,61 @@ def case_32_w016_sdk_bridge_nine_op_surface() -> Result:
         return fail(name, "capability ladder did not grow on allocation")
     obs_after = runtime.observe(adapter_id, now=_NOW)
     if not obs_after.ok:
-        return fail(name, "SDK observe (post-allocate) failed: %s" % obs_after.detail)
+        return fail(
+            name, "SDK observe (post-allocate) failed: %s"
+            % (obs_after.failure.detail if obs_after.failure else "?")
+        )
     samples_after = {s.metric: s.value for s in obs_after.value}
     if samples_after.get("link-up") != 1:
         return fail(name, "link-up must be 1 with an active SSID: %s" % samples_after)
-    # SDK bind_session -> family bind + authenticate + establish
-    # (requirements carry the Wi-Fi binding coordinates -- DATA; the
-    # bridge's documented allocate translation names the provisioned
-    # SSID after the mapped resource kind, so the SSID to associate
-    # on here is "coverage").
-    r = runtime.bind_session(
+    # SDK bind_session -> manager bind + authenticate + establish (each
+    # MEDIATED through the binding's owning sandbox; requirements carry
+    # the Wi-Fi binding coordinates -- DATA the bridge CONSUMES as the
+    # manager's explicit parameters, forwarding only the leftover QoS
+    # map.  The bridge's documented allocate translation names the
+    # provisioned SSID after the mapped resource kind, so the SSID to
+    # associate on here is "coverage").
+    sdk_r = runtime.bind_session(
         adapter_id, session_id=sid, now=_NOW,
         requirements={"ap_ref": ap_ref, "ssid_name": "coverage"},
     )
-    if not r.ok:
-        return fail(name, "SDK bind_session failed: %s" % (r.failure.detail if r.failure else "?"))
-    bearer_ref = r.value.bearer_ref
+    if not sdk_r.ok:
+        return fail(name, "SDK bind_session failed: %s" % (sdk_r.failure.detail if sdk_r.failure else "?"))
+    bearer_ref = sdk_r.value.bearer_ref
     if not str(bearer_ref).startswith("wifi:tunnel:"):
         return fail(name, "SDK bearer is not the N3IWF tunnel ref: %s" % bearer_ref)
     if sid in str(bearer_ref):
         return fail(name, "SDK bearer embeds the session id (W021 collapse)")
-    binding_id = r.value.binding_id
-    # SDK health -> family health (effective computed state).
+    binding_id = sdk_r.value.binding_id
+    # The manager's canonical event history PROVES the bridge routed
+    # every operation through the family runtime (only the manager
+    # appends these events): provision -> bind -> authenticate ->
+    # establish, all mediated.
+    event_types = [e["event_type"] for e in mgr.snapshot()["events"]]
+    for expected_event in (
+        "AP_PROVISIONED", "BIND_SESSION", "AUTHENTICATE",
+        "ESTABLISH_TUNNEL",
+    ):
+        if expected_event not in event_types:
+            return fail(
+                name,
+                "manager event history missing %s (the bridge must route "
+                "through the manager): %s" % (expected_event, event_types),
+            )
+    # SDK health -> the manager's mediated-outcomes health translated
+    # onto the SDK's three-state vocabulary.
     health = runtime.health(adapter_id, now=_NOW)
     if getattr(health, "state", "") != "HEALTHY":
         return fail(name, "SDK health not HEALTHY after provisioning: %s" % health)
-    # SDK unbind -> family release_tunnel.
-    r = runtime.unbind_session(binding_id, now=_NOW)
-    if not r.ok:
-        return fail(name, "SDK unbind failed: %s" % (r.failure.detail if r.failure else "?"))
+    # SDK unbind -> manager release_tunnel (the tunnel index routes
+    # the release to the OWNING binding's sandbox).
+    sdk_r = runtime.unbind_session(binding_id, now=_NOW)
+    if not sdk_r.ok:
+        return fail(name, "SDK unbind failed: %s" % (sdk_r.failure.detail if sdk_r.failure else "?"))
+    if "RELEASE_TUNNEL" not in [
+        e["event_type"] for e in mgr.snapshot()["events"]
+    ]:
+        return fail(name, "manager event history missing RELEASE_TUNNEL")
     # SDK release of the AP allocation fails CLOSED honestly (the
     # frozen 12-op family contract has no AP decommission operation)
     # -- the bridge refuses to silently drop the release.  Surfaced
@@ -1565,17 +1684,29 @@ def case_32_w016_sdk_bridge_nine_op_surface() -> Result:
                 alloc_id = aid
                 break
     if alloc_id is not None:
-        r = runtime.release(alloc_id, now=_NOW)
-        if r.ok:
+        sdk_r = runtime.release(alloc_id, now=_NOW)
+        if sdk_r.ok:
             return fail(name, "AP-ref SDK release silently succeeded (should fail closed)")
         # The SDK sandbox isolates the WifiError (message text not
         # captured -- its own LOCK-023 discipline, verified here as a
         # side effect); the fail-closed OUTCOME is the assertion.
+    # An ASSOCIATION ref fails closed at this seam too (the SDK
+    # surface carries no assoc refs; the association release is the
+    # family-native manager.close_binding).
+    try:
+        bridge.release(
+            AdapterContext(adapter_id, technology, _NOW, 100),
+            "wifi:assoc:" + "a" * 32,
+        )
+        return fail(name, "assoc-ref release silently succeeded (should fail closed)")
+    except WifiError:
+        pass
     return ok(
         name,
-        "nine-op SDK surface over the family (open/capabilities/observe/allocate/"
-        "bind_session/unbind/health/release); honest ladder + link translation; "
-        "AP release fails closed (no decommission op in the frozen family contract)",
+        "nine-op SDK surface over the family RUNTIME (bridge->manager->"
+        "sandbox->impl, proven by the manager event history); honest "
+        "ladder + link translation; AP + assoc releases fail closed; "
+        "the bridge holds manager+label only",
     )
 
 
@@ -1652,30 +1783,30 @@ def case_33_mixed_access_session_continuity_with_5g() -> Result:
             ap_profile_reader=_TestApProfileReader(),
         )
         wifi_adapter = N3IWFAdapter(control_endpoint=wifi_server.control_endpoint)
-        r = wifi_mgr.register_implementation(
+        wr = wifi_mgr.register_implementation(
             wifi_adapter, label="n3iwf-mixed", make_default=True, now=_NOW,
         )
-        if not r.ok:
-            return fail(name, "wifi register failed: %s" % r.detail)
+        if not wr.ok:
+            return fail(name, "wifi register failed: %s" % wr.detail)
         binding = _provision_bind(wifi_mgr, session_id=_SESSION_ID)
         if binding.session_id != _SESSION_ID:
             return fail(name, "wifi binding changed the session id")
         if not wifi_mgr.authenticate(now=_NOW, binding_id=binding.binding_id).ok:
             return fail(name, "wifi attach failed")
-        r = wifi_mgr.establish_tunnel(now=_NOW, binding_id=binding.binding_id)
-        if not r.ok:
-            return fail(name, "wifi tunnel establishment failed: %s" % r.detail)
-        tunnel_ref = r.value.tunnel_ref
+        wr = wifi_mgr.establish_tunnel(now=_NOW, binding_id=binding.binding_id)
+        if not wr.ok:
+            return fail(name, "wifi tunnel establishment failed: %s" % wr.detail)
+        tunnel_ref = wr.value.tunnel_ref
         # Identity separation across FAMILIES: no fivegc-side ref text
         # appears in the wifi refs and vice versa.
         if "pdu" in tunnel_ref or "fivegc" in tunnel_ref:
             return fail(name, "wifi ref carries 5G-side identity text")
         if "wifi" in pdu_ref:
             return fail(name, "fivegc ref carries Wi-Fi-side identity text")
-        r = wifi_mgr.app_session(now=_NOW, session_id=_SESSION_ID)
-        if not r.ok:
-            return fail(name, "wifi app_session failed: %s" % r.detail)
-        wsession = r.value
+        wr = wifi_mgr.app_session(now=_NOW, session_id=_SESSION_ID)
+        if not wr.ok:
+            return fail(name, "wifi app_session failed: %s" % wr.detail)
+        wsession = wr.value
         wsession.connect("lobby-service")
         wsession.send(payload)
         echo_wifi = b""
@@ -1889,6 +2020,247 @@ def case_35_b1_gate_hardening_matrix_and_anti_faking() -> Result:
                 os.environ[k] = v
 
 
+def case_36_architect_review_authority_path() -> Result:
+    """The PR #22 architect-review corrections, as pinnable regressions.
+
+    Verifies the redesigned authority path MECHANICALLY:
+
+    (1) NO sandbox escape hatch -- the sandbox exposes no
+        data-path/capability accessor onto the implementation, and no
+        family module contains a generic getattr(implementation,
+        "_...") capability escape (source scan).
+    (2) The manager's app_session returns the implementation's
+        sandbox-validated facade VERBATIM (object identity) and never
+        constructs a second facade (source scan).
+    (3) The bridge routes through the manager -> sandbox mediator:
+        a BaseException raised by the implementation is isolated by
+        the FAMILY sandbox first (the SDK runtime's failure detail
+        shows the WifiError the bridge re-raised from the family's
+        isolated failure VALUE -- not the raw SystemExit a direct
+        implementation call would have leaked to the SDK layer).
+    (4) The real data path is ENCAPSULATED INSIDE the returned facade
+        (the adapter attaches its own socket to its own facade; a
+        byte round-trip over the real conformance peer still works).
+    """
+    name = "case_36_architect_review_authority_path"
+    from adapters.wifi import N3IWFAdapter as _N3IWF
+    from adapters.wifi import SandboxedWifi as _SandboxedWifi
+    from adapters.wifi import WifiTechnologyAdapter
+
+    # ---- (1) structural escape-hatch elimination ---------------------
+    if hasattr(_SandboxedWifi, "data_path_for_binding"):
+        return fail(name, "SandboxedWifi still exposes data_path_for_binding")
+    if hasattr(_N3IWF, "_data_path_for_binding"):
+        return fail(name, "N3IWFAdapter still exposes _data_path_for_binding")
+    pkg_dir = os.path.join(_ROOT, "adapters", "wifi")
+    for fname in sorted(os.listdir(pkg_dir)):
+        if not fname.endswith(".py"):
+            continue
+        with open(os.path.join(pkg_dir, fname), encoding="utf-8") as f:
+            source = f.read()
+        for banned in (
+            "data_path_for_binding", "_data_path_for_binding",
+        ):
+            if banned in source:
+                return fail(
+                    name,
+                    "adapters/wifi/%s still references %r (the escape "
+                    "hatch must be gone)" % (fname, banned),
+                )
+        for banned_getattr in (
+            "getattr(self._implementation", "getattr(self._manager",
+            "getattr(implementation", 'getattr(implementation,',
+        ):
+            if banned_getattr in source:
+                return fail(
+                    name,
+                    "adapters/wifi/%s contains the generic capability "
+                    "escape %r (no getattr reach-around onto the "
+                    "implementation/manager may exist)" % (fname, banned_getattr),
+                )
+        if fname == "manager.py" and "WifiAppSession(" in source:
+            return fail(
+                name,
+                "manager.py constructs a WifiAppSession (the manager must "
+                "return the implementation's facade verbatim, never build "
+                "a second one)",
+            )
+
+    # ---- (2) the manager returns the implementation's facade verbatim
+    engine = _FacadeCapturingImpl()
+    mgr = _new_manager(engine)
+    binding, _tunnel_ref = _bind_auth_establish(mgr, session_id=_SESSION_ID)
+    r = mgr.app_session(now=_NOW, session_id=_SESSION_ID)
+    if not r.ok:
+        return fail(name, "app_session failed: %s" % r.detail)
+    if not engine.returned_facades:
+        return fail(name, "implementation returned no facade (capture empty)")
+    if r.value is not engine.returned_facades[-1]:
+        return fail(
+            name,
+            "manager returned a DIFFERENT object than the implementation's "
+            "validated facade (Blocker 3: the facade must be returned "
+            "verbatim)",
+        )
+    # The facade is fully functional through the manager-routed byte
+    # path (send -> manager.egress_frame -> sandbox -> impl -> echo ->
+    # recv).
+    session = r.value
+    session.connect("lobby-service")
+    if session.send(_PAYLOAD) != len(_PAYLOAD):
+        return fail(name, "verbatim facade send returned wrong length")
+    echoed = b""
+    while len(echoed) < len(_PAYLOAD):
+        chunk = session.recv()
+        if not chunk:
+            break
+        echoed += chunk
+    session.close()
+    if echoed != _PAYLOAD:
+        return fail(name, "verbatim facade round-trip mismatch")
+
+    # ---- (3) the bridge routes through manager -> sandbox (BaseException
+    # isolation by the FAMILY sandbox, then the SDK sandbox) ----------
+    store, sid = _established_session()
+    runtime = AdapterRuntime(session_store=store)
+    technology = "access.ieee.80211"
+    adapter_id = derive_adapter_id(technology, "wifi-crash")
+    descriptor = AdapterDescriptor(
+        adapter_id=adapter_id,
+        access_technology_id=technology,
+        supported_profile_versions=("v1-0-0",),
+        capabilities=("capability.profile.wifi.non-3gpp-access",),
+        resource_mapping=(
+            ResourceMappingEntry(
+                technology_resource="ap-association-capacity",
+                kind="coverage", unit="count", quantity=4,
+                availability="continuous",
+            ),
+        ),
+        security_state=AdapterSecurityState(
+            profile="baseline",
+            credential_slots=("wifi-technology-credentials",),
+            attested=False,
+        ),
+    )
+    crashing = _CrashingImpl()
+    crash_mgr = WifiManager(
+        integration_id="adcos:wifi:crash-bridge",
+        session_reader=_StoreSessionReader(store),
+        ap_profile_reader=_TestApProfileReader(),
+    )
+    crash_reg = crash_mgr.register_implementation(
+        crashing, label="crashing", make_default=True, now=_T0,
+    )
+    if not crash_reg.ok:
+        return fail(name, "crashing register failed: %s" % crash_reg.detail)
+    crash_bridge = WifiTechnologyAdapter(crash_mgr, label="wifi-crash-bridge")
+    runtime.register(descriptor, crash_bridge, now=_T0)
+    if not runtime.open_adapter(adapter_id, now=_NOW).ok:
+        return fail(name, "crashing SDK open failed")
+    # The crashing implementation crashes on provision_ap too, so no
+    # allocation is possible; bind directly with a grammar-valid (but
+    # nonexistent) ap_ref -- the crashing implementation raises long
+    # before any existence check, which is exactly what this leg
+    # isolates.
+    crash_bind = runtime.bind_session(
+        adapter_id, session_id=sid, now=_NOW,
+        requirements={
+            "ap_ref": "wifi:ap:" + "a" * 32, "ssid_name": "coverage",
+        },
+    )
+    if crash_bind.ok:
+        return fail(name, "crashing impl bind did not fail")
+    detail = (
+        crash_bind.failure.detail if crash_bind.failure is not None else ""
+    )
+    # The family sandbox isolated the SystemExit into a typed failure
+    # VALUE; the bridge re-raised it as WifiError; the SDK sandbox
+    # isolated THAT.  A raw "raised SystemExit" detail would mean the
+    # bridge had called the implementation DIRECTLY (the pre-redesign
+    # bypass -- exactly what this regression pins out).
+    if "SystemExit" in detail:
+        return fail(
+            name,
+            "the implementation's SystemExit reached the SDK layer raw "
+            "(the bridge bypassed the family sandbox): %s" % detail,
+        )
+    if "WifiError" not in detail:
+        return fail(
+            name,
+            "expected the bridge's WifiError (re-raised from the family "
+            "sandbox's isolated failure value) in the SDK failure detail: %s"
+            % detail,
+        )
+
+    # ---- (4) the real data path is encapsulated INSIDE the facade ---
+    server = ReferenceWifiConformanceServer()
+    try:
+        adapter = N3IWFAdapter(control_endpoint=server.control_endpoint)
+        real_mgr = WifiManager(
+            integration_id="adcos:wifi:encap",
+            session_reader=_TestSessionReader(),
+            ap_profile_reader=_TestApProfileReader(),
+        )
+        r = real_mgr.register_implementation(
+            adapter, label="n3iwf-encap", make_default=True, now=_NOW,
+        )
+        if not r.ok:
+            return fail(name, "encap register failed: %s" % r.detail)
+        real_binding = _provision_bind(real_mgr, session_id=_SESSION_ID)
+        if not real_mgr.authenticate(
+            now=_NOW, binding_id=real_binding.binding_id
+        ).ok:
+            return fail(name, "encap authenticate failed")
+        if not real_mgr.establish_tunnel(
+            now=_NOW, binding_id=real_binding.binding_id
+        ).ok:
+            return fail(name, "encap tunnel establishment failed")
+        r = real_mgr.app_session(now=_NOW, session_id=_SESSION_ID)
+        if not r.ok:
+            return fail(name, "encap app_session failed: %s" % r.detail)
+        facade = r.value
+        # The facade OWNS the adapter's private real data path (the
+        # manager extracted nothing -- there is no data-path hook to
+        # extract with; the adapter attached the socket to the facade
+        # it returned).
+        if getattr(facade, "_real_socket", None) is None:
+            return fail(name, "facade carries no encapsulated real data path")
+        facade.connect("lobby-service")
+        if facade.send(_PAYLOAD) != len(_PAYLOAD):
+            return fail(name, "encap facade send returned wrong length")
+        echo = b""
+        while len(echo) < len(_PAYLOAD):
+            chunk = facade.recv()
+            if not chunk:
+                break
+            echo += chunk
+        facade.close()
+        if echo != _PAYLOAD:
+            return fail(name, "encap facade round-trip mismatch")
+        real_mgr.release_tunnel(
+            now=_NOW,
+            tunnel_ref=real_mgr._live_tunnel_for_binding(
+                real_binding.binding_id
+            ) or "",
+        )
+        real_mgr.close_binding(now=_NOW, binding_id=real_binding.binding_id)
+        real_mgr.close()
+    finally:
+        server.close()
+    mgr.close_binding(now=_NOW, binding_id=binding.binding_id)
+    mgr.close()
+    crash_mgr.close()
+    return ok(
+        name,
+        "no sandbox escape hatch (structural + source scan); manager "
+        "returns the implementation's facade verbatim (object identity); "
+        "bridge->manager->sandbox proven by two-layer BaseException "
+        "isolation; real data path encapsulated inside the returned "
+        "facade (byte round-trip over the real peer)",
+    )
+
+
 # ==========================================================================
 # Main
 # ==========================================================================
@@ -1931,6 +2303,7 @@ def main() -> int:
         case_33_mixed_access_session_continuity_with_5g,
         case_34_b1_real_wifi_n3iwf_interop_gate,
         case_35_b1_gate_hardening_matrix_and_anti_faking,
+        case_36_architect_review_authority_path,
     ]
     results: List[Result] = []
     for case in cases:

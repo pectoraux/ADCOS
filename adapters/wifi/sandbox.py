@@ -74,6 +74,7 @@ from .model import (
     ExternalAssociationEvidence,
     TunnelBinding,
 )
+from .session import WifiAppSession
 from .validation import assert_ref_session_separation, validate_opaque_ref
 
 # The contract module defines _BudgetExhausted privately; re-import it
@@ -393,15 +394,17 @@ class SandboxedWifi:
         return bytes(value)
 
     def _validate_app_session(self, value: Any) -> Any:
-        if value is None or isinstance(
-            value, (str, bytes, bytearray, bool, int, float)
-        ):
+        if not isinstance(value, WifiAppSession):
             return _ContractViolation(
-                "app_session must return an application session object"
+                "app_session must return a WifiAppSession instance (the "
+                "family's standard application facade; a foreign object "
+                "cannot cross the seam)"
             )
         # LOCK-019 analog: the application session exposes ONLY
         # standard session semantics; no ADCOS/Wi-Fi API may appear in
-        # the app path.
+        # the app path.  The family facade guarantees the four methods;
+        # the sandbox re-asserts them structurally so a hostile
+        # subclass cannot drop them.
         for method in _APPSESSION_METHODS:
             if not callable(getattr(value, method, None)):
                 return _ContractViolation(
@@ -583,45 +586,18 @@ class SandboxedWifi:
             validate=self._validate_nothing,
         )
 
-    # ------------------------------------------------------------------
-    # Mediated real-data-path access (the environment-gated real
-    # Wi-Fi/N3IWF interop path; W021-a4 additive surface)
-    # ------------------------------------------------------------------
-
-    def data_path_for_binding(self, binding_id: str) -> Optional[Any]:
-        """The binding's real (socket, peer_endpoint) pair when the
-        implementation owns one, else ``None`` (mediated hook).
-
-        Implementations that own a REAL tunnel data path (the
-        production-shaped :class:`adapters.wifi.n3iwf.N3IWFAdapter`)
-        expose the documented ``_data_path_for_binding`` internal
-        protocol; the reference engine exposes none (``None`` -- the
-        in-memory reference model has no real network).  The manager
-        routes the returned pair onto the manager-routed app-session
-        facade via the family's documented ``_bind_data_path``
-        internal protocol so the application's standard
-        connect/send/recv/close carry bytes over the REAL access
-        path while the manager stays implementation-agnostic.  The
-        socket is PRIVATE routing metadata; it never appears in any
-        public surface or canonical state.
-        """
-        if not isinstance(binding_id, str) or not binding_id:
-            return None
-        hook = getattr(self._implementation, "_data_path_for_binding", None)
-        if not callable(hook):
-            return None
-        try:
-            pair = hook(binding_id)
-        except Exception:  # noqa: BLE001 -- mediation: never raise
-            return None
-        if (
-            isinstance(pair, tuple)
-            and len(pair) == 2
-            and pair[0] is not None
-            and pair[1] is not None
-        ):
-            return pair
-        return None
+    # NOTE (the W021 authority path, architect-reviewed): the sandbox
+    # exposes NO capability-escape surface of any kind onto the
+    # implementation -- no generic attribute reach-around, no
+    # data-path accessor, no private-attribute hook of any kind.  The
+    # ONLY things that cross this seam are the 12 mediated operations
+    # above (charged, contract-validated, exception-isolated) and the
+    # LEAST-AUTHORITY WifiContext facade.  An implementation that owns
+    # a REAL tunnel data path encapsulates it INSIDE the WifiAppSession
+    # facade its mediated ``app_session`` operation returns (the facade
+    # owns its private data path; the manager returns that facade
+    # verbatim with the egress routing bound) -- exactly the accepted
+    # WORK-019 pattern.
 
     # ------------------------------------------------------------------
     # Diagnostic surface (NOT canonical public state; B2)

@@ -27,10 +27,15 @@ real-network operations:
   path (manager.egress_frame -> sandbox -> adapter) BEFORE landing
   on the real peer.  The peer's echoed bytes come back through the
   same socket + the WifiAppSession's standard ``recv()``.
-* ``app_session`` -- the reference facade PLUS the real data socket
-  attachment (the documented ``_bind_data_path`` internal protocol
-  on the family's app-session facade -- the manager mediates the
-  hook; the application still sees ONLY connect/send/recv/close).
+* ``app_session`` -- the reference facade (the family's
+  :class:`adapters.wifi.session.WifiAppSession`) PLUS the real data
+  socket attachment: the adapter attaches its real TCP tunnel data
+  socket + endpoint to the facade it RETURNS, via the documented
+  ``_bind_data_path`` internal protocol, so the facade ITSELF owns
+  its private real data path (the manager returns that facade
+  verbatim with the egress routing bound -- the accepted WORK-019
+  ``Open5GSAdapter`` ``_bind_real_socket`` pattern; the application
+  still sees ONLY connect/send/recv/close).
 * ``observe_external_association`` -- a REAL UDP OBSERVE round-trip
   against the peer's association table (the WORK-019
   ``observe_external_pdu_session`` analog; the reference engine
@@ -55,7 +60,6 @@ from .engine import ReferenceWifiEngine
 from .errors import WifiError, WifiReasonCode
 from .model import ExternalAssociationEvidence
 from .sandbox import STEP_CHARGES
-from .session import WifiAppSession
 
 __all__ = ["N3IWFAdapter"]
 
@@ -264,15 +268,18 @@ class N3IWFAdapter(ReferenceWifiEngine):
         session_id: str,
     ) -> Any:
         # Defer to the reference engine for the charge + binding
-        # lookup + tunnel lookup (its own reference facade validates
-        # the engine state first), then -- when a real tunnel data
-        # endpoint exists for the binding -- return the family's
-        # app-session facade (adapters.wifi.session.WifiAppSession,
-        # the a3 module) carrying the REAL data socket through its
-        # documented ``_bind_data_path`` internal protocol.  The
-        # facade's PUBLIC surface stays the standard
-        # connect/send/recv/close semantics (LOCK-019 analog); the
-        # socket is private routing metadata.
+        # lookup + tunnel lookup (it constructs the family's
+        # WifiAppSession facade), then -- when a real tunnel data
+        # endpoint exists for the binding -- attach the REAL data
+        # socket to THAT facade via the documented ``_bind_data_path``
+        # internal protocol, and return the SAME facade.  The facade
+        # OWNS its private real data path (the socket never crosses
+        # any seam as a bare capability; the manager returns this
+        # facade verbatim with the egress routing bound -- the
+        # accepted WORK-019 Open5GSAdapter pattern).  The facade's
+        # PUBLIC surface stays the standard connect/send/recv/close
+        # semantics (LOCK-019 analog); the socket is private routing
+        # metadata.
         app_session = super().app_session(context, session_id=session_id)
         entry = self._live_association_for_session(session_id)
         if entry is None:
@@ -285,26 +292,17 @@ class N3IWFAdapter(ReferenceWifiEngine):
             # in-memory reference model (no real network).
             return app_session
         host, port = data_endpoint
-        tunnel = self._live_tunnel_for_association(entry.binding.assoc_ref)
-        facade = WifiAppSession(
-            destination=entry.binding.ssid,
-            tunnel_ref=(
-                tunnel.binding.tunnel_ref if tunnel is not None else ""
-            ),
-        )
         # Create a real TCP tunnel data socket (UNCONNECTED).  The
         # facade's standard connect(destination) opens the TCP
         # connection to the configured peer endpoint so bytes later
-        # sent through send() traverse the contract path and land on
-        # the real N3IWF tunnel data peer.  The manager-routed byte
-        # path picks the SAME socket up through the documented
-        # _data_path_for_binding internal protocol (mediated by the
-        # sandbox) and attaches it to the manager-routed facade.
+        # sent through send() traverse the contract path (the
+        # manager-routed egress -> adapter.egress_frame writes to
+        # THIS socket) and land on the real N3IWF tunnel data peer.
         sock = _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM)
         sock.settimeout(10)
         self._real_data_sockets[binding_id] = sock
-        facade._bind_data_path(sock, (host, port))
-        return facade
+        app_session._bind_data_path(sock, (host, port))
+        return app_session
 
     def close(
         self,
@@ -367,31 +365,14 @@ class N3IWFAdapter(ReferenceWifiEngine):
                 "N3IWF peer returned incomplete external association state",
             ) from None
 
-    # ------------------------------------------------------------------
-    # Documented internal protocol: the real data path for a live
-    # binding (mediated by the sandbox's data_path_for_binding; the
-    # manager routes it onto the app-session facade -- the manager
-    # stays implementation-agnostic).  Note: importing STEP_CHARGES
-    # from .sandbox above creates NO import cycle (sandbox imports
-    # nothing from this module).
-    # ------------------------------------------------------------------
-
-    def _data_path_for_binding(
-        self, binding_id: str
-    ) -> Optional[Tuple[Any, Any]]:
-        """Internal: the binding's real (socket, peer_endpoint) pair
-        when a real tunnel data socket exists for it, else ``None``.
-
-        The sandbox mediates this hook
-        (:meth:`adapters.wifi.sandbox.SandboxedWifi.
-        data_path_for_binding`); the manager attaches it to the
-        manager-routed app-session facade via the family's documented
-        ``_bind_data_path`` internal protocol.  The socket is PRIVATE
-        routing metadata; it never appears in the public
-        app-session surface.
-        """
-        sock = self._real_data_sockets.get(binding_id)
-        endpoint = self._binding_data_endpoints.get(binding_id)
-        if sock is None or endpoint is None:
-            return None
-        return (sock, endpoint)
+    # NOTE (the W021 authority path, architect-reviewed): the adapter
+    # exposes NO private capability-escape hooks onto itself -- no
+    # data-path accessor of any kind any caller (or any mediator)
+    # could use to reach around the mediated 12-op contract with.  The
+    # adapter's REAL tunnel data path is ENCAPSULATED INSIDE the
+    # WifiAppSession facade its mediated ``app_session`` operation
+    # returns (attached via the documented ``_bind_data_path``
+    # internal protocol before the facade crosses the sandbox seam);
+    # the manager returns that facade verbatim.  Importing
+    # STEP_CHARGES from .sandbox above creates NO import cycle
+    # (sandbox imports nothing from this module).

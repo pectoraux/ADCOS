@@ -81,6 +81,35 @@ data = session.recv()
 session.close()
 ```
 
+The facade the application holds is the IMPLEMENTATION'S OWN
+sandbox-validated `WifiAppSession`, returned verbatim by the manager
+(with the manager-routed egress bound); a real tunnel data path is
+ENCAPSULATED INSIDE that facade — no bare socket ever crosses a
+seam (the accepted WORK-019 `AppSession` pattern).
+
+## The one mediated authority path (PR #22 architect review)
+
+```
+W016 Adapter Runtime
+        |
+WifiTechnologyAdapter   (bridge: thin translation; holds the MANAGER
+        |                 and nothing else — no implementation ref)
+        v
+WifiManager             (family runtime; binding table + events)
+        |
+SandboxedWifi           (BaseException isolation, contract-shape
+        |                 validation, W021 identity checks, frozen
+        |                 per-op step charging)
+        v
+WifiContract implementation
+```
+
+There is no path from the SDK surface around the family mediator:
+the sandbox exposes no data-path/capability accessor onto the
+implementation (no `getattr` reach-around of any kind — pinned by
+case_36's structural + source scan), and the bridge cannot call a
+concrete implementation because it holds no reference to one.
+
 ## Real Wi-Fi/N3IWF interoperability (a4: in-sandbox honest evidence)
 
 `adapters/wifi/conformance.py` — a REAL N3IWF-shaped peer (real UDP
@@ -129,7 +158,7 @@ an ACR.
 
 ## Verification
 
-`python3 tools/wifi_selftest.py` — 35 cases covering the brief's nine
+`python3 tools/wifi_selftest.py` — 36 cases covering the brief's nine
 verification bullets: the frozen 12-op contract surface, least-authority
 context, happy paths, identity separation + collapse/smuggling
 rejection, credential isolation, availability/capability/capacity
@@ -139,6 +168,10 @@ vendor/RAN tokens + citations), frozen `spec/` byte identity,
 no-core-wifi-leakage, read-only reader facades, pinned step charges,
 same-impl + cross-impl determinism, BaseException/contract-shape/
 budget/secret-leak failure isolation, the a4 real conformance byte
-path, the WORK-016 SDK nine-op bridge, mixed-access session
-continuity with 5G, and the environment-gated real interop gate +
-anti-faking hardening.
+path, the WORK-016 SDK nine-op bridge (over the family MANAGER —
+proven by the manager's canonical event history), mixed-access session
+continuity with 5G, the environment-gated real interop gate +
+anti-faking hardening, and the PR #22 architect-review authority-path
+regressions (no sandbox escape hatch; the implementation's facade
+returned verbatim; two-layer BaseException isolation through the
+bridge; the real data path encapsulated inside the returned facade).

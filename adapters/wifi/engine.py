@@ -71,6 +71,7 @@ from .model import (
     derive_tunnel_ref,
 )
 from .sandbox import STEP_CHARGES
+from .session import WifiAppSession
 from .validation import (
     reject_credential_like_text,
     validate_credential_slot_name,
@@ -163,75 +164,6 @@ class _TunnelEntry:
     def __init__(self, binding: TunnelBinding) -> None:
         self.binding = binding
         self.released = False
-
-
-class _ReferenceAppSession:
-    """The reference engine's ordinary application session facade.
-
-    Standard session semantics ONLY (``connect`` / ``send`` / ``recv``
-    / ``close``); NO ADCOS or Wi-Fi API appears in the app path
-    (LOCK-019 analog).  All fields are PRIVATE (underscore-prefixed);
-    the sandbox validator scans the public surface for ADCOS/Wi-Fi
-    tokens and rejects a leaky facade at the seam.
-
-    Engine-local: the later WORK-021 session module supersedes this
-    minimal facade with the manager-routed application session; the
-    sandbox validates the surface STRUCTURALLY (standard semantics +
-    no leaky tokens), so the seam holds for any conforming facade.
-    """
-
-    def __init__(self, *, destination: str, path_ref: str) -> None:
-        self._destination = destination
-        # PRIVATE routing metadata: the live tunnel ref (or "" when the
-        # association has no live tunnel yet).  Stored under a
-        # non-token attribute name; never part of the public surface.
-        self._path_ref = path_ref
-        self._connected = False
-        self._closed = False
-        self._inbound: List[bytes] = []
-
-    def connect(self, destination: str) -> None:
-        """Connect to a remote endpoint (standard session semantics)."""
-        if self._closed:
-            raise WifiError(WifiReasonCode.NOT_OPEN, "session is closed")
-        if not isinstance(destination, str) or not destination:
-            raise WifiError(
-                WifiReasonCode.INVALID_INPUT,
-                "destination must be a non-empty string",
-            )
-        self._destination = destination
-        self._connected = True
-
-    def send(self, data: bytes) -> int:
-        """Send bytes to the connected remote endpoint."""
-        if self._closed:
-            raise WifiError(WifiReasonCode.NOT_OPEN, "session is closed")
-        if not isinstance(data, (bytes, bytearray)):
-            raise WifiError(
-                WifiReasonCode.INVALID_INPUT, "data must be bytes"
-            )
-        # No manager bound yet (the later session module routes send()
-        # through egress_frame on the binding's owning sandbox); the
-        # reference model accepts the bytes deterministically.
-        return len(data)
-
-    def recv(self) -> bytes:
-        """Receive bytes from the connected remote endpoint."""
-        if self._closed:
-            raise WifiError(WifiReasonCode.NOT_OPEN, "session is closed")
-        if self._inbound:
-            return self._inbound.pop(0)
-        # In the reference model an empty recv is permitted (mirrors
-        # the fivegc AppSession reference behavior).
-        return b""
-
-    def close(self) -> None:
-        """Close the session."""
-        self._closed = True
-
-    def _deliver(self, data: bytes) -> None:
-        """Internal: deliver inbound bytes (test harness / manager)."""
-        self._inbound.append(bytes(data))
 
 
 class ReferenceWifiEngine(WifiContract):
@@ -903,12 +835,20 @@ class ReferenceWifiEngine(WifiContract):
                 "no live association for session %s" % session_id,
             )
         tunnel = self._live_tunnel_for_association(entry.binding.assoc_ref)
-        # Construct the application session facade; the manager binds
-        # itself + the injected instant later (the a3 session module
-        # supersedes this minimal facade with the manager-routed one).
-        return _ReferenceAppSession(
+        # The family's application-session facade (adapters.wifi.session
+        # -- the a3 module).  The MANAGER binds itself + the injected
+        # instant later (the documented _bind_manager / _set_now
+        # internal protocol), so the facade's standard send() routes
+        # through the binding's OWNING sandbox; the facade the
+        # implementation returns is the AUTHORITATIVE application
+        # object (the manager returns it verbatim -- it never
+        # constructs a second facade).  Mirrors the accepted WORK-019
+        # reference engine's AppSession construction.
+        return WifiAppSession(
             destination=entry.binding.ssid,
-            path_ref=tunnel.binding.tunnel_ref if tunnel is not None else "",
+            tunnel_ref=(
+                tunnel.binding.tunnel_ref if tunnel is not None else ""
+            ),
         )
 
     def health(self) -> str:

@@ -88,11 +88,12 @@ DEFAULT_INTEGRATION_ID = "wifi-integration"
 #: LOCK-006).  The binding coordinates (``ap_ref`` / ``ssid_name`` /
 #: ``station_label``) are EXPLICIT manager parameters here -- a
 #: requirements key duplicating them is an override attempt.  (The
-#: WORK-016 bridge passes the SDK caller's binding coordinates through
-#: the requirements map because the generic SDK surface has no
-#: AP-selection parameter; that is the BRIDGE's translation, which
-#: drives the implementation directly -- it never crosses this
-#: manager's requirements gate.)
+#: WORK-016 bridge CONSUMES the SDK caller's binding-coordinate keys
+#: from the requirements map as its documented translation -- the
+#: generic SDK surface has no AP-selection parameter -- and passes the
+#: coordinates as these explicit parameters, forwarding only the
+#: leftover QoS data; the leftover map crosses THIS gate like any
+#: other caller's.)
 _FORBIDDEN_REQUIREMENT_KEYS: Tuple[str, ...] = (
     "session_id",
     "session",
@@ -621,16 +622,25 @@ class WifiManager:
         """Return the ordinary application session facade for a live
         binding.
 
-        Mirrors the WORK-019 ``app_session`` mechanics: the binding is
-        located by the sacred ``session_id``, the family's own
-        ``app_session`` operation is mediated through the binding's
-        OWNING sandbox (charging its budget and validating the
-        implementation's facade surface), and the application receives
-        the MANAGER-ROUTED :class:`WifiAppSession` whose standard
-        ``send()`` traverses ``manager.egress_frame`` on the owning
-        sandbox (B2) -- superseding the engine-local reference facade
-        (the a2 stage note).  A live tunnel is required (the routed
-        facade's data path is the binding's tunnel).
+        Mirrors the accepted WORK-019 ``app_session`` mechanics EXACTLY:
+        the binding is located by the sacred ``session_id``, the
+        family's own ``app_session`` operation is mediated through the
+        binding's OWNING sandbox (charging its budget and validating
+        the facade surface), and the application receives THE
+        IMPLEMENTATION'S OWN validated :class:`WifiAppSession` --
+        returned VERBATIM, never discarded and never re-constructed --
+        with the manager's egress routing bound onto it (the
+        documented ``_bind_manager`` / ``_set_now`` internal protocol)
+        so the standard ``send()`` traverses
+        ``manager.egress_frame`` on the binding's OWNING sandbox (B2).
+
+        The facade OWNS whatever private data path the implementation
+        gave it (a real tunnel socket stays ENCAPSULATED INSIDE the
+        returned facade -- the adapter attaches it before the facade
+        crosses the sandbox seam; the manager extracts NOTHING from
+        the implementation and holds no second data-path authority).
+        A live tunnel is required (the routed facade's data path is
+        the binding's tunnel).
         """
         self._require_now(now)
         if not isinstance(session_id, str) or not session_id:
@@ -653,34 +663,18 @@ class WifiManager:
                 "binding's tunnel)",
             )
         result = record.sandbox.app_session(now, session_id=session_id)
-        if not result.ok:
-            return result
-        session = WifiAppSession(
-            destination=record.binding.ssid, tunnel_ref=tunnel_ref,
-        )
-        # The manager binds itself + the injected instant so the
-        # facade's standard send() routes through the binding's OWNING
-        # sandbox (B2).
-        session._bind_manager(self)
-        session._set_now(now)
-        # W021-a4 additive mediation: when the OWNING implementation
-        # exposes a REAL tunnel data path (the production-shaped
-        # N3IWFAdapter behind the sandbox's documented
-        # data_path_for_binding hook), attach it to the facade so the
-        # application's standard connect/send/recv/close carry bytes
-        # over the REAL access path.  The reference engine exposes
-        # none (None) -- the in-memory reference model is unchanged.
-        # The manager stays implementation-agnostic: the hook is
-        # mediated by the sandbox, never reached around.
-        data_path = record.sandbox.data_path_for_binding(
-            record.binding.binding_id
-        )
-        if data_path is not None:
-            session._bind_data_path(data_path[0], data_path[1])
-        self._append_event(
-            "APP_SESSION", now=now, assoc_ref=record.binding.assoc_ref
-        )
-        return WifiOpResult(ok=True, value=session)
+        if result.ok:
+            session = result.value
+            # The manager binds itself + the injected instant so the
+            # facade's standard send() routes through the binding's
+            # OWNING sandbox (B2).  The facade itself is the
+            # implementation's AUTHORITATIVE object, returned verbatim.
+            session._bind_manager(self)
+            session._set_now(now)
+            self._append_event(
+                "APP_SESSION", now=now, assoc_ref=record.binding.assoc_ref
+            )
+        return result
 
     def health(self, *, now: str) -> WifiOpResult:
         """The DEFAULT implementation's health (the availability
@@ -689,6 +683,55 @@ class WifiManager:
         self._require_now(now)
         sandbox = self._require_default()
         return sandbox.health(now)
+
+    def computed_health(self) -> str:
+        """The deterministic effective health of the DEFAULT
+        implementation, from MEDIATED OUTCOMES ONLY (instant-free;
+        LOCK-017: reported, never authoritative).
+
+        ``NOT_RUNNING`` before any default implementation is
+        registered (or before its sandbox opened); otherwise the
+        owning sandbox's consecutive-failure aggregate (HEALTHY /
+        DEGRADED / FAILED).  This is the instant-free informational
+        surface the WORK-016 bridge translates onto the SDK's
+        three-state health vocabulary -- it derives from what the
+        manager can actually see (mediated outcomes), never from a
+        reach-around into implementation state.
+        """
+        sandbox = self._default_sandbox
+        if sandbox is None:
+            return "NOT_RUNNING"
+        return sandbox.computed_health()
+
+    def capabilities(self) -> Tuple[str, ...]:
+        """The informational capability ladder, derived from MEDIATED
+        MANAGER STATE ONLY (LOCK-017: reported, never authoritative).
+
+        ``()`` while no default implementation is registered; the four
+        boundary capabilities once one is (the access boundary exists:
+        non-3GPP access, association, authentication, N3IWF tunnel);
+        the data-path capability additionally once the manager's
+        mediated history shows at least one provisioned AP (the
+        boundary has the capacity it provisioned).  The ladder is
+        derived from the manager's OWN canonical event history -- the
+        implementation's internal SSID activation state never crosses
+        the seam (LOCK-016/017); the WORK-016 bridge surfaces this
+        ladder on the SDK's ``capabilities`` surface and the SDK
+        runtime filters it to the descriptor's declared set.
+        """
+        if self._default_sandbox is None:
+            return ()
+        caps: Tuple[str, ...] = (
+            "capability.profile.wifi.non-3gpp-access",
+            "capability.profile.wifi.association",
+            "capability.profile.wifi.authentication",
+            "capability.profile.wifi.n3iwf-tunnel",
+        )
+        if any(
+            event.event_type == "AP_PROVISIONED" for event in self._events
+        ):
+            caps = caps + ("capability.profile.wifi.data-path",)
+        return caps
 
     def close_binding(self, *, now: str, binding_id: str) -> WifiOpResult:
         """Close ONE binding: release the association AND its
