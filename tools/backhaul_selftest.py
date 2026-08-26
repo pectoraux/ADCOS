@@ -3558,18 +3558,24 @@ def case_45_preflight_separation_and_distinct_status() -> Result:
     """Secondary corrections 3 + 4 regression: the capability preflight
     SEPARATES hard management-plane prerequisites (the real SNMP
     endpoint round-trip) from data-plane capability prerequisites and
-    from never-blocking diagnostics (a reachable real element stays
-    reachable despite absent snmpget/daemons); and the gate reports
-    the DISTINCT DATA_PEER_UNREACHABLE status when the management
-    plane is verified over real SNMP but the data plane cannot carry
-    (never a fabricated PASS).
+    from never-blocking diagnostics -- MACHINE-INDEPENDENTLY (the
+    diagnostics may be PRESENT, e.g. on the CI runner, or ABSENT,
+    e.g. in this sandbox; either way they never gate reachability,
+    which the real SNMP round-trip alone decides); and the gate
+    reports the DISTINCT DATA_PEER_UNREACHABLE status when the
+    management plane is verified over real SNMP but the data plane
+    cannot carry (never a fabricated PASS; on a machine that DOES
+    host the data plane the gate's honest verdicts are the
+    data-plane statuses -- a real byte-identical echo may
+    legitimately close the gate).
     """
     name = "case_45_preflight_separation_and_distinct_status"
     responder = _SnmpResponder()
     try:
         # (1) preflight separation: a REAL SNMP-answering endpoint is
-        # reachable even though the diagnostics are absent in this
-        # sandbox (no snmpget, no daemons) -- they never block.
+        # reachable regardless of this machine's DIAGNOSTIC inventory
+        # (snmpget/daemons present or absent -- never blocking; the
+        # hard reachability decision is the real SNMP GET round-trip).
         report = probe_backhaul_interop_capability(
             BackhaulEnvProbeConfig(
                 snmp_endpoint="127.0.0.1:%d" % responder.endpoint[1],
@@ -3584,21 +3590,37 @@ def case_45_preflight_separation_and_distinct_status() -> Result:
                 "real SNMP endpoint not reachable (diagnostics must never "
                 "block): %s" % report.summary(),
             )
-        tools = report.check("element_mgmt_tools")
-        daemons = report.check("terminal_daemons")
-        if tools.status == "PASS" or daemons.status == "PASS":
-            return fail(name, "diagnostic premise wrong (sandbox has the tools?)")
-        if report.data_plane_ready:
+        # Machine-independent structural proof that the diagnostics
+        # can NEVER gate reachability: they are classified OUTSIDE the
+        # hard management-plane prerequisite set and the data-plane
+        # capability set, and the report CARRIES each of them as a
+        # never-blocking entry whose status is honest for THIS
+        # machine (PASS when the tools ship -- e.g. the CI runner;
+        # MISSING when they do not -- e.g. this sandbox).
+        from adapters.backhaul.interop_env_probe import (  # test reach-around
+            _DATA_PLANE_CHECKS,
+            _DIAGNOSTIC_CHECKS,
+            _HARD_MANAGEMENT_CHECKS,
+        )
+        if _HARD_MANAGEMENT_CHECKS != ("snmp_endpoint",):
             return fail(
-                name,
-                "data-plane readiness reported without CAP_NET_RAW "
-                "(this sandbox cannot create AF_PACKET sockets)",
+                name, "hard management prerequisites changed: %s"
+                % (_HARD_MANAGEMENT_CHECKS,)
             )
+        for diag in _DIAGNOSTIC_CHECKS:
+            if diag in _HARD_MANAGEMENT_CHECKS or diag in _DATA_PLANE_CHECKS:
+                return fail(name, "diagnostic %s leaked into a blocking set" % diag)
+            entry = report.check(diag)
+            if entry.status not in ("PASS", "MISSING"):
+                return fail(
+                    name, "diagnostic %s status not honest: %s"
+                    % (diag, entry.status)
+                )
         # (2) the DISTINCT DATA_PEER_UNREACHABLE outcome: the gate's
         # full control-plane flow over REAL SNMP (link_up + VLAN
         # createAndGo + egress PortList bind + the real session
         # authority + negative controls + clean teardown), then the
-        # honest data-plane blocker -- never a PASS.
+        # honest data-plane verdict -- never a fabricated PASS.
         for var in ("BACKHAUL_INTEROP", "BACKHAUL_PEER_KIND"):
             os.environ.pop(var, None)
         outcome = run_backhaul_interop(
@@ -3612,19 +3634,38 @@ def case_45_preflight_separation_and_distinct_status() -> Result:
                 timeout_s=1.0,
             )
         )
-        if outcome.status != "DATA_PEER_UNREACHABLE":
-            return fail(
-                name,
-                "management-plane-verified gate must report the DISTINCT "
-                "DATA_PEER_UNREACHABLE, got %s (%s)"
-                % (outcome.status, outcome.detail[:160]),
-            )
-        if outcome.status == "PASSED":
-            return fail(name, "the gate fabricated a PASS")
-        if "real SNMP management-plane interop verified" not in outcome.detail:
-            return fail(name, "outcome detail missing the verified-management-plane disclosure")
-        if "CAPABILITY" not in outcome.detail:
-            return fail(name, "outcome detail missing the capability matrix")
+        if not report.data_plane_ready:
+            # The CI runner and this sandbox: no CAP_NET_RAW -- the
+            # management plane is verified and the data plane cannot
+            # carry HERE, so the gate must report the DISTINCT
+            # DATA_PEER_UNREACHABLE with the verified-management-plane
+            # disclosure and the capability matrix.
+            if outcome.status != "DATA_PEER_UNREACHABLE":
+                return fail(
+                    name,
+                    "management-plane-verified gate must report the DISTINCT "
+                    "DATA_PEER_UNREACHABLE, got %s (%s)"
+                    % (outcome.status, outcome.detail[:160]),
+                )
+            if "real SNMP management-plane interop verified" not in outcome.detail:
+                return fail(name, "outcome detail missing the verified-management-plane disclosure")
+            if "CAPABILITY" not in outcome.detail:
+                return fail(name, "outcome detail missing the capability matrix")
+        else:
+            # A machine that DOES host the data plane: the gate REALLY
+            # attempts the data plane, so the verdict must be one of
+            # the honest data-plane statuses (a real byte-identical
+            # echo may legitimately close the gate; anything else
+            # must name the DATA plane) -- never a management-side
+            # non-acceptance (SKIP/UNREACHABLE/FORBIDDEN) here.
+            if outcome.status not in (
+                "PASSED", "DATA_PEER_UNREACHABLE", "BYTE_MISMATCH",
+            ):
+                return fail(
+                    name,
+                    "capable-machine gate verdict must be a data-plane "
+                    "status, got %s (%s)" % (outcome.status, outcome.detail[:160]),
+                )
         # (3) the gate's REAL SNMP exchanges happened (the responder's
         # audit log proves the management-plane verbs traversed real
         # BER bytes) and the element was left CLEAN (admin restored,
@@ -3653,7 +3694,7 @@ def case_45_preflight_separation_and_distinct_status() -> Result:
         return fail(name, "dead SNMP endpoint reported reachable")
     if report2.check("snmp_endpoint").status != "UNREACHABLE":
         return fail(name, "dead endpoint must be an snmp_endpoint UNREACHABLE check")
-    return ok(name, "preflight separates hard management checks (real SNMP round-trip) from data-plane capability and never-blocking diagnostics; the gate reports the DISTINCT DATA_PEER_UNREACHABLE with the management plane verified over real SNMP and the element left clean; a dead endpoint stays UNREACHABLE")
+    return ok(name, "preflight separates hard management checks (real SNMP round-trip) from data-plane capability and never-blocking diagnostics MACHINE-INDEPENDENTLY (present on the CI runner or absent in the sandbox -- reachability unaffected either way); the gate reports the DISTINCT DATA_PEER_UNREACHABLE with the management plane verified over real SNMP and the element left clean (on data-plane-capable machines the verdict is an honest data-plane status); a dead endpoint stays UNREACHABLE")
 
 
 def case_46_production_wire_path_protocol_consistency() -> Result:

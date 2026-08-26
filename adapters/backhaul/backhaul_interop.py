@@ -661,6 +661,7 @@ def run_backhaul_interop(
                 "never a fabricated PASS",
             )
         if echoed != payload:
+            _teardown()  # a mismatched echo still restores the element
             return InteropOutcome(
                 "BYTE_MISMATCH",
                 "real wire data path returned %r (expected %r)"
