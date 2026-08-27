@@ -24,20 +24,31 @@ local-first offline mechanics:
 - :class:`OfflinePolicyCache` -- the §16 "configurable offline
   authorization grace periods" + "local policy cache" with an
   EXPLICIT lifecycle (ONLINE / OFFLINE_GRACE /
-  ONLINE_REAUTH_REQUIRED).  While ONLINE, callers
-  :meth:`~OfflinePolicyCache.record_decision` genuine WORK-010
-  decisions (digest-verified against their canonical bytes) and the
-  recorded verdicts replay while UP.  A partition enters
-  OFFLINE_GRACE: the recording channel CLOSES (a decision minted
-  during the partition is never learnable by the cache -- the cache
-  replays verdicts recorded while connected; it never becomes a
-  policy evaluator/authority during the partition) and the recorded
-  verdicts remain honored within the configured grace window only.
-  Recovery enters ONLINE_REAUTH_REQUIRED: the offline-honor channel
-  CLOSES -- every decision recorded before the recovery is rejected
-  until it has been revalidated and re-recorded by the online policy
-  authority.  The cache REPLAYS recorded verdicts -- it never
-  evaluates policy (WORK-010 stays the sole policy authority).
+  ONLINE_REAUTH_REQUIRED).  While ONLINE (before the first
+  recovery), callers :meth:`~OfflinePolicyCache.record_decision`
+  genuine WORK-010 decisions (digest-verified against their
+  canonical bytes) and the recorded verdicts replay while UP.  A
+  partition enters OFFLINE_GRACE: the recording channel CLOSES (a
+  decision minted during the partition is never learnable by the
+  cache -- the cache replays verdicts recorded while connected; it
+  never becomes a policy evaluator/authority during the partition)
+  and the recorded verdicts remain honored within the configured
+  grace window only.  Recovery enters ONLINE_REAUTH_REQUIRED: the
+  offline-honor channel CLOSES -- every decision recorded before
+  the recovery is rejected until it has been revalidated and
+  re-recorded by the online policy authority.  Post-recovery
+  recording crosses the ACTUAL policy-authority boundary (the PR
+  #28 review B2 round-3 correction): a caller-supplied raw
+  ``PolicyDecision`` is NEVER proof of reauthorization (its
+  digest is content addressing, not provenance -- a forged
+  self-consistent ALLOW is indistinguishable from a genuine one by
+  field inspection), so the only recording path after a recovery
+  is :meth:`~OfflinePolicyCache.record_authoritative_decision`
+  with a receipt minted by the constructor-injected
+  :class:`~policy.revalidation.PolicyRevalidationAuthority` and
+  verified against THAT authority's mint ledger.  The cache
+  REPLAYS recorded verdicts -- it never evaluates policy (WORK-010
+  stays the sole policy authority).
 - :class:`DeferredSyncQueue` -- the §16 "delayed synchronization":
   WORK-026 telemetry observations recorded while offline are queued
   content-addressed (idempotent by observation id) and replayed into
@@ -51,9 +62,9 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Protocol, Tuple
 
-from policy.model import PolicyDecision
+from policy.model import PolicyDecision, PolicyError
 
 from .errors import EnergyError, EnergyReasonCode
 from .model import (
@@ -70,6 +81,12 @@ from .validation import (
     validate_instant,
     validate_upstream_subject,
 )
+
+if TYPE_CHECKING:  # typing-only: the receipt is an opaque token at
+    # runtime -- the cache never inspects its fields and never
+    # imports the policy revalidation module (verification crosses
+    # the authority boundary through the injected verifier).
+    from policy.revalidation import RevalidationReceipt
 
 # ----------------------------------------------------------------------
 # Node restart / rejoin ledger
@@ -625,35 +642,63 @@ class HonorResult:
             raise EnergyError(EnergyReasonCode.INVALID_INPUT, "detail must be a string")
 
 
+class RevalidationAuthority(Protocol):
+    """The structural interface of the ONLINE WORK-010 revalidation
+    authority the composition root injects into
+    :class:`OfflinePolicyCache` (the PR #28 review B2 round-3
+    boundary).
+
+    The cache calls :meth:`verify_revalidation_receipt` for every
+    authoritative recording; the authority decides validity against
+    its own mint ledger (raising :class:`~policy.model.PolicyError`
+    for anything it did not mint for exactly the presented
+    decision).  The cache NEVER inspects receipt fields itself --
+    the authority interaction IS the proof.
+    """
+
+    def verify_revalidation_receipt(
+        self, receipt: "RevalidationReceipt", decision: PolicyDecision
+    ) -> None:
+        """Raise ``PolicyError`` unless this authority minted
+        ``receipt`` for exactly ``decision``."""
+        ...
+
+
 class OfflinePolicyCache:
     """The §16 local policy cache with configurable offline
     authorization grace, governed by an EXPLICIT lifecycle (the PR
     #28 review B1/B2 correction):
 
-    - ``ONLINE`` (initial): :meth:`record_decision` is OPEN for
-      genuine WORK-010 decisions (digest-verified against their
-      canonical bytes); the recorded verdicts replay while UP (the
-      §16 local policy cache);
+    - ``ONLINE`` (initial, authorization epoch 0):
+      :meth:`record_decision` is OPEN for genuine WORK-010 decisions
+      (digest-verified against their canonical bytes); the recorded
+      verdicts replay while UP (the §16 local policy cache);
     - ``OFFLINE_GRACE`` (``mark_partition``): the recording channel
       is CLOSED -- a decision minted during the partition is never
       learnable by the cache (the cache replays verdicts recorded
-      while connected; it never becomes a policy evaluator/authority
-      during the partition).  The verdicts recorded before the
-      partition remain honored within ``offline_grace_seconds``;
+      while connected; it never becomes a policy
+      evaluator/authority during the partition).  The verdicts
+      recorded before the partition remain honored within
+      ``offline_grace_seconds``;
     - ``ONLINE_REAUTH_REQUIRED`` (``mark_recovered``): the
       offline-honor channel is CLOSED for every decision recorded
       before the recovery -- each is rejected
       (``offline-reauth-required``) until the demand is freshly
       re-evaluated by the online policy authority and the NEW
-      decision recorded; recording is OPEN again, but ONLY for
-      freshly-evaluated decisions -- the decision's digest-bound
-      evaluation instant must be at or after the recovery instant.
-      Re-recording the EXACT pre-recovery decision object (identical
-      bytes, old evaluation instant) is REJECTED: the cache never
-      re-opens the offline-honor channel for old bytes -- the PR #28
-      review B2 authority boundary (revalidation is a fresh
-      evaluation with a new decision id, never a re-record of the
-      old object).
+      decision recorded.  Recording after a recovery crosses the
+      ACTUAL policy-authority boundary (the PR #28 review B2
+      round-3 correction): :meth:`record_decision` REJECTS every
+      caller-supplied raw ``PolicyDecision`` outright -- a decision
+      digest is content addressing, not provenance, so a forged
+      self-consistent ALLOW with a post-recovery
+      ``evaluation_instant`` is indistinguishable from a genuine
+      evaluation by field inspection.  The ONLY post-recovery
+      recording path is :meth:`record_authoritative_decision` with
+      a receipt minted by the ONLINE
+      :class:`~policy.revalidation.PolicyRevalidationAuthority`
+      (constructor-injected) and verified against THAT authority's
+      mint ledger -- revalidation is a recorded authority
+      interaction, never an inference from caller-supplied bytes.
 
     The cache NEVER evaluates policy (WORK-010 stays the sole policy
     authority) -- it replays recorded verdicts, and everything it
@@ -669,7 +714,7 @@ class OfflinePolicyCache:
       resurrected -- not after recovery, and not by a subsequent
       partition (partitioning cannot launder a stale verdict), and
       not by re-recording the old object (post-recovery recording
-      demands a fresh evaluation instant at/after the recovery);
+      demands an authority receipt that no old object carries);
 
     Every recorded decision carries the authorization epoch it was
     recorded in; :meth:`mark_recovered` advances the epoch, which is
@@ -677,7 +722,12 @@ class OfflinePolicyCache:
     pre-recovery decisions at once.
     """
 
-    def __init__(self, profile: SurvivalProfile) -> None:
+    def __init__(
+        self,
+        profile: SurvivalProfile,
+        *,
+        revalidation_authority: Optional[RevalidationAuthority] = None,
+    ) -> None:
         if not isinstance(profile, SurvivalProfile):
             raise EnergyError(
                 EnergyReasonCode.INVALID_INPUT,
@@ -689,43 +739,53 @@ class OfflinePolicyCache:
         self._decisions: Dict[str, Tuple[PolicyDecision, str, int]] = {}
         self._partition_started_at: Optional[str] = None
         # The instant of the last recovery (None until the first
-        # recovery): the freshness anchor for post-recovery
-        # recording -- a recorded decision must carry a digest-bound
-        # evaluation instant at or after it (the online policy
-        # authority freshly evaluated the demand after coming back).
+        # recovery): the defense-in-depth freshness anchor for
+        # post-recovery AUTHORITATIVE recording -- even a genuine
+        # authority receipt only re-opens the channel for a decision
+        # evaluated at/after the recovery (the primary proof is the
+        # receipt itself; this anchor additionally rejects genuine
+        # receipts minted for pre-recovery evaluations).
         self._recovered_at: Optional[str] = None
         # The authorization epoch: 0 until the first recovery, +1 on
         # every recovery.  A decision is honorable through the offline
         # path only while its recording epoch == the current epoch.
         self._authorization_epoch = 0
+        # The ONLINE WORK-010 revalidation authority (the composition
+        # root's trust anchor for post-recovery recording): every
+        # authoritative recording is verified through THIS object's
+        # mint ledger.  A receipt minted by any other instance never
+        # verifies.  None = the authoritative recording path is
+        # unavailable (fail closed).
+        self._revalidation_authority = revalidation_authority
 
     # -- recording while online (CLOSED while partitioned) ---------------
 
     def record_decision(self, decision: PolicyDecision, *, now: str) -> str:
         """Record a genuine WORK-010 decision observed while ONLINE
-        (the recording channel is CLOSED while partitioned -- a
-        decision minted during the partition is never learnable by
-        the cache; the demand must be freshly re-evaluated by the
-        online policy authority after recovery).
+        and BEFORE the first recovery (authorization epoch 0) -- the
+        §16 cache-priming path (the recording channel is CLOSED
+        while partitioned -- a decision minted during the partition
+        is never learnable by the cache).
 
         The decision id MUST bind to the decision's canonical bytes
         (tamper evidence); the decision's evaluation instant must not
-        be in the future.  Returns the decision id.
+        be in the future.  Returns the decision id.  Recording a
+        decision already recorded with IDENTICAL content in the
+        CURRENT authorization epoch is an idempotent refresh
+        (recorded-at update only).
 
-        After a recovery (authorization epoch > 0) recording
-        additionally requires an independently verifiable
-        FRESH-authority condition (the PR #28 review B2 authority
-        boundary): the decision's digest-bound evaluation instant
-        must be at or after the recovery instant -- i.e. the online
-        policy authority freshly evaluated the demand after coming
-        back.  Re-recording the EXACT pre-recovery decision object is
-        REJECTED (``offline-reauth-required``): its content -- hence
-        its id -- predates the recovery, and old bytes never re-open
-        the offline-honor channel (revalidation is a fresh
-        evaluation, a new decision id).  Recording a decision
-        already recorded with IDENTICAL content in the CURRENT
-        authorization epoch is an idempotent refresh (recorded-at
-        update only)."""
+        After ANY recovery (authorization epoch > 0) this method
+        REJECTS EVERY caller-supplied decision outright
+        (``offline-reauth-required``) -- the PR #28 review B2 round-3
+        authority boundary: a decision digest is content addressing,
+        not provenance, so NO field inside a caller-provided object
+        (its evaluation instant included) can prove the online
+        policy authority freshly evaluated the demand.  Post-
+        recovery revalidation must cross the actual authority
+        boundary: obtain a fresh decision PLUS an authority-minted
+        receipt from the online
+        :class:`~policy.revalidation.PolicyRevalidationAuthority`
+        and record them via :meth:`record_authoritative_decision`."""
         if self._partition_started_at is not None:
             raise EnergyError(
                 EnergyReasonCode.OFFLINE_RECORD_CLOSED,
@@ -736,6 +796,28 @@ class OfflinePolicyCache:
                 "authority after recovery"
                 % (self.lifecycle(), self._partition_started_at),
             )
+        if self._authorization_epoch > 0:
+            # Post-recovery: a caller-supplied raw PolicyDecision is
+            # NEVER proof of reauthorization (PR #28 review B2,
+            # round 3).  The digest binds content, not provenance:
+            # a forged self-consistent ALLOW with a post-recovery
+            # evaluation_instant is indistinguishable from a genuine
+            # evaluation by field inspection, so no field-level
+            # check can be the gate.  The only path back in is the
+            # authority interaction (record_authoritative_decision
+            # with an authority-minted receipt).
+            raise EnergyError(
+                EnergyReasonCode.OFFLINE_REAUTH_REQUIRED,
+                "a caller-supplied raw PolicyDecision is never "
+                "reauthorization proof after a recovery (authorization "
+                "epoch %d): no field inside the object -- its "
+                "evaluation instant included -- proves the online "
+                "policy authority freshly evaluated the demand; obtain "
+                "a fresh decision and its authority-minted receipt from "
+                "the online PolicyRevalidationAuthority and record them "
+                "via record_authoritative_decision"
+                % (self._authorization_epoch,),
+            )
         if not isinstance(decision, PolicyDecision):
             raise EnergyError(
                 EnergyReasonCode.INVALID_INPUT,
@@ -743,6 +825,118 @@ class OfflinePolicyCache:
                 "(WORK-010 authority; the cache never evaluates policy)",
             )
         validate_instant(now, label="now")
+        return self._record_verified(decision, now=now)
+
+    def record_authoritative_decision(
+        self,
+        decision: PolicyDecision,
+        receipt: "RevalidationReceipt",
+        *,
+        now: str,
+    ) -> str:
+        """Record a decision the ONLINE policy authority freshly
+        re-evaluated, together with the receipt the authority minted
+        for it -- the ONLY recording path after a recovery (the PR
+        #28 review B2 round-3 authority boundary).
+
+        The pair (decision, receipt) is verified THROUGH the
+        constructor-injected
+        :class:`~policy.revalidation.PolicyRevalidationAuthority`:
+        the authority checks its own mint ledger for a receipt
+        vouching for EXACTLY this decision.  This is the actual
+        boundary crossing -- the cache never inspects receipt fields,
+        and a receipt minted by any other authority instance (or
+        fabricated from scratch, however self-consistent) never
+        verifies (``offline-authority-proof-invalid``).
+
+        Additional gates (in order): the recording channel is CLOSED
+        while partitioned (B1); the decision id must bind to its
+        canonical bytes; the evaluation instant must not be in the
+        future; and, after a recovery, the FRESH evaluation instant
+        must be at or after the recovery instant (defense in depth:
+        even a GENUINE receipt minted for a pre-recovery evaluation
+        cannot re-open the offline-honor channel).
+
+        Returns the decision id.  Recording the identical
+        (decision, receipt) pair in the current epoch is an
+        idempotent refresh."""
+        if self._partition_started_at is not None:
+            raise EnergyError(
+                EnergyReasonCode.OFFLINE_RECORD_CLOSED,
+                "recording is CLOSED while partitioned (lifecycle %s, "
+                "partition opened %r): the online policy authority is "
+                "unreachable during the partition -- revalidate and "
+                "record after recovery"
+                % (self.lifecycle(), self._partition_started_at),
+            )
+        if not isinstance(decision, PolicyDecision):
+            raise EnergyError(
+                EnergyReasonCode.INVALID_INPUT,
+                "decision must be a genuine policy.model.PolicyDecision "
+                "(WORK-010 authority; the cache never evaluates policy)",
+            )
+        validate_instant(now, label="now")
+        authority = self._revalidation_authority
+        if authority is None:
+            raise EnergyError(
+                EnergyReasonCode.ILLEGAL_STATE,
+                "the authoritative recording path requires the "
+                "constructor-injected ONLINE revalidation authority "
+                "(PolicyRevalidationAuthority); without it post-recovery "
+                "recording fails closed",
+            )
+        # THE AUTHORITY BOUNDARY: the receipt is proven by the
+        # authority's own mint ledger, never by field inspection of
+        # a caller-supplied object.
+        try:
+            authority.verify_revalidation_receipt(receipt, decision)
+        except PolicyError as error:
+            raise EnergyError(
+                EnergyReasonCode.OFFLINE_AUTHORITY_PROOF_INVALID,
+                "the revalidation receipt does not verify against the "
+                "online policy authority's mint ledger (%s: %s) -- "
+                "post-recovery authorization is backed by an actual "
+                "WORK-010 authority interaction, never by fields inside "
+                "a caller-supplied object"
+                % (error.code, error.detail),
+            ) from error
+        if self._authorization_epoch > 0:
+            # Defense in depth ON TOP of the authority proof (the
+            # receipt is the primary gate): the authority may be
+            # asked to evaluate a context carrying a PRE-recovery
+            # instant -- a genuine receipt for such a stale
+            # evaluation still never re-opens the channel.
+            from protocol.temporal import parse_instant
+
+            recovered_at = self._recovered_at
+            if recovered_at is None:  # defensive: epoch > 0 implies a recovery
+                raise EnergyError(
+                    EnergyReasonCode.ILLEGAL_STATE,
+                    "authorization epoch %d without a recovery instant"
+                    % (self._authorization_epoch,),
+                )
+            if parse_instant(decision.evaluation_instant) < parse_instant(recovered_at):
+                raise EnergyError(
+                    EnergyReasonCode.OFFLINE_REAUTH_REQUIRED,
+                    "decision %r was evaluated at %r, BEFORE the last recovery "
+                    "at %r (authorization epoch %d): even a GENUINE authority "
+                    "receipt does not re-open the offline-honor channel for a "
+                    "pre-recovery evaluation -- revalidation must be a FRESH "
+                    "evaluation at/after the recovery"
+                    % (
+                        decision.decision_id[:16],
+                        decision.evaluation_instant,
+                        recovered_at,
+                        self._authorization_epoch,
+                    ),
+                )
+        return self._record_verified(decision, now=now)
+
+    def _record_verified(self, decision: PolicyDecision, *, now: str) -> str:
+        """The shared digest-bind/future/dedupe tail of both recording
+        paths (the caller has already authenticated the decision:
+        either we are at authorization epoch 0, or the authority's
+        mint ledger vouched for it)."""
         expected_id = hashlib.sha256(decision.canonical_bytes()).hexdigest()
         if decision.decision_id != expected_id:
             raise EnergyError(
@@ -758,47 +952,15 @@ class OfflinePolicyCache:
                 "decision %r is future-dated relative to the recording instant "
                 "%r" % (decision.decision_id[:16], now),
             )
-        if self._authorization_epoch > 0:
-            # Post-recovery: an independently verifiable
-            # fresh-authority condition (PR #28 review B2).  The
-            # evaluation instant is digest-bound inside the decision
-            # content, so a decision that passes this check provably
-            # was minted at/after the recovery -- the online policy
-            # authority freshly evaluated the demand.  The exact old
-            # decision object cannot pass: its bytes (and therefore
-            # its id) carry the old evaluation instant, and no
-            # re-stamp is possible without breaking the digest
-            # binding.
-            recovered_at = self._recovered_at
-            if recovered_at is None:  # defensive: epoch > 0 implies a recovery
-                raise EnergyError(
-                    EnergyReasonCode.ILLEGAL_STATE,
-                    "authorization epoch %d without a recovery instant"
-                    % (self._authorization_epoch,),
-                )
-            if parse_instant(decision.evaluation_instant) < parse_instant(recovered_at):
-                raise EnergyError(
-                    EnergyReasonCode.OFFLINE_REAUTH_REQUIRED,
-                    "decision %r was evaluated at %r, BEFORE the last recovery "
-                    "at %r (authorization epoch %d): post-recovery recording "
-                    "requires a decision FRESHLY evaluated by the online "
-                    "policy authority -- re-recording the exact pre-recovery "
-                    "decision object never re-opens the offline-honor channel"
-                    % (
-                        decision.decision_id[:16],
-                        decision.evaluation_instant,
-                        recovered_at,
-                        self._authorization_epoch,
-                    ),
-                )
         existing = self._decisions.get(decision.decision_id)
         if existing is not None:
             if existing[0] == decision:
                 if existing[2] < self._authorization_epoch:
-                    # Defense in depth (the freshness gate above
-                    # already rejects pre-recovery bytes): an entry
-                    # from an older epoch can NEVER be re-stamped
-                    # into the current one.
+                    # Defense in depth: an entry from an older epoch
+                    # can NEVER be re-stamped into the current one
+                    # (the authority path re-evaluates, minting a NEW
+                    # decision id; an identical id with an old epoch
+                    # can only be old bytes).
                     raise EnergyError(
                         EnergyReasonCode.OFFLINE_REAUTH_REQUIRED,
                         "decision %r is recorded from authorization epoch %d "
@@ -855,9 +1017,11 @@ class OfflinePolicyCache:
         for every decision recorded before the recovery (each is
         rejected until its demand is freshly re-evaluated by the
         online policy authority and the NEW decision recorded);
-        recording re-opens ONLY for freshly-evaluated decisions (the
-        digest-bound evaluation instant must be at or after ``now`` --
-        re-recording old bytes is rejected, never revalidation)."""
+        recording re-opens ONLY through
+        :meth:`record_authoritative_decision` -- a fresh decision
+        PLUS an authority-minted receipt verified against the
+        authority's own mint ledger (a caller-supplied raw decision,
+        however self-consistent, is never accepted again)."""
         validate_instant(now, label="now")
         if self._partition_started_at is None:
             raise EnergyError(
@@ -881,8 +1045,10 @@ class OfflinePolicyCache:
           (``offline-reauth-required``) -- the offline-honor channel
           closed at recovery and only the online policy authority
           re-opens it (by freshly re-evaluating the demand and
-          issuing a NEW decision, which the caller records -- never
-          by re-recording the old object);
+          issuing a NEW decision WITH an authority-minted receipt,
+          which the caller records via
+          :meth:`record_authoritative_decision` -- never by
+          re-recording the old object);
         - OFFLINE_GRACE: the same, additionally bounded by the grace
           window ``[partition_start, partition_start + grace]``; a
           decision recorded before the last recovery is NOT
@@ -932,10 +1098,11 @@ class OfflinePolicyCache:
             # The offline-honor channel closed at the last recovery:
             # the decision predates it and only the online policy
             # authority re-opens the channel (a fresh re-evaluation +
-            # record of the NEW decision).  This also holds during a
-            # NEW partition -- partitioning cannot launder a stale
-            # verdict (and post-recovery recording rejects the old
-            # bytes outright, so the entry can never be re-stamped
+            # an authority-minted receipt recorded through
+            # record_authoritative_decision).  This also holds during
+            # a NEW partition -- partitioning cannot launder a stale
+            # verdict (and post-recovery recording demands an
+            # authority receipt, so the entry can never be re-stamped
             # into the current epoch).
             return HonorResult(
                 honored=False,
@@ -1113,5 +1280,6 @@ __all__ = [
     "UpstreamMonitor",
     "OfflinePolicyCache",
     "HonorResult",
+    "RevalidationAuthority",
     "DeferredSyncQueue",
 ]

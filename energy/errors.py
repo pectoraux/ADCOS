@@ -82,6 +82,12 @@ class EnergyReasonCode:
     #: online policy authority (the vocabulary twin of the
     #: ``HonorResult.REAUTH_REQUIRED`` reason).
     OFFLINE_REAUTH_REQUIRED = "offline-reauth-required"
+    #: PR #28 review B2 (round 3): a post-recovery recording attempt
+    #: presented a receipt that the ONLINE policy authority's mint
+    #: ledger does not vouch for (fabricated, foreign-authority, or
+    #: mismatched receipt) -- the authority interaction is the proof,
+    #: never fields inside a caller-supplied object.
+    OFFLINE_AUTHORITY_PROOF_INVALID = "offline-authority-proof-invalid"
     QUEUE_EXISTS = "queue-exists"
     ILLEGAL_STATE = "illegal-state"
 
@@ -115,6 +121,7 @@ class EnergyReasonCode:
             cls.OFFLINE_DECISION_FUTURE,
             cls.OFFLINE_RECORD_CLOSED,
             cls.OFFLINE_REAUTH_REQUIRED,
+            cls.OFFLINE_AUTHORITY_PROOF_INVALID,
             cls.QUEUE_EXISTS,
             cls.ILLEGAL_STATE,
         )

@@ -69,6 +69,17 @@ the WORK-027 work-item contract to discriminating cases:
   old-object restamp is rejected and
   multi-cycle laundering fails closed
                                          -> case_36
+- REGRESSION (PR #28 B2 round 3): the
+  fresh-authority condition is an ACTUAL
+  WORK-010 authority interaction -- a
+  forged self-consistent ALLOW with a
+  post-recovery evaluation instant is
+  rejected, a fabricated/foreign/
+  cross-paired receipt is rejected by the
+  authority's mint ledger, and only a
+  genuine authority revaluation records
+  and honors
+                                         -> case_37
 - deferred sync queue replays REAL
   telemetry into a REAL TelemetryStore               -> case_20
 - power simulation: solar day/night cycle,
@@ -157,9 +168,9 @@ from energy.serialization import (  # noqa: E402
 )
 from policy.model import Condition, PolicyDecision, PolicyRule, PolicySet  # noqa: E402
 from policy.model import Operation, PolicyContext, PolicyDomain  # noqa: E402
+from policy.model import DecisionCode, Effect  # noqa: E402
 from policy.predicates import PredicateKind  # noqa: E402
 from policy.evaluation import PolicyEngine  # noqa: E402
-from policy.model import Effect  # noqa: E402
 from resources.model import (  # noqa: E402
     EnergyState,
     Quantity,
@@ -443,13 +454,16 @@ def case_02_frozen_vocabularies() -> Result:
             return fail(name, "vocabulary %s = %r (expected %r)" % (key, actual[key], expected[key]))
     codes = EnergyReasonCode.values()
     # 27 at db7c455; the PR #28 review B1/B2 remediation deliberately
-    # added offline-record-closed and offline-reauth-required.
-    if len(codes) != 29 or len(set(codes)) != 29:
-        return fail(name, "reason-code vocabulary must stay frozen at 29 unique codes")
+    # added offline-record-closed and offline-reauth-required; the
+    # round-3 B2 remediation deliberately added
+    # offline-authority-proof-invalid (a receipt that fails the
+    # authority's mint-ledger verification).
+    if len(codes) != 30 or len(set(codes)) != 30:
+        return fail(name, "reason-code vocabulary must stay frozen at 30 unique codes")
     depleting = {PowerSource.BATTERY, PowerSource.SOLAR_HYBRID, PowerSource.GENERATOR, PowerSource.HARVESTING}
     if PowerSource.DEPLETING != depleting or PowerSource.is_depleting(PowerSource.GRID):
         return fail(name, "grid must never be a depleting source")
-    return ok(name, "all vocabularies closed + frozen (29 reason codes)")
+    return ok(name, "all vocabularies closed + frozen (30 reason codes)")
 
 
 def case_03_survival_profile_validation_and_tamper_matrix() -> Result:
@@ -1395,7 +1409,8 @@ def case_19_offline_policy_cache_grace() -> Result:
     assert decision is not None
 
     profile = _profile(grace=3600)
-    cache = OfflinePolicyCache(profile)
+    authority = _revalidation_authority(policy_set)
+    cache = OfflinePolicyCache(profile, revalidation_authority=authority)
     problems = []
 
     # A tampered decision is refused at record time (digest binding).
@@ -1499,20 +1514,18 @@ def case_19_offline_policy_cache_grace() -> Result:
     still_closed = cache.honor(decision, now="2026-09-01T13:12:45Z")
     if still_closed.honored or still_closed.reason != HonorResult.REAUTH_REQUIRED:
         problems.append("failed restamp re-opened the channel: %r" % (still_closed,))
-    # The lawful path: the online authority freshly re-evaluates the
-    # demand after the recovery (a NEW decision id) and the caller
-    # records it -- the revalidated verdict replays again.
-    reissue_eval = engine.evaluate(
-        policy_set,
-        PolicyContext(
-            operation=Operation.RESOURCE_RESERVE, requester_node_id=_NODE_A,
-            evaluation_instant="2026-09-01T13:12:30Z",
-        ),
-    )
-    if reissue_eval.decision is None or reissue_eval.decision.decision_id == decision.decision_id:
+    # The lawful path (the PR #28 review B2 round-3 boundary): the
+    # ONLINE authority freshly re-evaluates the demand after the
+    # recovery and MINTS A RECEIPT for the new decision; the caller
+    # records the pair through the authoritative path -- the
+    # revalidated verdict replays again.
+    reissue_decision, reissue_receipt = _revalidated(authority, "2026-09-01T13:12:30Z")
+    if reissue_decision.decision_id == decision.decision_id:
         return fail(name, "fixture broken: the fresh evaluation must mint a new id")
-    cache.record_decision(reissue_eval.decision, now="2026-09-01T13:12:30Z")
-    revalidated = cache.honor(reissue_eval.decision, now="2026-09-01T13:13:00Z")
+    cache.record_authoritative_decision(
+        reissue_decision, reissue_receipt, now="2026-09-01T13:12:30Z"
+    )
+    revalidated = cache.honor(reissue_decision, now="2026-09-01T13:13:00Z")
     if not revalidated.honored or revalidated.effect != Effect.ALLOW:
         problems.append("freshly re-evaluated verdict not honored: %r" % (revalidated,))
     try:
@@ -1526,8 +1539,8 @@ def case_19_offline_policy_cache_grace() -> Result:
         name,
         "genuine WORK-010 verdicts: digest-bound, grace-bounded, fail-closed; "
         "recording closed while partitioned; recovery closes the honor channel "
-        "until a FRESH online re-evaluation (the exact old-object restamp is "
-        "rejected)",
+        "until a FRESH authority revaluation (receipt-backed recording; the "
+        "exact old-object restamp is rejected)",
     )
 
 
@@ -2162,6 +2175,53 @@ def _genuine_policy_decision(engine: PolicyEngine, policy_set: PolicySet, at: st
     return decision
 
 
+def _revalidation_authority(policy_set: PolicySet) -> Any:
+    """The ONLINE WORK-010 revalidation authority over ``policy_set``
+    (lazy import: the PR #28 round-3 B2 correction surface, so the
+    discriminating run against e834053 fails per-case, never
+    file-wide)."""
+    from policy.revalidation import PolicyRevalidationAuthority
+
+    return PolicyRevalidationAuthority(policy_set)
+
+
+def _revalidated(authority: Any, at: str) -> Tuple[PolicyDecision, Any]:
+    """A GENUINE fresh authority revalidation of the reserve demand
+    at ``at``: the authority evaluates the context itself and mints
+    the receipt for its own output -- the lawful post-recovery
+    recording pair."""
+    result = authority.revalidate(
+        PolicyContext(
+            operation=Operation.RESOURCE_RESERVE, requester_node_id=_NODE_A,
+            evaluation_instant=at,
+        )
+    )
+    assert result.ok and result.decision is not None and result.receipt is not None, result.detail
+    return result.decision, result.receipt
+
+
+def _forged_fresh_allow(at: str) -> PolicyDecision:
+    """A FORGED yet perfectly self-consistent ALLOW (the round-3
+    attack object): no engine ever evaluated it, but
+    ``decision_id == sha256(canonical_bytes())`` holds exactly as it
+    does for a genuine decision -- a content digest is integrity,
+    NOT provenance."""
+    from dataclasses import replace as _replace
+
+    placeholder = PolicyDecision(
+        decision_id="0" * 64,
+        effect=Effect.ALLOW,
+        code=DecisionCode.ALLOW,
+        detail="ALLOW by rule(s) ['allow-reserve']",
+        matched_rule_ids=("allow-reserve",),
+        policy_set_id="ps-w027",
+        policy_set_version=1,
+        evaluation_instant=at,
+    )
+    forged_id = hashlib.sha256(placeholder.canonical_bytes()).hexdigest()
+    return _replace(placeholder, decision_id=forged_id)
+
+
 def case_33_offline_cache_never_learns_partition_decisions() -> Result:
     name = "case_33_offline_cache_never_learns_partition_decisions"
     # PR #28 review B1: once partitioned, record_decision must REJECT.
@@ -2185,7 +2245,8 @@ def case_33_offline_cache_never_learns_partition_decisions() -> Result:
     second = _genuine_policy_decision(engine, policy_set, "2026-09-01T12:30:00Z")
     if first.decision_id == second.decision_id:
         return fail(name, "fixture broken: distinct instants minted identical decisions")
-    cache = OfflinePolicyCache(_profile(grace=3600))
+    authority = _revalidation_authority(policy_set)
+    cache = OfflinePolicyCache(_profile(grace=3600), revalidation_authority=authority)
     problems: List[str] = []
     # Genuine ALLOW recorded while UP.
     cache.record_decision(first, now=_NOW)
@@ -2225,12 +2286,14 @@ def case_33_offline_cache_never_learns_partition_decisions() -> Result:
             problems.append("wrong rejection reason: %r" % (error.reason,))
     if cache.honor(second, now="2026-09-01T12:41:00Z").honored:
         problems.append("partition-minted decision honored after the failed re-record")
-    # The only lawful path: the authority freshly re-evaluates the
-    # demand (a NEW decision id) and the caller records that.
-    third = _genuine_policy_decision(engine, policy_set, "2026-09-01T12:45:00Z")
+    # The only lawful path (the round-3 B2 boundary): the ONLINE
+    # authority freshly re-evaluates the demand (a NEW decision id
+    # PLUS an authority-minted receipt) and the caller records the
+    # pair through the authoritative path.
+    third, third_receipt = _revalidated(authority, "2026-09-01T12:45:00Z")
     if third.decision_id in (first.decision_id, second.decision_id):
         return fail(name, "fixture broken: the fresh evaluation must mint a new id")
-    cache.record_decision(third, now="2026-09-01T12:45:00Z")
+    cache.record_authoritative_decision(third, third_receipt, now="2026-09-01T12:45:00Z")
     if not cache.honor(third, now="2026-09-01T12:46:00Z").honored:
         problems.append("fresh post-recovery decision not honored")
     # The pre-recovery decision stays closed after the recovery.
@@ -2265,7 +2328,8 @@ def case_34_recovery_closes_offline_honor_channel() -> Result:
     )
     engine = PolicyEngine()
     cached = _genuine_policy_decision(engine, policy_set, _NOW)
-    cache = OfflinePolicyCache(_profile(grace=3600))
+    authority = _revalidation_authority(policy_set)
+    cache = OfflinePolicyCache(_profile(grace=3600), revalidation_authority=authority)
     problems: List[str] = []
     # UP: the genuine ALLOW is cached and replays.
     cache.record_decision(cached, now=_NOW)
@@ -2299,12 +2363,13 @@ def case_34_recovery_closes_offline_honor_channel() -> Result:
             "pre-recovery decision honored after recovery (the offline-honor "
             "channel never closed): %r" % (rejected,),
         )
-    # A FRESH genuine decision (digest-bound evaluation instant at or
-    # after the recovery) recorded after recovery = usable.
-    fresh = _genuine_policy_decision(engine, policy_set, "2026-09-01T13:11:30Z")
+    # A FRESH genuine authority revaluation (the ONLINE policy
+    # authority evaluates the demand post-recovery and mints the
+    # receipt) recorded through the authoritative path = usable.
+    fresh, fresh_receipt = _revalidated(authority, "2026-09-01T13:11:30Z")
     if fresh.decision_id == cached.decision_id:
         return fail(name, "fixture broken: fresh decision must differ from the cached one")
-    cache.record_decision(fresh, now="2026-09-01T13:11:30Z")
+    cache.record_authoritative_decision(fresh, fresh_receipt, now="2026-09-01T13:11:30Z")
     if not cache.honor(fresh, now="2026-09-01T13:12:00Z").honored:
         return fail(name, "fresh post-recovery decision not usable")
     # Lifecycle reads (the explicit vocabulary pins; the lazy import
@@ -2513,7 +2578,8 @@ def case_36_offline_laundering_multicycle() -> Result:
     )
     engine = PolicyEngine()
     old = _genuine_policy_decision(engine, policy_set, _NOW)
-    cache = OfflinePolicyCache(_profile(grace=3600))
+    authority = _revalidation_authority(policy_set)
+    cache = OfflinePolicyCache(_profile(grace=3600), revalidation_authority=authority)
     problems: List[str] = []
     # Cycle 1 -- UP: the genuine ALLOW is recorded and honored.
     cache.record_decision(old, now=_NOW)
@@ -2533,12 +2599,15 @@ def case_36_offline_laundering_multicycle() -> Result:
             problems.append("wrong cycle-1 restamp reason: %r" % (error.reason,))
     if cache.honor(old, now="2026-09-01T13:11:00Z").reason != HonorResult.REAUTH_REQUIRED:
         problems.append("old ALLOW not rejected after the cycle-1 recovery")
-    # The genuine fresh WORK-010 decision (freshly evaluated at/after
-    # the recovery): record + honor succeed.
-    fresh1 = _genuine_policy_decision(engine, policy_set, "2026-09-01T13:12:00Z")
+    # The genuine fresh WORK-010 revaluation (the ONLINE authority
+    # evaluates the demand post-recovery and mints the receipt):
+    # authoritative record + honor succeed.
+    fresh1, fresh1_receipt = _revalidated(authority, "2026-09-01T13:12:00Z")
     if fresh1.decision_id == old.decision_id:
         return fail(name, "fixture broken: fresh evaluation minted the old id")
-    cache.record_decision(fresh1, now="2026-09-01T13:12:00Z")
+    cache.record_authoritative_decision(
+        fresh1, fresh1_receipt, now="2026-09-01T13:12:00Z"
+    )
     if not cache.honor(fresh1, now="2026-09-01T13:13:00Z").honored:
         problems.append("cycle-1 fresh decision not honored")
     # Cycle 2 -- a NEW partition: the old decision still fails closed
@@ -2574,16 +2643,20 @@ def case_36_offline_laundering_multicycle() -> Result:
         problems.append("old ALLOW not rejected after the second recovery")
     if cache.honor(fresh1, now="2026-09-01T15:01:00Z").reason != HonorResult.REAUTH_REQUIRED:
         problems.append("cycle-1 fresh decision survived the second recovery")
-    fresh2 = _genuine_policy_decision(engine, policy_set, "2026-09-01T15:02:00Z")
-    cache.record_decision(fresh2, now="2026-09-01T15:02:00Z")
+    fresh2, fresh2_receipt = _revalidated(authority, "2026-09-01T15:02:00Z")
+    cache.record_authoritative_decision(
+        fresh2, fresh2_receipt, now="2026-09-01T15:02:00Z"
+    )
     if not cache.honor(fresh2, now="2026-09-01T15:03:00Z").honored:
         problems.append("cycle-2 fresh decision not honored")
     # The exact recovery-instant boundary: a decision evaluated AT the
     # recovery instant is freshly evaluated (accepted).
-    boundary = _genuine_policy_decision(engine, policy_set, "2026-09-01T15:00:00Z")
+    boundary, boundary_receipt = _revalidated(authority, "2026-09-01T15:00:00Z")
     if boundary.decision_id in (old.decision_id, fresh1.decision_id, fresh2.decision_id):
         return fail(name, "fixture broken: the boundary evaluation must mint a new id")
-    cache.record_decision(boundary, now="2026-09-01T15:04:00Z")
+    cache.record_authoritative_decision(
+        boundary, boundary_receipt, now="2026-09-01T15:04:00Z"
+    )
     if not cache.honor(boundary, now="2026-09-01T15:05:00Z").honored:
         problems.append("decision evaluated exactly at the recovery instant rejected")
     if problems:
@@ -2591,7 +2664,196 @@ def case_36_offline_laundering_multicycle() -> Result:
     return ok(
         name,
         "the exact old-object restamp is rejected in every cycle; old bytes never "
-        "re-enter the cache; each epoch's fresh evaluation records and honors",
+        "re-enter the cache; each epoch's authority revaluation records and honors",
+    )
+
+
+def case_37_forged_fresh_decision_rejected() -> Result:
+    name = "case_37_forged_fresh_decision_rejected"
+    # PR #28 review B2 (round 3 -- the discriminating case): the
+    # defense must be AUTHORITY-BASED, not timestamp-based.  The
+    # directed proof sequence:
+    #   record genuine ALLOW before recovery
+    #   -> recover
+    #   -> fabricate a new self-consistent ALLOW with
+    #      evaluation_instant >= recovery
+    #   -> cache MUST reject it (raw path closed AND no verifiable
+    #      receipt exists for it)
+    #   -> genuine post-recovery WORK-010 evaluation
+    #   -> authoritative result accepted
+    #   -> honor succeeds
+    # plus the receipt forgery matrix: a fabricated receipt, a
+    # receipt minted by a DIFFERENT authority instance, a genuine
+    # receipt cross-paired with the wrong decision, and a GENUINE
+    # receipt minted for a pre-recovery evaluation all fail closed.
+    from policy.revalidation import RevalidationReceipt  # lazy: the round-3 surface
+
+    rule = PolicyRule(
+        rule_id="allow-reserve", domain=PolicyDomain.RESOURCE,
+        effect=Effect.ALLOW, operation=Operation.RESOURCE_RESERVE,
+    )
+    policy_set = PolicySet(
+        set_id="ps-w027", version=1, rules=(rule,), issuer_node_id=_ISSUER,
+        valid_from="2026-01-01T00:00:00Z", valid_until="2028-01-01T00:00:00Z",
+    )
+    engine = PolicyEngine()
+    old = _genuine_policy_decision(engine, policy_set, _NOW)
+    authority = _revalidation_authority(policy_set)
+    cache = OfflinePolicyCache(_profile(grace=3600), revalidation_authority=authority)
+    problems: List[str] = []
+    # Genuine ALLOW recorded BEFORE the recovery (epoch 0), honored
+    # while UP and within grace.
+    cache.record_decision(old, now=_NOW)
+    if not cache.honor(old, now=_NOW).honored:
+        return fail(name, "fixture broken: the genuine ALLOW must be honored while UP")
+    cache.mark_partition(now="2026-09-01T12:10:00Z")
+    if not cache.honor(old, now="2026-09-01T13:00:00Z").honored:
+        return fail(name, "fixture broken: grace-bounded honor before recovery")
+    # RECOVERY at 13:10 (authorization epoch 1).
+    cache.mark_recovered(now="2026-09-01T13:10:00Z")
+    if cache.honor(old, now="2026-09-01T13:10:30Z").reason != HonorResult.REAUTH_REQUIRED:
+        problems.append("pre-recovery ALLOW honored after recovery")
+    # ATTACK 1 -- the exact-old-object replay (retained from round 2):
+    # re-recording the EXACT pre-recovery ALLOW is rejected outright.
+    try:
+        cache.record_decision(old, now="2026-09-01T13:10:30Z")
+        problems.append("exact pre-recovery ALLOW re-recorded after recovery")
+    except EnergyError as error:
+        if error.reason != EnergyReasonCode.OFFLINE_REAUTH_REQUIRED:
+            problems.append("wrong replay rejection reason: %r" % (error.reason,))
+    # ATTACK 2 -- the FORGED fresh-looking decision: a NEW ALLOW,
+    # never evaluated by any engine, that is perfectly self-consistent
+    # (decision_id == sha256(canonical_bytes)) and carries
+    # evaluation_instant >= the recovery instant.  Field inspection
+    # cannot distinguish it from a genuine evaluation -- so the raw
+    # recording path must reject it REGARDLESS of its fields.
+    forged = _forged_fresh_allow("2026-09-01T13:10:30Z")
+    if hashlib.sha256(forged.canonical_bytes()).hexdigest() != forged.decision_id:
+        return fail(name, "fixture broken: the forged ALLOW must be self-consistent")
+    if forged.decision_id == old.decision_id:
+        return fail(name, "fixture broken: the forged ALLOW must be a NEW object")
+    try:
+        cache.record_decision(forged, now="2026-09-01T13:10:30Z")
+        problems.append("forged fresh-looking ALLOW accepted through the raw path")
+    except EnergyError as error:
+        if error.reason != EnergyReasonCode.OFFLINE_REAUTH_REQUIRED:
+            problems.append("wrong forged-decision rejection reason: %r" % (error.reason,))
+    if cache.honor(forged, now="2026-09-01T13:10:45Z").honored:
+        problems.append("forged decision honored (it was never recorded)")
+    # ATTACK 3 -- the FABRICATED receipt: the receipt dataclass is
+    # pure data, so the attacker constructs one with plausible fields
+    # and a self-consistent-looking id.  The cache must route it
+    # through the authority's mint ledger, which has no such entry.
+    fabricated = RevalidationReceipt(
+        decision_id=forged.decision_id,
+        evaluation_instant=forged.evaluation_instant,
+        authority_sequence=1,
+        receipt_id=hashlib.sha256(forged.decision_id.encode("ascii")).hexdigest(),
+    )
+    try:
+        cache.record_authoritative_decision(forged, fabricated, now="2026-09-01T13:10:30Z")
+        problems.append("fabricated receipt accepted (ledger membership never checked?)")
+    except EnergyError as error:
+        if error.reason != EnergyReasonCode.OFFLINE_AUTHORITY_PROOF_INVALID:
+            problems.append("wrong fabricated-receipt rejection reason: %r" % (error.reason,))
+    # ATTACK 4 -- the FOREIGN authority: a different authority
+    # instance over the SAME policy set genuinely re-evaluates the
+    # same context.  The engine is pure, so it mints the IDENTICAL
+    # decision id -- but its receipt lives in ITS ledger, not the
+    # cache's authority's.  The decision was never the proof; the
+    # authority interaction is.
+    foreign_authority = _revalidation_authority(policy_set)
+    foreign_decision, foreign_receipt = _revalidated(foreign_authority, "2026-09-01T13:10:30Z")
+    if foreign_decision.decision_id == forged.decision_id:
+        return fail(name, "fixture broken: the foreign decision must differ from the forgery")
+    try:
+        cache.record_authoritative_decision(foreign_decision, foreign_receipt, now="2026-09-01T13:10:30Z")
+        problems.append("foreign-authority receipt accepted (authority identity unbound?)")
+    except EnergyError as error:
+        if error.reason != EnergyReasonCode.OFFLINE_AUTHORITY_PROOF_INVALID:
+            problems.append("wrong foreign-receipt rejection reason: %r" % (error.reason,))
+    # ATTACK 5 -- the GENUINE receipt cross-paired with the WRONG
+    # decision: the cache's own authority freshly re-evaluates the
+    # demand post-recovery, but the attacker presents that receipt
+    # for the FORGED decision instead.
+    genuine_decision, genuine_receipt = _revalidated(authority, "2026-09-01T13:11:00Z")
+    if genuine_decision.decision_id == old.decision_id:
+        return fail(name, "fixture broken: the post-recovery evaluation must mint a new id")
+    try:
+        cache.record_authoritative_decision(forged, genuine_receipt, now="2026-09-01T13:11:00Z")
+        problems.append("genuine receipt accepted for the wrong (forged) decision")
+    except EnergyError as error:
+        if error.reason != EnergyReasonCode.OFFLINE_AUTHORITY_PROOF_INVALID:
+            problems.append("wrong cross-pairing rejection reason: %r" % (error.reason,))
+    # ATTACK 6 -- the GENUINE receipt for a PRE-RECOVERY evaluation:
+    # the attacker asks the genuine authority to evaluate a context
+    # carrying a PRE-recovery instant (the engine is pure; it will).
+    # The receipt is genuine, the decision is byte-identical to the
+    # old ALLOW -- and the channel still stays closed (the
+    # fresh-evaluation anchor holds even for genuine receipts).
+    stale_decision, stale_receipt = _revalidated(authority, _NOW)
+    if stale_decision.decision_id != old.decision_id:
+        return fail(name, "fixture broken: the stale re-evaluation must mint the old id")
+    try:
+        cache.record_authoritative_decision(stale_decision, stale_receipt, now="2026-09-01T13:11:15Z")
+        problems.append("genuine receipt for a pre-recovery evaluation accepted")
+    except EnergyError as error:
+        if error.reason != EnergyReasonCode.OFFLINE_REAUTH_REQUIRED:
+            problems.append("wrong stale-genuine rejection reason: %r" % (error.reason,))
+    # THE LAWFUL PATH (the review's required ending): the genuine
+    # post-recovery WORK-010 evaluation, recorded through the
+    # authoritative path, is accepted and honored.
+    cache.record_authoritative_decision(
+        genuine_decision, genuine_receipt, now="2026-09-01T13:11:30Z"
+    )
+    honored = cache.honor(genuine_decision, now="2026-09-01T13:12:00Z")
+    if not honored.honored or honored.effect != Effect.ALLOW:
+        problems.append("genuine authority revaluation not honored: %r" % (honored,))
+    # The identical pair re-recorded in the current epoch is an
+    # idempotent refresh (no double-jeopardy for the lawful caller).
+    cache.record_authoritative_decision(
+        genuine_decision, genuine_receipt, now="2026-09-01T13:12:30Z"
+    )
+    # Post-conditions: the old ALLOW and the forgery stay closed; the
+    # cache learned exactly the genuine material.
+    if cache.honor(old, now="2026-09-01T13:12:00Z").reason != HonorResult.REAUTH_REQUIRED:
+        problems.append("old ALLOW resurrected after the lawful revalidation")
+    if cache.honor(forged, now="2026-09-01T13:12:00Z").reason != HonorResult.UNKNOWN_DECISION:
+        problems.append("forged decision became known to the cache")
+    if set(cache.recorded_decision_ids()) != {old.decision_id, genuine_decision.decision_id}:
+        problems.append(
+            "recorded ids drifted: %r" % (cache.recorded_decision_ids(),)
+        )
+    # FAIL-CLOSED DEFAULT: a cache constructed WITHOUT an authority
+    # has no post-recovery recording path at all (both channels
+    # closed -- the authoritative path is unavailable, the raw path
+    # is never proof).
+    bare = OfflinePolicyCache(_profile(grace=60))
+    bare.record_decision(old, now=_NOW)
+    bare.mark_partition(now="2026-09-01T12:10:00Z")
+    bare.mark_recovered(now="2026-09-01T12:20:00Z")
+    try:
+        bare.record_authoritative_decision(
+            genuine_decision, genuine_receipt, now="2026-09-01T12:21:00Z"
+        )
+        problems.append("authoritative recording worked without any injected authority")
+    except EnergyError as error:
+        if error.reason != EnergyReasonCode.ILLEGAL_STATE:
+            problems.append("wrong no-authority rejection reason: %r" % (error.reason,))
+    try:
+        bare.record_decision(genuine_decision, now="2026-09-01T12:21:00Z")
+        problems.append("raw recording re-opened post-recovery without an authority")
+    except EnergyError as error:
+        if error.reason != EnergyReasonCode.OFFLINE_REAUTH_REQUIRED:
+            problems.append("wrong no-authority raw rejection reason: %r" % (error.reason,))
+    if problems:
+        return fail(name, "; ".join(problems))
+    return ok(
+        name,
+        "forged fresh-looking ALLOW rejected (raw path closed post-recovery); "
+        "fabricated / foreign-authority / cross-paired / stale-genuine receipts "
+        "all rejected by the authority's mint ledger; only a genuine post-recovery "
+        "WORK-010 revaluation records and honors; no-authority caches fail closed",
     )
 
 
@@ -2636,6 +2898,7 @@ CASES = [
     case_34_recovery_closes_offline_honor_channel,
     case_35_energy_never_terminates_established_sessions,
     case_36_offline_laundering_multicycle,
+    case_37_forged_fresh_decision_rejected,
 ]
 
 

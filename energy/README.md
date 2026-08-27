@@ -102,13 +102,23 @@ closed, explicit reasons: `shed-droppable`, `shed-deferrable`,
   the offline-honor channel CLOSES -- every pre-recovery decision
   is rejected until its demand is freshly re-evaluated by the
   online authority and the NEW decision recorded; recording
-  re-opens only for freshly-evaluated decisions: the digest-bound
-  evaluation instant must be at or after the recovery instant, so
-  re-recording the exact pre-recovery decision object -- old bytes
-  carrying the old evaluation instant -- is REJECTED). Unknown
-  decisions, tampered decisions, and expired verdicts fail closed
-  throughout; a pre-recovery decision is never resurrected, not
-  even by a subsequent partition.
+  re-opens ONLY through the authoritative path -- the PR #28
+  review B2 round-3 boundary: `record_decision` rejects every
+  caller-supplied raw decision after a recovery, because a
+  decision digest is content addressing, NOT provenance -- a
+  forged self-consistent ALLOW with a post-recovery
+  `evaluation_instant` is indistinguishable from a genuine
+  evaluation by field inspection. The only path back in is
+  `record_authoritative_decision(decision, receipt)`, where the
+  receipt was minted by the constructor-injected ONLINE
+  `PolicyRevalidationAuthority` and is verified against THAT
+  authority's own mint ledger (a fabricated receipt, a receipt
+  from a different authority instance, and a genuine receipt
+  paired with the wrong decision all fail closed), with the
+  fresh-evaluation-instant anchor kept as defense in depth).
+  Unknown decisions, tampered decisions, and expired verdicts
+  fail closed throughout; a pre-recovery decision is never
+  resurrected, not even by a subsequent partition.
 - `DeferredSyncQueue` -- §16 delayed synchronization: telemetry
   observations recorded while offline are queued idempotently by
   observation id and replayed into a real `TelemetryStore` on

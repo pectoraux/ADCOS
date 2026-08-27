@@ -243,11 +243,15 @@ class OfflineCacheLifecycle:
       channel is CLOSED for every decision recorded before the
       recovery (each demand must be freshly re-evaluated by the
       online policy authority and the NEW decision recorded);
-      recording is OPEN again, but ONLY for freshly-evaluated
-      decisions -- the digest-bound evaluation instant must be at or
-      after the recovery instant, so re-recording the exact
-      pre-recovery decision object is rejected (old bytes never
-      re-open the channel; the PR #28 review B2 authority boundary).
+      recording is OPEN again, but ONLY through the authoritative
+      path -- a fresh decision PLUS a receipt minted by the ONLINE
+      ``PolicyRevalidationAuthority`` and verified against its own
+      mint ledger (a caller-supplied raw decision is never proof of
+      reauthorization: its digest is content addressing, not
+      provenance, so a forged self-consistent ALLOW is
+      indistinguishable from a genuine evaluation by field
+      inspection -- the PR #28 review B2 round-3 authority
+      boundary).
 
     The cache enters ``online-reauth-required`` on every recovery and
     stays there until the next partition: after a partition/recovery

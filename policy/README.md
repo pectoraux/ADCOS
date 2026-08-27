@@ -144,6 +144,35 @@ The `PolicyStore` enforces:
 
 Policy-set version sequencing is a policy-owned concept. It MUST NOT be conflated with WORK-008 resource-account versions or WORK-007 topology sequences (rule 9).
 
+## Authority-owned revalidation (receipts)
+
+Added by the PR #28 review B2 round-3 correction (consumed by the
+WORK-027 offline policy cache; a deliberate, review-mandated surface
+extension of WORK-010):
+
+```text
+PolicyRevalidationAuthority(policy_set)   # the ONLINE authority instance
+  .revalidate(context)                    # FRESH engine evaluation + minted receipt
+  .verify_revalidation_receipt(r, d)      # the ONLY receipt validity check
+```
+
+A `PolicyDecision` is pure data with a content-derived digest: `decision_id ==
+sha256(canonical_bytes)` proves content integrity, NEVER provenance — anyone
+can forge a new self-consistent ALLOW with any `evaluation_instant`.  The
+revalidation receipt closes that hole architecturally: a verifying
+`(decision, receipt)` pair is obtainable ONLY by submitting a context to the
+specific authority instance, which evaluates the context itself and records
+the mint in its internal hash-chained ledger.  Verification is a
+ledger-membership check against that same instance — a fabricated receipt, a
+receipt minted by a different instance, and a genuine receipt paired with the
+wrong decision all fail.  The receipt id is derived over the receipt content
+PLUS the authority-internal chain root, so it is not computable from the
+public fields alone.  All clocks are injected; the ledger is a pure function
+of the mint sequence (deterministic).
+
+The engine itself is unchanged: `PolicyEngine.evaluate` stays pure and
+stateless; the authority only wraps it with the mint ledger.
+
 ## Secret isolation
 
 Policy documents, contexts, and decisions must NEVER carry: private keys, secret keys, passwords, subscriber secrets, credential secrets, session encryption secrets, raw bearer tokens. The `policy/validation.py` recursive `_reject_secret_material` guard rejects any field name or sequence item matching the `_SECRET_HINTS` list (LOCK-023 conventions, kept in sync with WORK-008/WORK-009). Diagnostics MUST NOT echo secret material on failures — only the field name is reported.
@@ -188,6 +217,10 @@ policy/
                      #   cross-checks
   evaluation.py      # PolicyEngine.evaluate(): pure, deterministic,
                      #   injected instant, no wall-clock, no state mutation
+  revalidation.py   # PolicyRevalidationAuthority: the authority-owned
+                     #   revalidation boundary (PR #28 review B2 round 3) --
+                     #   fresh evaluation + mint-ledger receipts; the ONLY
+                     #   receipt validity check is the authority itself
   serialization.py  # rule_from_mapping / policy_set_from_mapping /
                      #   context_from_mapping / canonical-bytes helpers
                      #   (WORK-003 machinery)

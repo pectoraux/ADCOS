@@ -19,8 +19,10 @@ The family is a CONTROL-COMPOSITION layer, not a new authority:
 - policy authority stays WORK-010 (the offline cache REPLAYS its
   recorded decisions; it never evaluates policy -- recording closes
   while partitioned and recovery closes the honor channel until
-  online revalidation: a FRESH post-recovery evaluation, never a
-  re-record of the old decision bytes);
+  online revalidation: a FRESH post-recovery evaluation backed by an
+  authority-minted receipt verified against the ONLINE
+  PolicyRevalidationAuthority's own mint ledger, never a re-record
+  of caller-supplied decision bytes);
 - session authority stays WORK-012 (the survival gate is a
   new-demand admission gate: it may shed NEW demand and NEW route
   candidates, it never terminates or mutates an established
@@ -84,6 +86,7 @@ from .resilience import (
     HonorResult,
     NodeRejoinLedger,
     OfflinePolicyCache,
+    RevalidationAuthority,
     UpstreamMonitor,
 )
 from .simulation import PowerSimulator, PowerStepResult
@@ -152,6 +155,7 @@ __all__ = [
     "HonorResult",
     "NodeRejoinLedger",
     "OfflinePolicyCache",
+    "RevalidationAuthority",
     "UpstreamMonitor",
     # simulation
     "PowerSimulator",
