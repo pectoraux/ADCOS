@@ -41,7 +41,7 @@ The model does **not** assume that Python privacy naming (`_name`) is a security
 | Downgrade / profile confusion | negotiated profiles, compatibility rules, secure transport downgrade tests | `capability_selftest.py`, `transport_selftest.py` |
 | Privilege escalation | deny-by-default policy and born-bound privileged decisions | `policy_selftest.py`, `service_selftest.py`, `telemetry_selftest.py` |
 | Route/path hijacking | content-bound path/decision identifiers and policy/session binding | `routing_selftest.py`, `session_selftest.py`, `multipath_selftest.py` |
-| Capability inflation / provider leakage | adapter sandboxing and declaration floors; provider isolation | `capability_selftest.py`, `adapter_selftest.py` |
+| Capability inflation / provider leakage | adapter sandboxing and declaration floors; provider isolation; vendor specifics structurally confined to the adapters boundary | `capability_selftest.py`, `adapter_selftest.py`, `security_selftest.py` (BOUND-01/NT-*) |
 | Federation scope escalation | explicit scope evaluation, revocation, peer-domain isolation | `federation_selftest.py` |
 | Secret leakage | LOCK-023 structural scans and serialization/diagnostic negative tests | `security_selftest.py`, `identity_selftest.py`, `adapter_selftest.py`, `transport_selftest.py` |
 | Authority bypass | downstream layers verify/extract rather than mint upstream authority | `security_selftest.py` plus policy/service/telemetry/routing/session suites |
@@ -62,7 +62,7 @@ The model does **not** assume that Python privacy naming (`_name`) is a security
 `routing/` owns path selection; `sessions/` owns logical session state. Security controls must prevent path/content tampering from changing session identity or bypassing policy.
 
 ### Adapter/transport boundaries
-Provider-specific state remains outside the core. Transport security uses established standard primitives and explicit record-protection seams; anti-replay admission is transactional.
+Provider-specific state remains outside the core. Vendor specifics are structurally confined behind the provider seam (LOCK-016): external vendor/mobile SDK imports are rejected in every authority package, and vendor-named in-repo modules exist only inside `adapters/` — never imported by non-adapter authority packages. Transport security uses established standard primitives and explicit record-protection seams; anti-replay admission is transactional.
 
 ### Federation authority
 `federation/` owns inter-domain scopes and revocation. Membership in another domain is never equivalent to node-level trust.
