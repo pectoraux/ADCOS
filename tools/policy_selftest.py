@@ -2069,11 +2069,14 @@ def case_74_promotion_binding_born_bound(results: List[Result]) -> None:
     """REGRESSION (WORK-026 "policy-controlled authority"): the frozen
     ``telemetry.topology-promote`` operation is PRIVILEGED
     (deny-by-default) and its decisions are BORN bound to the exact
-    promotion scope (observation, subject kind, subject ref) -- the
-    same trust chain case_73 pins for service.invoke, applied to the
-    telemetry topology-promotion seam.  Without an explicit rule
-    ALLOW the promotion is denied by default, so telemetry can never
-    silently become topology authority.
+    promotion scope (observation, subject kind, subject ref) AND the
+    privacy disclosure authorization (privacy_scope,
+    source_disclosure) -- the same trust chain case_73 pins for
+    service.invoke, applied to the telemetry topology-promotion seam
+    (privacy axes added by the PR #27 Architect review, blocker 2).
+    Without an explicit rule ALLOW the promotion is denied by
+    default, so telemetry can never silently become topology
+    authority.
 
     Discriminating legs:
     - deny-by-default: no applicable rule -> DEFAULT_DENY (privileged
@@ -2083,9 +2086,15 @@ def case_74_promotion_binding_born_bound(results: List[Result]) -> None:
       context's descriptor;
     - a promotion context WITHOUT a valid descriptor fails closed
       (ok=False, INVALID_POLICY, no decision);
-    - the descriptor schema is strict (five keys, strings, frozen
+    - the descriptor schema is strict (seven keys, strings, frozen
       operation) and MIRRORS the context's first-class resource_refs
       (subject and observation must be exactly what the rules saw);
+    - the privacy disclosure authorization keys (privacy_scope,
+      source_disclosure) are REQUIRED, non-empty strings -- a
+      promotion decision without an explicit privacy boundary can
+      never exist (structural schema only: the VALUE vocabularies are
+      owned by the telemetry family and validated at its consumption
+      seam);
     - a promotion descriptor riding a non-promotion context is inert
       opaque DATA.
     """
@@ -2104,6 +2113,8 @@ def case_74_promotion_binding_born_bound(results: List[Result]) -> None:
         "observation_id": obs_id,
         "subject_kind": "link",
         "subject_ref": subject_ref,
+        "privacy_scope": "operational",
+        "source_disclosure": "identity",
     }
     good_kwargs: Dict[str, Any] = dict(
         operation=Operation.TELEMETRY_TOPOLOGY_PROMOTE,
@@ -2186,6 +2197,32 @@ def case_74_promotion_binding_born_bound(results: List[Result]) -> None:
     _expect_invalid(
         "empty observation_id", _ctx(extensions=({**descriptor, "observation_id": ""},)),
     )
+    # Privacy disclosure authorization keys are REQUIRED (PR #27
+    # review, blocker 2): a promotion decision without an explicit
+    # privacy boundary can never be born.
+    _expect_invalid(
+        "missing privacy_scope",
+        _ctx(extensions=({k: v for k, v in descriptor.items() if k != "privacy_scope"},)),
+    )
+    _expect_invalid(
+        "missing source_disclosure",
+        _ctx(extensions=({k: v for k, v in descriptor.items() if k != "source_disclosure"},)),
+    )
+    _expect_invalid(
+        "empty privacy_scope", _ctx(extensions=({**descriptor, "privacy_scope": ""},)),
+    )
+    _expect_invalid(
+        "empty source_disclosure",
+        _ctx(extensions=({**descriptor, "source_disclosure": ""},)),
+    )
+    _expect_invalid(
+        "non-string privacy_scope",
+        _ctx(extensions=({**descriptor, "privacy_scope": 3},)),
+    )
+    _expect_invalid(
+        "non-string source_disclosure",
+        _ctx(extensions=({**descriptor, "source_disclosure": True},)),
+    )
     # Mirror violations: subject/observation not among the evaluated
     # first-class resource_refs.
     _expect_invalid(
@@ -2233,7 +2270,8 @@ def case_74_promotion_binding_born_bound(results: List[Result]) -> None:
             ok(
                 name,
                 "telemetry.topology-promote is deny-by-default privileged and born "
-                "bound (digest-covered, resource_refs-mirrored); malformed/absent "
+                "bound (digest-covered, resource_refs-mirrored, privacy "
+                "disclosure authorization required); malformed/absent "
                 "descriptor fails closed; inert on other operations",
             )
         )

@@ -5,9 +5,10 @@ Public API:
 - frozen vocabularies: :class:`TelemetrySubjectKind` (the six
   measurement subjects), :class:`TelemetrySourceClass` (the frozen
   spec/architecture 6.11 evidence types), :class:`PrivacyClass`,
-  :class:`ValidityState`, :class:`TelemetryEventType`, the
-  standardized per-subject metric registry
-  :data:`TELEMETRY_METRIC_REGISTRY`
+  :class:`SourceDisclosure` (the promotion-authorization
+  source-identity disclosure modes), :class:`ValidityState`,
+  :class:`TelemetryEventType`, the standardized per-subject metric
+  registry :data:`TELEMETRY_METRIC_REGISTRY`
 - canonical records: :class:`TelemetryObservation` (source, time,
   confidence, validity), :class:`TopologyPromotion` (the
   policy-authorized export artifact), :class:`TelemetryEvent` (the
@@ -48,6 +49,7 @@ from .model import (
     PSEUDONYM_PREFIX,
     TELEMETRY_METRIC_REGISTRY,
     PrivacyClass,
+    SourceDisclosure,
     TelemetryEvent,
     TelemetryEventType,
     TelemetryMetric,
@@ -79,6 +81,7 @@ from .validation import (
     validate_privacy_scope,
     validate_purpose,
     validate_source_class,
+    validate_source_disclosure,
     validate_subject_kind,
     validate_subject_ref,
 )
@@ -95,6 +98,7 @@ __all__ = [
     "TelemetrySubjectKind",
     "TelemetrySourceClass",
     "PrivacyClass",
+    "SourceDisclosure",
     "PRIVACY_VISIBILITY",
     "ValidityState",
     "TelemetryEventType",
@@ -129,6 +133,7 @@ __all__ = [
     "validate_confidence_basis_points",
     "validate_subject_ref",
     "validate_privacy_scope",
+    "validate_source_disclosure",
     "validate_purpose",
     # Errors
     "TelemetryError",

@@ -9,6 +9,7 @@ remediation 2 -- comment 5434924645), applied to the WORK-026
     WORK-010 policy authority / composition root
             ->
     decision already bound to the exact promotion scope
+    AND privacy disclosure authorization
             ->
     telemetry verification + extraction ONLY   <-- this module
             ->
@@ -17,22 +18,39 @@ remediation 2 -- comment 5434924645), applied to the WORK-026
 The promotion scope a ``telemetry.topology-promote`` decision
 authorizes is established UPSTREAM, inside the policy authority: the
 composition root declares the exact (observation, subject kind,
-subject ref) scope as an ``adcos.telemetry-topology-promotion``
-descriptor in the ``PolicyContext.extensions`` (the frozen
-WORK-003-style opaque surface), and the WORK-010 evaluator derives
-the binding from that descriptor with strict mirror checks against
-the context's first-class ``resource_refs``
+subject ref) scope AND the privacy disclosure authorization
+(``privacy_scope`` + ``source_disclosure``) as an
+``adcos.telemetry-topology-promotion`` descriptor in the
+``PolicyContext.extensions`` (the frozen WORK-003-style opaque
+surface), and the WORK-010 evaluator derives the binding from that
+descriptor with strict mirror checks against the context's
+first-class ``resource_refs``
 (``policy.promotion.promotion_binding_from_context``), so every
 ``telemetry.topology-promote`` decision the engine emits is BORN
-carrying its exact promotion scope among its ``extensions`` --
-covered by the decision's content-derived ``decision_id`` digest.
+carrying its exact promotion scope and privacy disclosure
+authorization among its ``extensions`` -- covered by the decision's
+content-derived ``decision_id`` digest.
+
+The privacy disclosure authorization (PR #27 Architect review,
+blocker 2) is extracted here exactly like the promotion scope:
+``privacy_scope`` (validated against the frozen spec/architecture 20
+privacy classes -- the promotion may never disclose an observation
+whose privacy class is above the authorized scope) and
+``source_disclosure`` (validated against the frozen disclosure
+vocabulary -- the raw source identity is exported ONLY when the
+authorization explicitly permits identity disclosure).  The values
+are telemetry-owned vocabularies: the policy authority enforces the
+descriptor's structural schema, and THIS seam interprets the privacy
+semantics (verification + extraction ONLY).
 
 This module deliberately possesses NO binding-construction
 capability: there is no function here (or anywhere in the
 ``telemetry`` package) that can take an ALLOW decision and attach,
-rewire, or re-stamp a promotion scope around it.  The telemetry layer
-is a pure policy CONSUMER: it verifies the decision's own
-tamper-evidence and EXTRACTS the scope the decision itself carries.
+rewire, or re-stamp a promotion scope or a privacy disclosure
+authorization around it.  The telemetry layer is a pure policy
+CONSUMER: it verifies the decision's own tamper-evidence and
+EXTRACTS the scope and privacy authorization the decision itself
+carries.
 """
 
 from __future__ import annotations
@@ -45,6 +63,10 @@ from policy.model import PolicyDecision
 from policy.promotion import PROMOTION_BINDING_KIND, PROMOTION_BINDING_KEYS
 
 from .errors import TelemetryError, TelemetryReasonCode
+from .validation import (
+    validate_privacy_scope,
+    validate_source_disclosure,
+)
 
 #: ``PROMOTION_BINDING_KIND`` (imported above) is the discriminator
 #: carried inside the promotion binding of a BORN-BOUND engine
@@ -65,12 +87,17 @@ TELEMETRY_PROMOTION_OPERATION = "telemetry.topology-promote"
 class PromotionBinding:
     """The extracted, born-bound promotion scope of one engine
     decision: the exact observation and subject the WORK-010 authority
-    evaluated.  Constructible ONLY by extraction from a genuine
-    decision's digest-covered extensions."""
+    evaluated, PLUS the privacy disclosure authorization the decision
+    carries (``privacy_scope`` -- the maximum privacy class the
+    promotion may disclose; ``source_disclosure`` -- the permitted
+    source-identity disclosure mode).  Constructible ONLY by extraction
+    from a genuine decision's digest-covered extensions."""
 
     observation_id: str
     subject_kind: str
     subject_ref: str
+    privacy_scope: str
+    source_disclosure: str
 
 
 def decision_is_tamper_evident(decision: PolicyDecision) -> bool:
@@ -101,9 +128,15 @@ def extract_promotion_binding(
     decisions are rejected -- rebinding the extension breaks the
     digest), and whose extensions carry EXACTLY ONE
     ``adcos.telemetry-topology-promotion`` binding with the strict
-    authority-side key schema.  Anything else is a promotion-scope
-    failure: the telemetry layer never constructs, completes, or
-    repairs a binding.
+    authority-side key schema.  The binding's privacy disclosure
+    authorization (``privacy_scope``, ``source_disclosure``) is
+    validated against the telemetry-owned frozen vocabularies here:
+    an out-of-vocabulary privacy authorization is an uninterpretable
+    authorization, and the promotion path fails closed on it (PR #27
+    Architect review blocker 2 -- the security property is
+    authorization-driven, never a caller flag).  Anything else is a
+    promotion-scope failure: the telemetry layer never constructs,
+    completes, or repairs a binding.
     """
     if not isinstance(decision, PolicyDecision):
         raise TelemetryError(
@@ -144,7 +177,7 @@ def extract_promotion_binding(
             TelemetryReasonCode.POLICY_INVALID,
             "promotion binding key set %s is not the strict authority "
             "schema %s (nothing rides alongside the authorized "
-            "promotion scope)"
+            "promotion scope and privacy disclosure authorization)"
             % (sorted(keys), sorted(PROMOTION_BINDING_KEYS)),
         )
     for key in sorted(PROMOTION_BINDING_KEYS):
@@ -162,17 +195,33 @@ def extract_promotion_binding(
             "decision can authorize a promotion"
             % (binding["operation"], TELEMETRY_PROMOTION_OPERATION),
         )
-    for required in ("observation_id", "subject_kind", "subject_ref"):
+    for required in (
+        "observation_id", "subject_kind", "subject_ref",
+        "privacy_scope", "source_disclosure",
+    ):
         if not binding[required]:
             raise TelemetryError(
                 TelemetryReasonCode.POLICY_INVALID,
                 "promotion binding carries an empty %s (the authorized "
-                "promotion scope is never optional)" % (required,),
+                "promotion scope and privacy disclosure authorization "
+                "are never optional)" % (required,),
             )
+    # The privacy disclosure authorization is telemetry-owned
+    # vocabulary: validate it here (verification + extraction ONLY --
+    # the values come from the digest-covered binding, never from the
+    # caller).  An out-of-vocabulary privacy authorization fails
+    # closed: the promotion path never guesses what an uninterpretable
+    # authorization permits.
+    privacy_scope = validate_privacy_scope(binding["privacy_scope"])
+    source_disclosure = validate_source_disclosure(
+        binding["source_disclosure"]
+    )
     return PromotionBinding(
         observation_id=binding["observation_id"],
         subject_kind=binding["subject_kind"],
         subject_ref=binding["subject_ref"],
+        privacy_scope=privacy_scope,
+        source_disclosure=source_disclosure,
     )
 
 

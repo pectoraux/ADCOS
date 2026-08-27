@@ -24,6 +24,7 @@ from .model import (
     MAX_METRIC_VALUE,
     PRIVACY_VISIBILITY,
     PrivacyClass,
+    SourceDisclosure,
     TelemetrySubjectKind,
     TelemetrySourceClass,
     TELEMETRY_METRIC_REGISTRY,
@@ -292,14 +293,36 @@ def validate_context_pairs(
 
 
 def validate_privacy_scope(value: object) -> str:
-    """Validate an explicit query privacy scope (the fail-closed §20
-    fence: observations above the scope are simply invisible)."""
+    """Validate an explicit privacy scope (the fail-closed §20
+    fence): the maximum privacy class a query may observe or a
+    topology-promotion authorization may disclose.  Observations
+    above the scope are simply invisible on the query path, and a
+    promotion above the scope fails closed."""
     if not isinstance(value, str) or value not in PrivacyClass.values():
         raise TelemetryError(
             TelemetryReasonCode.PRIVACY_VIOLATION,
             "privacy_scope must be one of the frozen privacy classes %s "
-            "(got %r) -- every telemetry query states the maximum "
-            "privacy class it may observe" % (list(PrivacyClass.values()), value),
+            "(got %r) -- every telemetry query and every promotion "
+            "authorization states the maximum privacy class it may "
+            "observe or disclose" % (list(PrivacyClass.values()), value),
+        )
+    return value
+
+
+def validate_source_disclosure(value: object) -> str:
+    """Validate a promotion authorization's source-identity disclosure
+    mode against the frozen vocabulary (PR #27 Architect review
+    blocker 2): the mode is part of the born-bound promotion
+    authorization, and the privacy boundary fails closed on anything
+    the authorization does not explicitly permit."""
+    if not isinstance(value, str) or value not in SourceDisclosure.values():
+        raise TelemetryError(
+            TelemetryReasonCode.PRIVACY_VIOLATION,
+            "source_disclosure must be one of the frozen disclosure "
+            "modes %s (got %r) -- a promotion authorization must "
+            "explicitly state what source-identity disclosure it "
+            "permits (identity or pseudonymous; never a caller flag)"
+            % (list(SourceDisclosure.values()), value),
         )
     return value
 
@@ -342,6 +365,7 @@ __all__ = [
     "validate_observation_ref_text",
     "validate_context_pairs",
     "validate_privacy_scope",
+    "validate_source_disclosure",
     "validate_purpose",
     "privacy_visible",
     "MAX_METRIC_VALUE",

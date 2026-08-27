@@ -58,6 +58,20 @@ the WORK-026 work-item contract to discriminating cases:
   WORK-016 health ladder; WORK-008 energy units     -> case_28
 - canonical serialization round-trips (schema
   tests)                                            -> case_29
+- REGRESSION (PR #27 review B1): LOCK-023
+  audit surface -- credential-like
+  material rejected in EVERY telemetry
+  free-text sink (TelemetryEvent.detail,
+  ids, matched_rule_ids) -- fails on
+  e504684                                          -> case_30
+- REGRESSION (PR #27 review B2): the
+  promotion privacy authorization boundary
+  -- a restricted observation never
+  exports above its explicit privacy
+  authorization; raw identity never
+  exports under pseudonymous-only
+  authorization; no caller disclosure
+  flag exists -- fails on e504684                    -> case_31
 """
 
 from __future__ import annotations
@@ -88,7 +102,9 @@ from telemetry import (  # noqa: E402
     PROMOTION_BINDING_CONSUMER_KIND,
     TELEMETRY_PROMOTION_OPERATION,
     PrivacyClass,
+    SourceDisclosure,
     TelemetryError,
+    TelemetryEvent,
     TelemetryEventType,
     TelemetryObservation,
     TelemetryQueryResult,
@@ -188,9 +204,14 @@ def _promotion_decision(
     policy_set: Optional[PolicySet] = None,
     evaluation_instant: str = _T1,
     requester_node_id: str = _NODE_A,
+    privacy_scope: str = PrivacyClass.OPERATIONAL,
+    source_disclosure: str = SourceDisclosure.IDENTITY,
 ) -> PolicyDecision:
     """A GENUINE WORK-010 engine decision for the exact promotion
-    scope (born bound by the evaluator; the composition recipe)."""
+    scope (born bound by the evaluator; the composition recipe),
+    including the born-bound privacy disclosure authorization
+    (``privacy_scope`` + ``source_disclosure`` -- PR #27 Architect
+    review blocker 2)."""
     engine = PolicyEngine()
     context = PolicyContext(
         operation=Operation.TELEMETRY_TOPOLOGY_PROMOTE,
@@ -204,6 +225,8 @@ def _promotion_decision(
                 "observation_id": observation.observation_id,
                 "subject_kind": observation.subject_kind,
                 "subject_ref": observation.subject_ref,
+                "privacy_scope": privacy_scope,
+                "source_disclosure": source_disclosure,
             },
         ),
     )
@@ -227,6 +250,19 @@ def _expect_error(name: str, label: str, reason: str, call: Callable[[], object]
             return fail(name, "%s: expected %s, got %s" % (label, reason, exc.reason))
         return ok(name, "")
     return fail(name, "%s: expected %s, no error raised" % (label, reason))
+
+
+def _event(**overrides: Any) -> TelemetryEvent:
+    """The audit-event fixture (the canonical free-text sink)."""
+    kwargs: Dict[str, Any] = dict(
+        event_type=TelemetryEventType.PROMOTION_AUTHORIZED,
+        instant=_T1,
+        observation_id="telemetry:observation:" + "a" * 64,
+        policy_decision_id="0" * 64,
+        detail="authorized under the born-bound promotion rule",
+    )
+    kwargs.update(overrides)
+    return TelemetryEvent(**kwargs)
 
 
 # --------------------------------------------------------------------------
@@ -272,6 +308,8 @@ def case_02_frozen_vocabularies_closed() -> Result:
         return fail(name, "source classes drifted from the 6.11 list")
     if PrivacyClass.values() != ("public", "operational", "restricted"):
         return fail(name, "privacy classes drifted")
+    if SourceDisclosure.values() != ("identity", "pseudonymous"):
+        return fail(name, "source disclosure modes drifted")
     if ValidityState.values() != ("fresh", "stale"):
         return fail(name, "validity states drifted")
     if TelemetryEventType.values() != (
@@ -687,29 +725,49 @@ def case_16_pseudonymization() -> Result:
         return fail(name, "pseudonym not deterministic/prefixed")
     if first == derive_pseudonym(_NODE_B):
         return fail(name, "distinct nodes share a pseudonym")
-    # Promotion with pseudonymize=True exports the pseudonym, not the
-    # raw identity.
+    # The exported source identity is AUTHORIZATION-DRIVEN (PR #27
+    # review blocker 2): a decision whose born-bound source_disclosure
+    # is ``pseudonymous`` exports the pseudonym -- there is no caller
+    # flag that could export the raw identity instead.
     store = TelemetryStore()
     observation = _recorded(store, _observation())
-    decision = _promotion_decision(observation)
+    decision = _promotion_decision(
+        observation, source_disclosure=SourceDisclosure.PSEUDONYMOUS,
+    )
     promotion = store.authorize_topology_promotion(
         now=_T1, observation_id=observation.observation_id,
-        policy_decision=decision, pseudonymize=True,
+        policy_decision=decision,
     )
     if promotion.source_display != first:
-        return fail(name, "pseudonymized promotion carried the wrong display")
+        return fail(name, "pseudonymous authorization exported the wrong display")
+    # A decision authorizing identity disclosure exports the raw id
+    # (explicitly authorized -- never more than the authorization
+    # permits).
     explicit = TelemetryStore()
     other = _recorded(
         explicit, _observation(subject_ref="link-pseudo-2"),
     )
     promotion2 = explicit.authorize_topology_promotion(
         now=_T1, observation_id=other.observation_id,
-        policy_decision=_promotion_decision(other),
-        pseudonymize=False,
+        policy_decision=_promotion_decision(
+            other, source_disclosure=SourceDisclosure.IDENTITY,
+        ),
     )
     if promotion2.source_display != _NODE_A:
-        return fail(name, "explicit promotion did not carry the source id")
-    return ok(name, "deterministic pseudonymous source identifiers on export")
+        return fail(name, "identity-authorized promotion did not carry the source id")
+    # There is structurally NO caller-side disclosure flag at all
+    # (the security property is authorization-driven, not a caller
+    # convenience -- a pseudonymize kwarg would reintroduce it).
+    try:
+        store.authorize_topology_promotion(  # type: ignore[call-arg]
+            now=_T1, observation_id=observation.observation_id,
+            policy_decision=_promotion_decision(observation),
+            pseudonymize=True,
+        )
+        return fail(name, "a caller-side disclosure flag still exists")
+    except TypeError:
+        pass
+    return ok(name, "deterministic pseudonymous sources, exported per the authorization")
 
 
 def case_17_no_binding_construction() -> Result:
@@ -1070,10 +1128,12 @@ def case_23_canonical_determinism() -> Result:
             ),
             now=_T1,
         )
-        decision = _promotion_decision(first)
+        decision = _promotion_decision(
+            first, source_disclosure=SourceDisclosure.PSEUDONYMOUS,
+        )
         store.authorize_topology_promotion(
             now=_T1, observation_id=first.observation_id,
-            policy_decision=decision, pseudonymize=True,
+            policy_decision=decision,
         )
         return hashlib.sha256(
             json.dumps(store.snapshot(), sort_keys=True).encode("utf-8")
@@ -1105,10 +1165,11 @@ def case_23_canonical_determinism() -> Result:
             "requester_node_id='adcos:node:test.profile.v1:' + 'a'*64, evaluation_instant='2026-08-27T00:01:00Z', "
             "resource_refs=(obs.observation_id, obs.subject_ref), extensions=({'kind': 'adcos.telemetry-topology-promotion', "
             "'operation': Operation.TELEMETRY_TOPOLOGY_PROMOTE, 'observation_id': obs.observation_id, "
-            "'subject_kind': 'link', 'subject_ref': obs.subject_ref},)); "
+            "'subject_kind': 'link', 'subject_ref': obs.subject_ref, "
+            "'privacy_scope': 'operational', 'source_disclosure': 'pseudonymous'},)); "
             "res = engine.evaluate(ps, ctx); assert res.ok and res.decision is not None; "
             "store.authorize_topology_promotion(now='2026-08-27T00:01:00Z', observation_id=obs.observation_id, "
-            "policy_decision=res.decision, pseudonymize=True); "
+            "policy_decision=res.decision); "
             "print(hashlib.sha256(json.dumps(store.snapshot(), sort_keys=True).encode('utf-8')).hexdigest())"
             % (_ROOT,)
         )
@@ -1281,6 +1342,335 @@ def case_29_serialization_round_trip() -> Result:
 
 
 # --------------------------------------------------------------------------
+# PR #27 Architect-review regressions
+# --------------------------------------------------------------------------
+
+
+def case_30_audit_event_lock023_boundary() -> Result:
+    """REGRESSION (PR #27 review, blocker 1): the LOCK-023 boundary is
+    universal for EVERY free-text telemetry field -- the canonical
+    audit trail included.  At the reviewed head e504684,
+    ``TelemetryEvent.__post_init__`` only checked ``isinstance(str)``,
+    so ``detail="rotation completed with shared_secret=..."`` (and
+    credential-like ids) became persistent telemetry DATA through
+    ``snapshot()`` / ``explain_observation()`` while the observation
+    layer rejected the same content.  This case FAILS on e504684 and
+    pins the closed boundary."""
+    name = "case_30_audit_event_lock023_boundary"
+    matrix: List[Tuple[str, Dict[str, Any]]] = [
+        (
+            "event detail",
+            {"detail": "rotation completed with shared_secret=abc123"},
+        ),
+        (
+            "event detail variant",
+            {"detail": "key rotation done (passphrase rotated)"},
+        ),
+        (
+            "event observation_id",
+            {"observation_id": "telemetry:observation:password=y"},
+        ),
+        (
+            "event policy_decision_id",
+            {"policy_decision_id": "api_key=k"},
+        ),
+        (
+            "event detail token",
+            {"detail": "observe with community_string public"},
+        ),
+    ]
+    for label, overrides in matrix:
+        probe = _expect_error(
+            name, label, TelemetryReasonCode.CREDENTIAL_LIKE_INPUT,
+            partial(_event, **overrides),
+        )
+        if not probe[1]:
+            return probe
+    # A clean audit event still constructs (the boundary is not a
+    # blanket rejection).
+    if not _event().observation_id:
+        return fail(name, "clean audit event no longer constructs")
+    # The observation layer rejects the same content: the audit
+    # surface is exactly as strict (no asymmetry remains).
+    probe = _expect_error(
+        name, "observation parity", TelemetryReasonCode.CREDENTIAL_LIKE_INPUT,
+        partial(
+            _observation,
+            provenance="rotation completed with shared_secret=abc123",
+        ),
+    )
+    if not probe[1]:
+        return probe
+    # TopologyPromotion.matched_rule_ids is a free-text sink too: a
+    # credential-like rule id fails closed at record construction.
+    obs_id = OBSERVATION_ID_PREFIX + "b" * 64
+    promotion_kwargs: Dict[str, Any] = dict(
+        promotion_id=derive_promotion_id(obs_id, "0" * 64, _T1),
+        observation_id=obs_id,
+        subject_kind=TelemetrySubjectKind.LINK,
+        subject_ref=_LINK_REF,
+        source_class=TelemetrySourceClass.PEER_OBSERVED,
+        source_display=_NODE_A,
+        policy_decision_id="0" * 64,
+        matched_rule_ids=("promo-allow",),
+        authorized_at=_T1,
+    )
+    TopologyPromotion(**promotion_kwargs)  # control: clean ids pass
+    probe = _expect_error(
+        name, "matched rule id", TelemetryReasonCode.CREDENTIAL_LIKE_INPUT,
+        partial(
+            TopologyPromotion,
+            **dict(promotion_kwargs, matched_rule_ids=("rule-with-password",)),
+        ),
+    )
+    if not probe[1]:
+        return probe
+    # End-to-end: the store's own audit trail (a denial + an
+    # authorization) carries no credential-like material anywhere.
+    store = TelemetryStore()
+    recorded = _recorded(store, _observation())
+    denied = _promotion_decision(
+        recorded, policy_set=_promotion_policy_set(allow=False),
+    )
+    try:
+        store.authorize_topology_promotion(
+            now=_T1, observation_id=recorded.observation_id,
+            policy_decision=denied,
+        )
+    except TelemetryError:
+        pass  # the audited denial
+    store.authorize_topology_promotion(
+        now=_T1, observation_id=recorded.observation_id,
+        policy_decision=_promotion_decision(recorded),
+    )
+    blob = json.dumps(store.snapshot(), sort_keys=True)
+    for forbidden in ("password", "secret", "token", "api_key", "psk"):
+        if forbidden in blob:
+            return fail(name, "audit trail carries %r" % (forbidden,))
+    return ok(
+        name,
+        "LOCK-023 universal: every telemetry free-text sink (events, "
+        "rule ids) rejects credential-like material",
+    )
+
+
+def case_31_promotion_privacy_authorization_boundary() -> Result:
+    """REGRESSION (PR #27 review, blocker 2): the topology-promotion
+    path is an explicit PRIVACY AUTHORIZATION BOUNDARY.  The invariant:
+    a topology promotion must never disclose information at a privacy
+    level greater than the authorization explicitly permits.
+
+    The privacy disclosure authorization (``privacy_scope`` +
+    ``source_disclosure``) is BORN-BOUND at the WORK-010 policy
+    authority (``policy/promotion.py`` derives it from the evaluation
+    context's descriptor; the decision's digest covers it), and the
+    telemetry layer verifies + extracts it ONLY.  At the reviewed head
+    e504684 there was no privacy authorization on the path at all --
+    a restricted observation promoted with ``pseudonymize=False``
+    exported the raw source NodeID under a decision that never
+    authorized any privacy disclosure.  This case FAILS on e504684."""
+    name = "case_31_promotion_privacy_authorization_boundary"
+
+    def restricted_observation(ref: str) -> TelemetryObservation:
+        return _observation(
+            subject_ref=ref,
+            privacy_class=PrivacyClass.RESTRICTED,
+            context=(("location", "sector-7"),),
+        )
+
+    # -- 1. public observation -> normal promotion works -------------
+    store = TelemetryStore()
+    public = _recorded(
+        store, _observation(
+            subject_ref="link-pub-31", privacy_class=PrivacyClass.PUBLIC,
+        ),
+    )
+    promotion = store.authorize_topology_promotion(
+        now=_T1, observation_id=public.observation_id,
+        policy_decision=_promotion_decision(
+            public, privacy_scope=PrivacyClass.PUBLIC,
+        ),
+    )
+    if not promotion.promotion_id.startswith(PROMOTION_ID_PREFIX):
+        return fail(name, "case 1: public promotion failed")
+
+    # -- 2. operational observation -> normal promotion works ---------
+    operational = _recorded(store, _observation(subject_ref="link-op-31"))
+    store.authorize_topology_promotion(
+        now=_T1, observation_id=operational.observation_id,
+        policy_decision=_promotion_decision(
+            operational, privacy_scope=PrivacyClass.OPERATIONAL,
+        ),
+    )
+    # The boundary is total: a public-only authorization is
+    # INSUFFICIENT for an operational observation (same lattice as
+    # the query path).
+    under_authorized = _recorded(
+        store, _observation(subject_ref="link-op-31b"),
+    )
+    probe = _expect_error(
+        name, "operational under public authorization",
+        TelemetryReasonCode.PRIVACY_VIOLATION,
+        lambda: store.authorize_topology_promotion(
+            now=_T1, observation_id=under_authorized.observation_id,
+            policy_decision=_promotion_decision(
+                under_authorized, privacy_scope=PrivacyClass.PUBLIC,
+            ),
+        ),
+    )
+    if not probe[1]:
+        return probe
+
+    # -- 3. restricted + insufficient authorization -> fails closed ---
+    store3 = TelemetryStore()
+    restricted = _recorded(store3, restricted_observation("link-r31"))
+    probe = _expect_error(
+        name, "restricted under operational authorization",
+        TelemetryReasonCode.PRIVACY_VIOLATION,
+        lambda: store3.authorize_topology_promotion(
+            now=_T1, observation_id=restricted.observation_id,
+            policy_decision=_promotion_decision(
+                restricted, privacy_scope=PrivacyClass.OPERATIONAL,
+            ),
+        ),
+    )
+    if not probe[1]:
+        return probe
+    # The privacy denial is AUDITED and nothing exported.
+    explanation = store3.explain_observation(
+        now=_T1, observation_id=restricted.observation_id,
+        privacy_scope=PrivacyClass.RESTRICTED, purpose="case-31-audit",
+    )
+    denials = [
+        e for e in explanation["events"]
+        if e["event_type"] == TelemetryEventType.PROMOTION_DENIED
+    ]
+    if not denials:
+        return fail(name, "case 3: privacy denial not audited")
+    if store3.promotions():
+        return fail(name, "case 3: insufficient authorization exported")
+
+    # -- 4. restricted + appropriate authorization -> proceeds --------
+    store4 = TelemetryStore()
+    restricted4 = _recorded(store4, restricted_observation("link-r31b"))
+    promotion4 = store4.authorize_topology_promotion(
+        now=_T1, observation_id=restricted4.observation_id,
+        policy_decision=_promotion_decision(
+            restricted4, privacy_scope=PrivacyClass.RESTRICTED,
+            source_disclosure=SourceDisclosure.IDENTITY,
+        ),
+    )
+    if promotion4.source_display != _NODE_A:
+        return fail(name, "case 4: identity-authorized export wrong")
+
+    # -- 5. raw identity NEVER exports under pseudonymous-only --------
+    store5 = TelemetryStore()
+    restricted5 = _recorded(store5, restricted_observation("link-r31c"))
+    promotion5 = store5.authorize_topology_promotion(
+        now=_T1, observation_id=restricted5.observation_id,
+        policy_decision=_promotion_decision(
+            restricted5, privacy_scope=PrivacyClass.RESTRICTED,
+            source_disclosure=SourceDisclosure.PSEUDONYMOUS,
+        ),
+    )
+    if promotion5.source_display != derive_pseudonym(_NODE_A):
+        return fail(name, "case 5: pseudonymous-only export is not the pseudonym")
+    if promotion5.source_display == _NODE_A:
+        return fail(name, "case 5: raw identity exported under pseudonymous-only")
+    operational5 = _recorded(store5, _observation(subject_ref="link-op-31c"))
+    promotion5b = store5.authorize_topology_promotion(
+        now=_T1, observation_id=operational5.observation_id,
+        policy_decision=_promotion_decision(
+            operational5, source_disclosure=SourceDisclosure.PSEUDONYMOUS,
+        ),
+    )
+    if promotion5b.source_display != derive_pseudonym(_NODE_A):
+        return fail(name, "case 5: pseudonymous-only export wrong on operational")
+
+    # -- 6. location-bearing restricted context cannot leak -----------
+    artifact = promotion5.to_dict()
+    if set(artifact.keys()) != {
+        "promotion_id", "observation_id", "subject_kind", "subject_ref",
+        "source_class", "source_display", "policy_decision_id",
+        "matched_rule_ids", "authorized_at",
+    }:
+        return fail(
+            name, "case 6: promotion artifact carries a context channel",
+        )
+    blob = json.dumps(artifact, sort_keys=True)
+    if "sector-7" in blob or "location" in blob:
+        return fail(name, "case 6: restricted context leaked into the artifact")
+    snapshot_blob = json.dumps(
+        [p.to_dict() for p in store5.promotions()], sort_keys=True,
+    )
+    if "sector-7" in snapshot_blob:
+        return fail(name, "case 6: restricted context leaked into promotions")
+    # The promoted restricted observation stays query-fenced exactly
+    # as before (the promotion does not downgrade its privacy class).
+    hits = store5.query_observations(now=_T1, privacy_scope=PrivacyClass.OPERATIONAL)
+    if any(
+        h.observation.observation_id == restricted5.observation_id
+        for h in hits
+    ):
+        return fail(name, "case 6: promoted observation lost its query fence")
+
+    # -- 7. changing the authorization changes semantics + digest -----
+    operational_scope = _promotion_decision(
+        restricted4, privacy_scope=PrivacyClass.OPERATIONAL,
+    )
+    restricted_scope = _promotion_decision(
+        restricted4, privacy_scope=PrivacyClass.RESTRICTED,
+    )
+    if operational_scope.decision_id == restricted_scope.decision_id:
+        return fail(name, "case 7: privacy scope not digest-covered")
+    pseudonymous = _promotion_decision(
+        restricted4, privacy_scope=PrivacyClass.RESTRICTED,
+        source_disclosure=SourceDisclosure.PSEUDONYMOUS,
+    )
+    if pseudonymous.decision_id == restricted_scope.decision_id:
+        return fail(name, "case 7: disclosure mode not digest-covered")
+    # Semantics follow the authorization: the operational-scope
+    # decision fails closed where the restricted-scope decision
+    # promotes (stores 3 vs 4 above prove exactly this fork).
+    # An out-of-vocabulary privacy authorization is uninterpretable
+    # and fails closed at the extraction seam (the telemetry layer
+    # owns the privacy vocabularies; the policy authority checks
+    # structure only).
+    store7 = TelemetryStore()
+    restricted7 = _recorded(store7, restricted_observation("link-r31d"))
+    probe = _expect_error(
+        name, "out-of-vocabulary privacy scope",
+        TelemetryReasonCode.PRIVACY_VIOLATION,
+        lambda: store7.authorize_topology_promotion(
+            now=_T1, observation_id=restricted7.observation_id,
+            policy_decision=_promotion_decision(
+                restricted7, privacy_scope="ultra",
+            ),
+        ),
+    )
+    if not probe[1]:
+        return probe
+    probe = _expect_error(
+        name, "out-of-vocabulary disclosure mode",
+        TelemetryReasonCode.PRIVACY_VIOLATION,
+        lambda: store7.authorize_topology_promotion(
+            now=_T1, observation_id=restricted7.observation_id,
+            policy_decision=_promotion_decision(
+                restricted7, source_disclosure="raw",
+            ),
+        ),
+    )
+    if not probe[1]:
+        return probe
+    return ok(
+        name,
+        "promotion privacy boundary: disclosure never exceeds the "
+        "born-bound privacy authorization (scope + identity mode, "
+        "digest-covered, fail-closed)",
+    )
+
+
+# --------------------------------------------------------------------------
 # Runner
 # --------------------------------------------------------------------------
 
@@ -1314,6 +1704,8 @@ CASES = (
     case_27_no_vendor_symbols,
     case_28_adapter_energy_composition,
     case_29_serialization_round_trip,
+    case_30_audit_event_lock023_boundary,
+    case_31_promotion_privacy_authorization_boundary,
 )
 
 

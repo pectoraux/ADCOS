@@ -14,17 +14,43 @@ WORK-026 "policy-controlled authority" acceptance criterion):
 
 This module is where the FIRST arrow lives.  The promotion scope a
 ``telemetry.topology-promote`` policy decision authorizes -- the exact
-``(observation_id, subject_kind, subject_ref)`` triple -- is
-established HERE, inside the policy authority, from the EVALUATION
-CONTEXT the rules actually evaluated.  It is not a post-hoc
-decoration any downstream layer can append to an unrelated decision:
-the composition root declares the promotion scope as an opaque
-descriptor inside ``PolicyContext.extensions`` (the frozen
-WORK-003-style surface), the engine derives the binding with strict
-mirror checks against the context's first-class ``resource_refs``, and
-the resulting :class:`~policy.model.PolicyDecision` is BORN with the
-binding among its own ``extensions`` -- covered by the decision's
-content-derived ``decision_id`` digest.
+``(observation_id, subject_kind, subject_ref)`` triple PLUS the
+privacy disclosure authorization ``(privacy_scope,
+source_disclosure)`` -- is established HERE, inside the policy
+authority, from the EVALUATION CONTEXT the rules actually evaluated.
+It is not a post-hoc decoration any downstream layer can append to an
+unrelated decision: the composition root declares the promotion scope
+as an opaque descriptor inside ``PolicyContext.extensions`` (the
+frozen WORK-003-style surface), the engine derives the binding with
+strict mirror checks against the context's first-class
+``resource_refs``, and the resulting
+:class:`~policy.model.PolicyDecision` is BORN with the binding among
+its own ``extensions`` -- covered by the decision's content-derived
+``decision_id`` digest.
+
+The privacy disclosure authorization (PR #27 Architect review,
+blocker 2) makes the promotion path an explicit privacy boundary
+instead of a caller convenience:
+
+- ``privacy_scope`` -- the maximum privacy class of observation this
+  promotion is authorized to disclose (one of the telemetry family's
+  frozen spec/architecture 20 privacy classes).  A ``restricted``
+  observation is promotable ONLY under an explicit ``restricted``
+  privacy authorization; the value is validated against the frozen
+  vocabulary at the telemetry consumption seam
+  (``telemetry.authorization``), which owns the privacy semantics --
+  the policy authority enforces the structural schema only.
+- ``source_disclosure`` -- what disclosure of the observation's
+  source identity the authorization permits (``identity`` or
+  ``pseudonymous``, the frozen telemetry disclosure vocabulary):
+  the raw canonical NodeID or its deterministic pseudonym.  A
+  promotion NEVER exports the raw source identity when the
+  authorization only permits pseudonymous disclosure.
+
+Both keys are REQUIRED in the descriptor: a promotion decision
+without an explicit privacy disclosure authorization cannot exist
+(the derivation fails closed), so the security property is
+authorization-driven, never a downstream caller flag.
 
 What this structurally guarantees:
 
@@ -32,11 +58,16 @@ What this structurally guarantees:
   observation: rebinding the descriptor breaks the digest, and the
   telemetry layer (WORK-026) re-derives the authorized scope from the
   stored observation and fails closed on any divergence;
+- a promotion can never disclose information at a privacy level
+  greater than the authorization explicitly permits: the privacy
+  disclosure scope rides the digest-covered binding, and no
+  downstream layer (the telemetry store included) possesses any
+  capability to widen it -- there is no caller-side override;
 - a ``telemetry.topology-promote`` context without a valid descriptor
   FAILS CLOSED at evaluation (``INVALID_POLICY``): the engine never
   emits an unbound promotion decision, so the only decisions that can
   exist for the frozen promotion operation already carry their exact
-  promotion scope;
+  promotion scope and privacy disclosure authorization;
 - the ``telemetry`` package possesses NO binding-construction
   capability at all -- it verifies the digest and extracts the scope
   (``telemetry.authorization``), which is the third arrow of the trust
@@ -48,9 +79,9 @@ The descriptor schema is deliberately minimal and technology-neutral
 (LOCK-001/002/003/004): opaque identifiers owned by their respective
 authorities, no vendor/platform vocabulary, no executable content.
 The policy authority does NOT interpret telemetry identifier FORMATS
-(that remains ``telemetry.validation``); it enforces only the
-structural schema and the context mirror, and copies the descriptor
-verbatim.
+or privacy vocabularies (that remains ``telemetry.validation``); it
+enforces only the structural schema and the context mirror, and
+copies the descriptor verbatim.
 """
 
 from __future__ import annotations
@@ -70,7 +101,16 @@ PROMOTION_BINDING_KIND = "adcos.telemetry-topology-promotion"
 
 #: The exact key set of a promotion descriptor / binding mapping
 #: (strict schema: unknown keys fail closed, so nothing can be
-#: smuggled alongside the authorized promotion scope).
+#: smuggled alongside the authorized promotion scope).  Beyond the
+#: (observation, subject kind, subject ref) scope, the descriptor
+#: carries the REQUIRED privacy disclosure authorization:
+#: ``privacy_scope`` (the maximum privacy class the promotion may
+#: disclose) and ``source_disclosure`` (``identity`` or
+#: ``pseudonymous``).  Both VALUE vocabularies are owned by the
+#: telemetry family (spec/architecture 20) and validated at the
+#: consumption seam; the policy authority enforces the structural
+#: schema only (non-empty strings), mirroring the opaque-identifier
+#: discipline for ``observation_id``/``subject_kind``/``subject_ref``.
 PROMOTION_BINDING_KEYS = frozenset(
     {
         "kind",
@@ -78,6 +118,8 @@ PROMOTION_BINDING_KEYS = frozenset(
         "observation_id",
         "subject_kind",
         "subject_ref",
+        "privacy_scope",
+        "source_disclosure",
     }
 )
 
@@ -91,8 +133,11 @@ def promotion_binding_from_context(
     The descriptor must be present in ``context.extensions`` EXACTLY
     once, carry exactly :data:`PROMOTION_BINDING_KEYS`, have string
     values, declare the frozen ``telemetry.topology-promote``
-    operation, carry a non-empty ``observation_id``, ``subject_kind``
-    and ``subject_ref``, and MIRROR the context's first-class facts:
+    operation, carry a non-empty ``observation_id``, ``subject_kind``,
+    ``subject_ref``, ``privacy_scope`` and ``source_disclosure`` (the
+    privacy disclosure authorization is REQUIRED -- a promotion
+    decision without an explicit privacy boundary can never exist),
+    and MIRROR the context's first-class facts:
 
     - ``descriptor["subject_ref"]`` must be among
       ``context.resource_refs`` (the rules must have evaluated the
@@ -179,12 +224,16 @@ def promotion_binding_from_context(
             "%r operation"
             % (descriptor["operation"], Operation.TELEMETRY_TOPOLOGY_PROMOTE),
         )
-    for required in ("observation_id", "subject_kind", "subject_ref"):
+    for required in (
+        "observation_id", "subject_kind", "subject_ref",
+        "privacy_scope", "source_disclosure",
+    ):
         if not descriptor[required]:
             raise PolicyError(
                 "promotion-binding",
                 "promotion descriptor carries an empty %s (the authorized "
-                "promotion scope is never optional)" % (required,),
+                "promotion scope and privacy disclosure authorization "
+                "are never optional)" % (required,),
             )
     # Mirror checks: the binding must restate exactly the first-class
     # facts the rules evaluated.  A descriptor that disagrees with its

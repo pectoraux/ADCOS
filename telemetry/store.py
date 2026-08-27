@@ -16,6 +16,17 @@ authority WORK-010.  In particular:
   evidence discipline, and without a genuine born-bound WORK-010
   ``telemetry.topology-promote`` ALLOW that path is closed
   (deny-by-default));
+- the promotion path is an explicit PRIVACY boundary (spec/
+  architecture 20; PR #27 Architect review blocker 2): the
+  born-bound decision's ``privacy_scope`` is the maximum privacy
+  class the promotion may disclose (a restricted observation is
+  promotable ONLY under an explicit restricted privacy
+  authorization -- insufficient authorization fails closed, audited)
+  and its ``source_disclosure`` mode governs the exported
+  ``source_display`` (the raw source identity NEVER exports under a
+  pseudonymous-only authorization).  There is deliberately NO
+  caller-side disclosure flag: the security property is
+  authorization-driven, not a caller convenience;
 - every query is privacy-fenced by an explicit scope (spec/
   architecture 20): observations above the scope are invisible, and
   a restricted scope requires a stated purpose;
@@ -47,6 +58,7 @@ from .errors import TelemetryError, TelemetryReasonCode
 from .model import (
     PROMOTION_ID_PREFIX,
     PrivacyClass,
+    SourceDisclosure,
     TelemetryEvent,
     TelemetryEventType,
     TelemetryObservation,
@@ -254,7 +266,6 @@ class TelemetryStore:
         now: str,
         observation_id: str,
         policy_decision: PolicyDecision,
-        pseudonymize: bool = False,
     ) -> TopologyPromotion:
         """Authorize the promotion of one observation toward topology
         authority under a genuine born-bound WORK-010 decision.
@@ -274,7 +285,23 @@ class TelemetryStore:
         4. the effect must be ``allow`` and the decision must not be
            future-dated (a genuine DENY is AUDITED and raises
            ``promotion-denied`` -- the denial is explainable);
-        5. one promotion per observation (re-authorization of the
+        5. the PRIVACY AUTHORIZATION BOUNDARY (spec/architecture 20;
+           PR #27 Architect review blocker 2): the decision's
+           born-bound ``privacy_scope`` is the maximum privacy class
+           this promotion may disclose.  An observation whose privacy
+           class is above the authorized scope fails closed with
+           ``privacy-violation`` (the denial is AUDITED) -- a topology
+           promotion must never disclose information at a privacy
+           level greater than the authorization explicitly permits.
+           The equally born-bound ``source_disclosure`` mode governs
+           the exported ``source_display``: ``identity`` exports the
+           raw canonical source NodeID, ``pseudonymous`` exports ONLY
+           the deterministic pseudonym (the raw source identity is
+           never exported under a pseudonymous-only authorization).
+           Both are extracted from the decision's digest-covered
+           binding; there is deliberately NO caller-side disclosure
+           flag to widen, narrow, or override them;
+        6. one promotion per observation (re-authorization of the
            identical derivation is repeat-safe).
 
         The returned :class:`TopologyPromotion` is DATA: the
@@ -361,6 +388,41 @@ class TelemetryStore:
                     policy_decision.decision_id, observation.observation_id,
                 ),
             )
+        # ----------------------------------------------------------------
+        # Privacy authorization boundary (spec/architecture 20; PR #27
+        # Architect review blocker 2): a topology promotion must never
+        # disclose information at a privacy level greater than the
+        # authorization explicitly permits.  The decision's born-bound
+        # privacy_scope is the maximum privacy class this promotion may
+        # disclose -- an observation above that scope fails closed, and
+        # the denial is AUDITED (explainable, like every promotion
+        # denial).  The scope came from the decision's digest-covered
+        # binding; there is no caller-side path that can widen it.
+        # ----------------------------------------------------------------
+        if not privacy_visible(
+            binding.privacy_scope, observation.privacy_class
+        ):
+            self._append_event(
+                TelemetryEventType.PROMOTION_DENIED, now,
+                observation_id=observation.observation_id,
+                policy_decision_id=policy_decision.decision_id,
+                detail="promotion privacy authorization scope %r does "
+                       "not cover observation privacy class %r (a "
+                       "promotion never discloses above its explicit "
+                       "privacy authorization; fail closed)"
+                       % (binding.privacy_scope, observation.privacy_class),
+            )
+            raise TelemetryError(
+                TelemetryReasonCode.PRIVACY_VIOLATION,
+                "observation %r is %s-class but the promotion "
+                "authorization's privacy scope is %r -- a topology "
+                "promotion must never disclose information at a privacy "
+                "level greater than the authorization explicitly "
+                "permits" % (
+                    observation.observation_id, observation.privacy_class,
+                    binding.privacy_scope,
+                ),
+            )
         promotion_id = derive_promotion_id(
             observation.observation_id,
             policy_decision.decision_id,
@@ -383,9 +445,16 @@ class TelemetryStore:
             subject_kind=observation.subject_kind,
             subject_ref=observation.subject_ref,
             source_class=observation.source_class,
+            # The exported source identity is governed ENTIRELY by the
+            # born-bound authorization's disclosure mode: ``identity``
+            # exports the raw canonical NodeID, ``pseudonymous``
+            # exports only the deterministic pseudonym.  No caller
+            # flag exists (PR #27 Architect review blocker 2: the
+            # security property is authorization-driven).
             source_display=(
-                derive_pseudonym(observation.source_node_id)
-                if pseudonymize else observation.source_node_id
+                observation.source_node_id
+                if binding.source_disclosure == SourceDisclosure.IDENTITY
+                else derive_pseudonym(observation.source_node_id)
             ),
             policy_decision_id=policy_decision.decision_id,
             matched_rule_ids=tuple(policy_decision.matched_rule_ids),

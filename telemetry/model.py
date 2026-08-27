@@ -146,6 +146,36 @@ class PrivacyClass:
         return (cls.PUBLIC, cls.OPERATIONAL, cls.RESTRICTED)
 
 
+class SourceDisclosure:
+    """The frozen source-identity disclosure vocabulary of a topology
+    promotion authorization (spec/architecture §20; PR #27 Architect
+    review blocker 2): WHAT disclosure of the promoted observation's
+    source identity the authorization explicitly permits.
+
+    - ``identity`` -- the raw canonical WORK-004 NodeID may appear in
+      the promotion artifact (``TopologyPromotion.source_display``);
+    - ``pseudonymous`` -- ONLY the deterministic pseudonym
+      (:func:`derive_pseudonym`) may appear; the raw source identity
+      is never exported.
+
+    The disclosure mode is part of the BORN-BOUND promotion
+    authorization (``policy.promotion`` derives it from the evaluation
+    context's descriptor and it rides the decision's digest-covered
+    ``extensions``); it is NOT a caller-side convenience flag.  A
+    promotion must never disclose more identity than the
+    authorization explicitly permits, exactly as the promotion must
+    never disclose information at a privacy level above the
+    authorized ``privacy_scope``.
+    """
+
+    IDENTITY = "identity"
+    PSEUDONYMOUS = "pseudonymous"
+
+    @classmethod
+    def values(cls) -> Tuple[str, ...]:
+        return (cls.IDENTITY, cls.PSEUDONYMOUS)
+
+
 #: Privacy-visibility lattice: which classes a query scope of class X
 #: may observe (``public`` visible to every scope; ``restricted`` only
 #: to an explicitly restricted scope -- fail-closed minimization).
@@ -562,7 +592,17 @@ class TelemetryEventType:
 
 @dataclass(frozen=True)
 class TelemetryEvent:
-    """One canonical audit event (attributable DATA; no secrets)."""
+    """One canonical audit event (attributable DATA; no secrets).
+
+    LOCK-023 is UNIVERSAL on the audit trail (PR #27 Architect review
+    blocker 1): every free-text field -- ``observation_id``,
+    ``policy_decision_id`` and ``detail`` alike -- passes the same
+    credential-like rejection as the observation layer, because the
+    event is persistent telemetry DATA (``snapshot()`` and
+    ``explain_observation()`` surface it verbatim).  A secret that
+    reaches an audit event would reach every consumer of the
+    canonical state; the constructor fails closed instead.
+    """
 
     event_type: str
     instant: str
@@ -571,6 +611,8 @@ class TelemetryEvent:
     detail: str = ""
 
     def __post_init__(self) -> None:
+        from .validation import validate_observation_ref_text
+
         if self.event_type not in TelemetryEventType.values():
             raise TelemetryError(
                 TelemetryReasonCode.INVALID_INPUT,
@@ -586,16 +628,16 @@ class TelemetryEvent:
                 "event instant must be an explicit RFC 3339 UTC instant: "
                 "%s" % (error,),
             ) from error
+        # LOCK-023 boundary is universal for every free-text telemetry
+        # field, the audit trail included: ids and detail both pass the
+        # same reference-text validation (type, length, and
+        # credential-like rejection) as the observation layer.
         for label, value in (
             ("observation_id", self.observation_id),
             ("policy_decision_id", self.policy_decision_id),
             ("detail", self.detail),
         ):
-            if not isinstance(value, str):
-                raise TelemetryError(
-                    TelemetryReasonCode.INVALID_INPUT,
-                    "%s must be a str" % (label,),
-                )
+            validate_observation_ref_text(value, label)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -622,8 +664,12 @@ class TopologyPromotion:
     can never upgrade provenance).
 
     ``source_display`` carries either the raw source node id or its
-    deterministic pseudonym (spec/architecture §20) depending on the
-    ``pseudonymize`` choice at authorization time."""
+    deterministic pseudonym (spec/architecture §20) as the BORN-BOUND
+    promotion authorization's ``source_disclosure`` mode permits
+    (``identity`` -> raw NodeID; ``pseudonymous`` -> the pseudonym;
+    ``policy.promotion`` derives the mode, the decision's digest covers
+    it, and no caller-side flag exists to override it).
+    """
 
     promotion_id: str
     observation_id: str
@@ -673,6 +719,13 @@ class TopologyPromotion:
                 TelemetryReasonCode.INVALID_INPUT,
                 "matched_rule_ids must be a tuple of strings",
             )
+        # LOCK-023 is universal for every free-text telemetry field:
+        # each matched rule id is validated reference text (type,
+        # length, credential-like rejection), exactly like the other
+        # textual fields of the family (PR #27 Architect review
+        # blocker 1).
+        for rule_id in self.matched_rule_ids:
+            validate_observation_ref_text(rule_id, "matched rule id")
         try:
             parse_instant(self.authorized_at)
         except TemporalError as error:
@@ -736,6 +789,7 @@ __all__ = [
     "TelemetrySubjectKind",
     "TelemetrySourceClass",
     "PrivacyClass",
+    "SourceDisclosure",
     "PRIVACY_VISIBILITY",
     "ValidityState",
     "TelemetryMetric",
