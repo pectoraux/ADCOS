@@ -61,6 +61,14 @@ the WORK-027 work-item contract to discriminating cases:
   decision can never terminate or mutate
   an established WORK-012 session
   (new-demand admission only)           -> case_35
+- REGRESSION (PR #28 B2 round 2): post-
+  recovery recording requires an
+  independently verifiable fresh-authority
+  condition (digest-bound evaluation
+  instant >= recovery instant); the exact
+  old-object restamp is rejected and
+  multi-cycle laundering fails closed
+                                         -> case_36
 - deferred sync queue replays REAL
   telemetry into a REAL TelemetryStore               -> case_20
 - power simulation: solar day/night cycle,
@@ -1466,8 +1474,9 @@ def case_19_offline_policy_cache_grace() -> Result:
     except EnergyError:
         pass
     # Recovery closes the offline-honor channel (the PR #28 review B2
-    # correction): the same recorded decision is REJECTED until it is
-    # revalidated and re-recorded by the online policy authority.
+    # correction): the same recorded decision is REJECTED until its
+    # demand is freshly re-evaluated by the online policy authority
+    # and the NEW decision recorded.
     cache.mark_recovered(now="2026-09-01T13:11:00Z")
     after = cache.honor(decision, now="2026-09-01T13:12:00Z")
     if after.honored or after.reason != HonorResult.REAUTH_REQUIRED:
@@ -1475,12 +1484,37 @@ def case_19_offline_policy_cache_grace() -> Result:
             "pre-recovery verdict must be rejected after recovery (offline "
             "honor channel closed): %r" % (after,)
         )
-    # The online authority re-issues the decision and the caller
-    # re-records it: the revalidated verdict replays again.
-    cache.record_decision(decision, now="2026-09-01T13:12:30Z")
-    revalidated = cache.honor(decision, now="2026-09-01T13:13:00Z")
+    # PR #28 review B2 (round 2 -- the authority boundary): the
+    # attacker's move is to re-record the EXACT pre-recovery ALLOW
+    # object.  That must be REJECTED: its digest-bound evaluation
+    # instant predates the recovery, and old bytes never re-open the
+    # offline-honor channel (revalidation is a fresh evaluation, not
+    # a re-record of the old object).
+    try:
+        cache.record_decision(decision, now="2026-09-01T13:12:30Z")
+        problems.append("exact pre-recovery decision object re-recorded after recovery")
+    except EnergyError as error:
+        if error.reason != EnergyReasonCode.OFFLINE_REAUTH_REQUIRED:
+            problems.append("wrong restamp rejection reason: %r" % (error.reason,))
+    still_closed = cache.honor(decision, now="2026-09-01T13:12:45Z")
+    if still_closed.honored or still_closed.reason != HonorResult.REAUTH_REQUIRED:
+        problems.append("failed restamp re-opened the channel: %r" % (still_closed,))
+    # The lawful path: the online authority freshly re-evaluates the
+    # demand after the recovery (a NEW decision id) and the caller
+    # records it -- the revalidated verdict replays again.
+    reissue_eval = engine.evaluate(
+        policy_set,
+        PolicyContext(
+            operation=Operation.RESOURCE_RESERVE, requester_node_id=_NODE_A,
+            evaluation_instant="2026-09-01T13:12:30Z",
+        ),
+    )
+    if reissue_eval.decision is None or reissue_eval.decision.decision_id == decision.decision_id:
+        return fail(name, "fixture broken: the fresh evaluation must mint a new id")
+    cache.record_decision(reissue_eval.decision, now="2026-09-01T13:12:30Z")
+    revalidated = cache.honor(reissue_eval.decision, now="2026-09-01T13:13:00Z")
     if not revalidated.honored or revalidated.effect != Effect.ALLOW:
-        problems.append("re-recorded (revalidated) verdict not honored: %r" % (revalidated,))
+        problems.append("freshly re-evaluated verdict not honored: %r" % (revalidated,))
     try:
         cache.mark_recovered(now="2026-09-01T13:14:00Z")
         problems.append("double recovery accepted")
@@ -1492,7 +1526,8 @@ def case_19_offline_policy_cache_grace() -> Result:
         name,
         "genuine WORK-010 verdicts: digest-bound, grace-bounded, fail-closed; "
         "recording closed while partitioned; recovery closes the honor channel "
-        "until online revalidation",
+        "until a FRESH online re-evaluation (the exact old-object restamp is "
+        "rejected)",
     )
 
 
@@ -2173,19 +2208,41 @@ def case_33_offline_cache_never_learns_partition_decisions() -> Result:
     still = cache.honor(first, now="2026-09-01T12:31:00Z")
     if not still.honored or still.effect != Effect.ALLOW or still.remaining_grace_seconds != 2340:
         problems.append("pre-partition decision no longer honored within grace: %r" % (still,))
-    # After recovery the recording channel re-opens: the online
-    # authority re-issues the second decision and the caller records
-    # it (the only lawful path for a partition-minted decision).
+    # After recovery the recording channel re-opens ONLY for freshly
+    # evaluated decisions.  The partition-minted object (evaluated
+    # 12:30, during the outage) is REJECTED: it was never learnable
+    # during the partition, and re-recording its old bytes after the
+    # recovery is laundering, not revalidation -- the demand must be
+    # freshly re-evaluated by the online authority.
     cache.mark_recovered(now="2026-09-01T12:40:00Z")
-    cache.record_decision(second, now="2026-09-01T12:40:00Z")
-    if not cache.honor(second, now="2026-09-01T12:41:00Z").honored:
-        problems.append("post-recovery recording of the genuine decision not honored")
+    try:
+        cache.record_decision(second, now="2026-09-01T12:40:30Z")
+        problems.append(
+            "partition-minted decision recorded after recovery (never freshly evaluated)"
+        )
+    except EnergyError as error:
+        if error.reason != EnergyReasonCode.OFFLINE_REAUTH_REQUIRED:
+            problems.append("wrong rejection reason: %r" % (error.reason,))
+    if cache.honor(second, now="2026-09-01T12:41:00Z").honored:
+        problems.append("partition-minted decision honored after the failed re-record")
+    # The only lawful path: the authority freshly re-evaluates the
+    # demand (a NEW decision id) and the caller records that.
+    third = _genuine_policy_decision(engine, policy_set, "2026-09-01T12:45:00Z")
+    if third.decision_id in (first.decision_id, second.decision_id):
+        return fail(name, "fixture broken: the fresh evaluation must mint a new id")
+    cache.record_decision(third, now="2026-09-01T12:45:00Z")
+    if not cache.honor(third, now="2026-09-01T12:46:00Z").honored:
+        problems.append("fresh post-recovery decision not honored")
+    # The pre-recovery decision stays closed after the recovery.
+    if cache.honor(first, now="2026-09-01T12:46:00Z").reason != HonorResult.REAUTH_REQUIRED:
+        problems.append("pre-recovery decision not rejected after recovery")
     if problems:
         return fail(name, "; ".join(problems))
     return ok(
         name,
         "recording closed while partitioned; partition-minted decisions never "
-        "learned/honored; pre-partition verdict still honored within grace",
+        "learned -- not even after recovery (a fresh evaluation is required); "
+        "pre-partition verdict still honored within grace",
     )
 
 
@@ -2194,9 +2251,10 @@ def case_34_recovery_closes_offline_honor_channel() -> Result:
     # PR #28 review B2: mark_recovered must actually CLOSE the offline
     # honor channel.  Explicit lifecycle: ONLINE -> OFFLINE_GRACE ->
     # ONLINE_REAUTH_REQUIRED; a previously cached decision is rejected
-    # after recovery until it has been revalidated/recorded by the
-    # online policy authority, and a fresh post-recovery decision is
-    # usable immediately.
+    # after recovery until its demand is freshly re-evaluated by the
+    # online policy authority (the NEW decision recorded; re-recording
+    # the exact old object is rejected), and a fresh post-recovery
+    # decision is usable immediately.
     rule = PolicyRule(
         rule_id="allow-reserve", domain=PolicyDomain.RESOURCE,
         effect=Effect.ALLOW, operation=Operation.RESOURCE_RESERVE,
@@ -2222,6 +2280,18 @@ def case_34_recovery_closes_offline_honor_channel() -> Result:
     # This is the discriminating B2 check -- at the reviewed commit the
     # cached verdict stayed honored indefinitely after recovery.
     cache.mark_recovered(now="2026-09-01T13:10:00Z")
+    # THE LAUNDERING ATTACK (PR #28 review B2, round 2): re-record the
+    # EXACT pre-recovery ALLOW -- identical bytes, old evaluation
+    # instant.  At the reviewed commit this re-stamped the entry into
+    # the new authorization epoch and honor() then succeeded
+    # (old ALLOW -> recover -> record(old ALLOW) -> new epoch ->
+    # honored).  The restamp itself must be REJECTED.
+    try:
+        cache.record_decision(cached, now="2026-09-01T13:10:30Z")
+        problems.append("exact pre-recovery ALLOW re-recorded after recovery (epoch laundering)")
+    except EnergyError as error:
+        if error.reason != EnergyReasonCode.OFFLINE_REAUTH_REQUIRED:
+            problems.append("wrong restamp rejection reason: %r" % (error.reason,))
     rejected = cache.honor(cached, now="2026-09-01T13:11:00Z")
     if rejected.honored or rejected.reason != HonorResult.REAUTH_REQUIRED:
         return fail(
@@ -2229,7 +2299,8 @@ def case_34_recovery_closes_offline_honor_channel() -> Result:
             "pre-recovery decision honored after recovery (the offline-honor "
             "channel never closed): %r" % (rejected,),
         )
-    # A FRESH genuine decision recorded after recovery = usable.
+    # A FRESH genuine decision (digest-bound evaluation instant at or
+    # after the recovery) recorded after recovery = usable.
     fresh = _genuine_policy_decision(engine, policy_set, "2026-09-01T13:11:30Z")
     if fresh.decision_id == cached.decision_id:
         return fail(name, "fixture broken: fresh decision must differ from the cached one")
@@ -2278,8 +2349,9 @@ def case_34_recovery_closes_offline_honor_channel() -> Result:
         return fail(name, "; ".join(problems))
     return ok(
         name,
-        "explicit lifecycle; recovery closes the honor channel until online "
-        "revalidation; stale verdicts never resurrected",
+        "explicit lifecycle; recovery closes the honor channel until a FRESH "
+        "online re-evaluation; the exact old-object restamp is rejected; "
+        "stale verdicts never resurrected",
     )
 
 
@@ -2419,6 +2491,110 @@ def case_35_energy_never_terminates_established_sessions() -> Result:
     )
 
 
+def case_36_offline_laundering_multicycle() -> Result:
+    name = "case_36_offline_laundering_multicycle"
+    # PR #28 review B2 (round 2): the multi-cycle laundering
+    # regression.  The directed proof sequence --
+    #   ALLOW recorded before recovery -> recovery -> attacker
+    #   re-records the exact old ALLOW -> REAUTH_REQUIRED -> genuine
+    #   fresh WORK-010 decision -> record/honor succeeds
+    # -- and then the laundering loop across TWO full
+    # partition/recovery cycles: recovery -> failed old-decision
+    # restamp -> new partition -> the old decision still fails closed
+    # (and a second recovery changes nothing).  Old bytes can never
+    # re-enter the cache; every epoch's fresh evaluation works.
+    rule = PolicyRule(
+        rule_id="allow-reserve", domain=PolicyDomain.RESOURCE,
+        effect=Effect.ALLOW, operation=Operation.RESOURCE_RESERVE,
+    )
+    policy_set = PolicySet(
+        set_id="ps-w027", version=1, rules=(rule,), issuer_node_id=_ISSUER,
+        valid_from="2026-01-01T00:00:00Z", valid_until="2028-01-01T00:00:00Z",
+    )
+    engine = PolicyEngine()
+    old = _genuine_policy_decision(engine, policy_set, _NOW)
+    cache = OfflinePolicyCache(_profile(grace=3600))
+    problems: List[str] = []
+    # Cycle 1 -- UP: the genuine ALLOW is recorded and honored.
+    cache.record_decision(old, now=_NOW)
+    if not cache.honor(old, now=_NOW).honored:
+        return fail(name, "fixture broken: the old ALLOW must be honored while UP")
+    cache.mark_partition(now="2026-09-01T12:10:00Z")
+    if not cache.honor(old, now="2026-09-01T13:00:00Z").honored:
+        return fail(name, "fixture broken: grace-bounded honor before recovery")
+    # Recovery: the restamp of the EXACT old object is REJECTED and
+    # the channel stays closed for it.
+    cache.mark_recovered(now="2026-09-01T13:10:00Z")
+    try:
+        cache.record_decision(old, now="2026-09-01T13:10:30Z")
+        problems.append("cycle-1 restamp of the exact old ALLOW accepted (laundering)")
+    except EnergyError as error:
+        if error.reason != EnergyReasonCode.OFFLINE_REAUTH_REQUIRED:
+            problems.append("wrong cycle-1 restamp reason: %r" % (error.reason,))
+    if cache.honor(old, now="2026-09-01T13:11:00Z").reason != HonorResult.REAUTH_REQUIRED:
+        problems.append("old ALLOW not rejected after the cycle-1 recovery")
+    # The genuine fresh WORK-010 decision (freshly evaluated at/after
+    # the recovery): record + honor succeed.
+    fresh1 = _genuine_policy_decision(engine, policy_set, "2026-09-01T13:12:00Z")
+    if fresh1.decision_id == old.decision_id:
+        return fail(name, "fixture broken: fresh evaluation minted the old id")
+    cache.record_decision(fresh1, now="2026-09-01T13:12:00Z")
+    if not cache.honor(fresh1, now="2026-09-01T13:13:00Z").honored:
+        problems.append("cycle-1 fresh decision not honored")
+    # Cycle 2 -- a NEW partition: the old decision still fails closed
+    # (the failed restamp did not launder it), recording stays closed
+    # (B1 holds in every cycle), and the current-epoch decision keeps
+    # its grace-bounded honor.
+    cache.mark_partition(now="2026-09-01T14:00:00Z")
+    if cache.honor(old, now="2026-09-01T14:01:00Z").reason != HonorResult.REAUTH_REQUIRED:
+        problems.append("old ALLOW resurrected by the new partition (laundered)")
+    try:
+        cache.record_decision(old, now="2026-09-01T14:02:00Z")
+        problems.append("recording accepted during the new partition (B1 broken in cycle 2)")
+    except EnergyError as error:
+        if error.reason != EnergyReasonCode.OFFLINE_RECORD_CLOSED:
+            problems.append("wrong cycle-2 partition rejection: %r" % (error.reason,))
+    survivor = cache.honor(fresh1, now="2026-09-01T14:01:00Z")
+    if not survivor.honored or survivor.remaining_grace_seconds != 3540:
+        problems.append("cycle-1 fresh decision lost its grace-bounded honor: %r" % (survivor,))
+    # Second recovery: the old object is rejected AGAIN (freshness is
+    # anchored at the LATEST recovery), the cycle-1 fresh decision is
+    # closed too (every recovery closes the channel for ALL prior
+    # material), and a new fresh evaluation works.
+    cache.mark_recovered(now="2026-09-01T15:00:00Z")
+    if cache.authorization_epoch() != 2:
+        problems.append("second recovery must advance the epoch to 2")
+    try:
+        cache.record_decision(old, now="2026-09-01T15:00:30Z")
+        problems.append("cycle-2 restamp of the exact old ALLOW accepted (laundering)")
+    except EnergyError as error:
+        if error.reason != EnergyReasonCode.OFFLINE_REAUTH_REQUIRED:
+            problems.append("wrong cycle-2 restamp reason: %r" % (error.reason,))
+    if cache.honor(old, now="2026-09-01T15:01:00Z").reason != HonorResult.REAUTH_REQUIRED:
+        problems.append("old ALLOW not rejected after the second recovery")
+    if cache.honor(fresh1, now="2026-09-01T15:01:00Z").reason != HonorResult.REAUTH_REQUIRED:
+        problems.append("cycle-1 fresh decision survived the second recovery")
+    fresh2 = _genuine_policy_decision(engine, policy_set, "2026-09-01T15:02:00Z")
+    cache.record_decision(fresh2, now="2026-09-01T15:02:00Z")
+    if not cache.honor(fresh2, now="2026-09-01T15:03:00Z").honored:
+        problems.append("cycle-2 fresh decision not honored")
+    # The exact recovery-instant boundary: a decision evaluated AT the
+    # recovery instant is freshly evaluated (accepted).
+    boundary = _genuine_policy_decision(engine, policy_set, "2026-09-01T15:00:00Z")
+    if boundary.decision_id in (old.decision_id, fresh1.decision_id, fresh2.decision_id):
+        return fail(name, "fixture broken: the boundary evaluation must mint a new id")
+    cache.record_decision(boundary, now="2026-09-01T15:04:00Z")
+    if not cache.honor(boundary, now="2026-09-01T15:05:00Z").honored:
+        problems.append("decision evaluated exactly at the recovery instant rejected")
+    if problems:
+        return fail(name, "; ".join(problems))
+    return ok(
+        name,
+        "the exact old-object restamp is rejected in every cycle; old bytes never "
+        "re-enter the cache; each epoch's fresh evaluation records and honors",
+    )
+
+
 # --------------------------------------------------------------------------
 # Runner
 # --------------------------------------------------------------------------
@@ -2459,6 +2635,7 @@ CASES = [
     case_33_offline_cache_never_learns_partition_decisions,
     case_34_recovery_closes_offline_honor_channel,
     case_35_energy_never_terminates_established_sessions,
+    case_36_offline_laundering_multicycle,
 ]
 
 

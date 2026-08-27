@@ -96,16 +96,19 @@ closed, explicit reasons: `shed-droppable`, `shed-deferrable`,
   correction): **ONLINE** (recording open; recorded verdicts replay
   while UP) → **OFFLINE_GRACE** (partition: recording CLOSED -- a
   decision minted during the partition is never learnable by the
-  cache, it must be obtained from the online policy authority after
-  recovery; recorded verdicts honored within the grace window only)
-  → **ONLINE_REAUTH_REQUIRED** (recovery: the offline-honor channel
-  CLOSES -- every pre-recovery decision is rejected until it has
-  been revalidated and re-recorded by the online authority;
-  post-recovery recordings -- including an identical re-record of a
-  pre-recovery decision the authority re-issued -- replay
-  normally). Unknown decisions, tampered decisions, and expired
-  verdicts fail closed throughout; a pre-recovery decision is never
-  resurrected, not even by a subsequent partition.
+  cache; the demand must be freshly re-evaluated by the online
+  policy authority after recovery; recorded verdicts honored within
+  the grace window only) → **ONLINE_REAUTH_REQUIRED** (recovery:
+  the offline-honor channel CLOSES -- every pre-recovery decision
+  is rejected until its demand is freshly re-evaluated by the
+  online authority and the NEW decision recorded; recording
+  re-opens only for freshly-evaluated decisions: the digest-bound
+  evaluation instant must be at or after the recovery instant, so
+  re-recording the exact pre-recovery decision object -- old bytes
+  carrying the old evaluation instant -- is REJECTED). Unknown
+  decisions, tampered decisions, and expired verdicts fail closed
+  throughout; a pre-recovery decision is never resurrected, not
+  even by a subsequent partition.
 - `DeferredSyncQueue` -- §16 delayed synchronization: telemetry
   observations recorded while offline are queued idempotently by
   observation id and replayed into a real `TelemetryStore` on

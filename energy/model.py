@@ -241,9 +241,13 @@ class OfflineCacheLifecycle:
       remain honored within the configured grace window only;
     - ``online-reauth-required`` -- recovered: the offline-honor
       channel is CLOSED for every decision recorded before the
-      recovery (each must be revalidated and re-recorded by the
-      online policy authority); recording is OPEN again and
-      post-recovery recordings replay normally.
+      recovery (each demand must be freshly re-evaluated by the
+      online policy authority and the NEW decision recorded);
+      recording is OPEN again, but ONLY for freshly-evaluated
+      decisions -- the digest-bound evaluation instant must be at or
+      after the recovery instant, so re-recording the exact
+      pre-recovery decision object is rejected (old bytes never
+      re-open the channel; the PR #28 review B2 authority boundary).
 
     The cache enters ``online-reauth-required`` on every recovery and
     stays there until the next partition: after a partition/recovery

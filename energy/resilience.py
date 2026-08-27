@@ -643,11 +643,17 @@ class OfflinePolicyCache:
     - ``ONLINE_REAUTH_REQUIRED`` (``mark_recovered``): the
       offline-honor channel is CLOSED for every decision recorded
       before the recovery -- each is rejected
-      (``offline-reauth-required``) until it has been revalidated and
-      re-recorded by the online policy authority; recording is OPEN
-      again, and post-recovery recordings (including an identical
-      re-record of a pre-recovery decision, i.e. the authority
-      re-issued it) replay normally.
+      (``offline-reauth-required``) until the demand is freshly
+      re-evaluated by the online policy authority and the NEW
+      decision recorded; recording is OPEN again, but ONLY for
+      freshly-evaluated decisions -- the decision's digest-bound
+      evaluation instant must be at or after the recovery instant.
+      Re-recording the EXACT pre-recovery decision object (identical
+      bytes, old evaluation instant) is REJECTED: the cache never
+      re-opens the offline-honor channel for old bytes -- the PR #28
+      review B2 authority boundary (revalidation is a fresh
+      evaluation with a new decision id, never a re-record of the
+      old object).
 
     The cache NEVER evaluates policy (WORK-010 stays the sole policy
     authority) -- it replays recorded verdicts, and everything it
@@ -661,7 +667,9 @@ class OfflinePolicyCache:
       being honored;
     - a decision recorded before the last recovery is never
       resurrected -- not after recovery, and not by a subsequent
-      partition (partitioning cannot launder a stale verdict).
+      partition (partitioning cannot launder a stale verdict), and
+      not by re-recording the old object (post-recovery recording
+      demands a fresh evaluation instant at/after the recovery);
 
     Every recorded decision carries the authorization epoch it was
     recorded in; :meth:`mark_recovered` advances the epoch, which is
@@ -680,6 +688,12 @@ class OfflinePolicyCache:
         # decision_id -> (decision, recorded_at, authorization_epoch)
         self._decisions: Dict[str, Tuple[PolicyDecision, str, int]] = {}
         self._partition_started_at: Optional[str] = None
+        # The instant of the last recovery (None until the first
+        # recovery): the freshness anchor for post-recovery
+        # recording -- a recorded decision must carry a digest-bound
+        # evaluation instant at or after it (the online policy
+        # authority freshly evaluated the demand after coming back).
+        self._recovered_at: Optional[str] = None
         # The authorization epoch: 0 until the first recovery, +1 on
         # every recovery.  A decision is honorable through the offline
         # path only while its recording epoch == the current epoch.
@@ -691,17 +705,27 @@ class OfflinePolicyCache:
         """Record a genuine WORK-010 decision observed while ONLINE
         (the recording channel is CLOSED while partitioned -- a
         decision minted during the partition is never learnable by
-        the cache; new policy decisions must be obtained from the
+        the cache; the demand must be freshly re-evaluated by the
         online policy authority after recovery).
 
         The decision id MUST bind to the decision's canonical bytes
         (tamper evidence); the decision's evaluation instant must not
-        be in the future.  Returns the decision id.  Recording a
-        decision that is already recorded with IDENTICAL content
-        re-stamps it (recorded-at + current authorization epoch):
-        after a recovery this is the online-revalidation path -- the
-        authority re-issued the decision and the cache honors it
-        again."""
+        be in the future.  Returns the decision id.
+
+        After a recovery (authorization epoch > 0) recording
+        additionally requires an independently verifiable
+        FRESH-authority condition (the PR #28 review B2 authority
+        boundary): the decision's digest-bound evaluation instant
+        must be at or after the recovery instant -- i.e. the online
+        policy authority freshly evaluated the demand after coming
+        back.  Re-recording the EXACT pre-recovery decision object is
+        REJECTED (``offline-reauth-required``): its content -- hence
+        its id -- predates the recovery, and old bytes never re-open
+        the offline-honor channel (revalidation is a fresh
+        evaluation, a new decision id).  Recording a decision
+        already recorded with IDENTICAL content in the CURRENT
+        authorization epoch is an idempotent refresh (recorded-at
+        update only)."""
         if self._partition_started_at is not None:
             raise EnergyError(
                 EnergyReasonCode.OFFLINE_RECORD_CLOSED,
@@ -734,12 +758,62 @@ class OfflinePolicyCache:
                 "decision %r is future-dated relative to the recording instant "
                 "%r" % (decision.decision_id[:16], now),
             )
+        if self._authorization_epoch > 0:
+            # Post-recovery: an independently verifiable
+            # fresh-authority condition (PR #28 review B2).  The
+            # evaluation instant is digest-bound inside the decision
+            # content, so a decision that passes this check provably
+            # was minted at/after the recovery -- the online policy
+            # authority freshly evaluated the demand.  The exact old
+            # decision object cannot pass: its bytes (and therefore
+            # its id) carry the old evaluation instant, and no
+            # re-stamp is possible without breaking the digest
+            # binding.
+            recovered_at = self._recovered_at
+            if recovered_at is None:  # defensive: epoch > 0 implies a recovery
+                raise EnergyError(
+                    EnergyReasonCode.ILLEGAL_STATE,
+                    "authorization epoch %d without a recovery instant"
+                    % (self._authorization_epoch,),
+                )
+            if parse_instant(decision.evaluation_instant) < parse_instant(recovered_at):
+                raise EnergyError(
+                    EnergyReasonCode.OFFLINE_REAUTH_REQUIRED,
+                    "decision %r was evaluated at %r, BEFORE the last recovery "
+                    "at %r (authorization epoch %d): post-recovery recording "
+                    "requires a decision FRESHLY evaluated by the online "
+                    "policy authority -- re-recording the exact pre-recovery "
+                    "decision object never re-opens the offline-honor channel"
+                    % (
+                        decision.decision_id[:16],
+                        decision.evaluation_instant,
+                        recovered_at,
+                        self._authorization_epoch,
+                    ),
+                )
         existing = self._decisions.get(decision.decision_id)
         if existing is not None:
             if existing[0] == decision:
-                # Identical content: re-stamp (the online-revalidation
-                # path after a recovery; a no-op refresh while the
-                # epoch is unchanged).
+                if existing[2] < self._authorization_epoch:
+                    # Defense in depth (the freshness gate above
+                    # already rejects pre-recovery bytes): an entry
+                    # from an older epoch can NEVER be re-stamped
+                    # into the current one.
+                    raise EnergyError(
+                        EnergyReasonCode.OFFLINE_REAUTH_REQUIRED,
+                        "decision %r is recorded from authorization epoch %d "
+                        "(before the last recovery): re-stamping it into "
+                        "epoch %d is rejected -- old bytes never re-open the "
+                        "offline-honor channel; only a freshly evaluated "
+                        "decision (new id) may be recorded"
+                        % (
+                            decision.decision_id[:16],
+                            existing[2],
+                            self._authorization_epoch,
+                        ),
+                    )
+                # Identical content in the CURRENT epoch: an
+                # idempotent refresh (recorded-at update only).
                 self._decisions[decision.decision_id] = (
                     decision,
                     now,
@@ -779,8 +853,11 @@ class OfflinePolicyCache:
         """The upstream recovered at ``now``: the lifecycle enters
         ONLINE_REAUTH_REQUIRED -- the offline-honor channel CLOSES
         for every decision recorded before the recovery (each is
-        rejected until revalidated and re-recorded by the online
-        policy authority); recording is OPEN again."""
+        rejected until its demand is freshly re-evaluated by the
+        online policy authority and the NEW decision recorded);
+        recording re-opens ONLY for freshly-evaluated decisions (the
+        digest-bound evaluation instant must be at or after ``now`` --
+        re-recording old bytes is rejected, never revalidation)."""
         validate_instant(now, label="now")
         if self._partition_started_at is None:
             raise EnergyError(
@@ -788,6 +865,7 @@ class OfflinePolicyCache:
                 "no partition is open (nothing to recover from)",
             )
         self._partition_started_at = None
+        self._recovered_at = now
         self._authorization_epoch += 1
 
     # -- the honor query -----------------------------------------------------------
@@ -802,8 +880,9 @@ class OfflinePolicyCache:
           before the last recovery is rejected
           (``offline-reauth-required``) -- the offline-honor channel
           closed at recovery and only the online policy authority
-          re-opens it (by re-issuing the decision, which the caller
-          re-records);
+          re-opens it (by freshly re-evaluating the demand and
+          issuing a NEW decision, which the caller records -- never
+          by re-recording the old object);
         - OFFLINE_GRACE: the same, additionally bounded by the grace
           window ``[partition_start, partition_start + grace]``; a
           decision recorded before the last recovery is NOT
@@ -852,9 +931,12 @@ class OfflinePolicyCache:
         if recorded_epoch < self._authorization_epoch:
             # The offline-honor channel closed at the last recovery:
             # the decision predates it and only the online policy
-            # authority re-opens the channel (revalidation +
-            # re-record).  This also holds during a NEW partition --
-            # partitioning cannot launder a stale verdict.
+            # authority re-opens the channel (a fresh re-evaluation +
+            # record of the NEW decision).  This also holds during a
+            # NEW partition -- partitioning cannot launder a stale
+            # verdict (and post-recovery recording rejects the old
+            # bytes outright, so the entry can never be re-stamped
+            # into the current epoch).
             return HonorResult(
                 honored=False,
                 effect="",
