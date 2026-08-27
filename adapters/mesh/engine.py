@@ -14,6 +14,11 @@ Every mutating operation is split into a ``_validate_*`` phase
 (step charge, fail-closed checks, content derivation -- NO
 mutation) and a ``_commit_*`` phase (infallible local bookkeeping),
 mirroring the accepted WORK-022 transactional discipline.  The
+identity-derivation nonce (``_sequence``, used to derive allocation
+and bearer refs) advances ONLY inside ``_commit_*``: validation
+derives refs from a *candidate* sequence, so a failed validation or
+a commit-phase defensive failure consumes no derivation state and a
+failed operation is unobservable in every future derived ref.  The
 forwarding discipline is fail-closed at every seam:
 
 * the LOOP GUARD fires BEFORE any enqueue/forward commit (a bundle
@@ -219,7 +224,10 @@ class ReferenceMeshEngine(MeshContract):
             )
         self._queue_config = queue_config
         self._open = False
-        self._sequence = 0  # bearer/allocation derivation nonce
+        # Bearer/allocation derivation nonce.  Advances ONLY inside
+        # _commit_allocate/_commit_bind_session (never in a _validate_
+        # phase): failed operations consume no derivation state.
+        self._sequence = 0
         # Relay links keyed by link_ref (insertion order = provision
         # order; deterministic).
         self._links = {}
@@ -639,7 +647,7 @@ class ReferenceMeshEngine(MeshContract):
         kind: str,
         quantity_base: int,
         purpose: str,
-    ) -> MeshAllocation:
+    ) -> Tuple[MeshAllocation, int]:
         context.charge(STEP_CHARGES["allocate"])
         self._require_open()
         if not isinstance(kind, str) or not kind:
@@ -691,25 +699,36 @@ class ReferenceMeshEngine(MeshContract):
                     self._queue_config.max_queued_bytes,
                 ),
             )
-        self._sequence += 1
+        # Derive from a CANDIDATE sequence: the nonce advances only
+        # in the commit phase, so a failed validation (or a
+        # commit-phase defensive failure) leaves the derivation
+        # state untouched and failed operations are unobservable in
+        # future derived refs (the PR #24 architectural-review
+        # correction).
+        candidate_sequence = self._sequence + 1
         allocation_ref = derive_allocation_ref(
-            kind, quantity_base, purpose, self._sequence
+            kind, quantity_base, purpose, candidate_sequence
         )
-        return MeshAllocation(
+        allocation = MeshAllocation(
             allocation_ref=allocation_ref,
             kind=kind,
             quantity_base=quantity_base,
             purpose=purpose,
             state=AllocationState.RESERVED,
         )
+        return allocation, candidate_sequence
 
-    def _commit_allocate(self, allocation: MeshAllocation) -> None:
+    def _commit_allocate(
+        self, allocation: MeshAllocation, candidate_sequence: int
+    ) -> None:
         if allocation.allocation_ref in self._allocations:  # defensive
             raise MeshError(
                 MeshReasonCode.ILLEGAL_STATE,
                 "allocation ref collision (deterministic derivation "
                 "broken)",
             )
+        # The sequence advances ONLY here, in the commit phase.
+        self._sequence = candidate_sequence
         self._allocations[allocation.allocation_ref] = _AllocationEntry(
             allocation
         )
@@ -722,10 +741,10 @@ class ReferenceMeshEngine(MeshContract):
         quantity_base: int,
         purpose: str,
     ) -> MeshAllocation:
-        allocation = self._validate_allocate(
+        allocation, candidate_sequence = self._validate_allocate(
             context, kind=kind, quantity_base=quantity_base, purpose=purpose
         )
-        self._commit_allocate(allocation)
+        self._commit_allocate(allocation, candidate_sequence)
         return allocation
 
     def _validate_release(
@@ -763,7 +782,7 @@ class ReferenceMeshEngine(MeshContract):
         session_id: str,
         route_ref: str,
         requirements: Optional[Mapping[str, Any]],
-    ) -> Tuple[MeshBinding, int]:
+    ) -> Tuple[MeshBinding, int, int]:
         context.charge(STEP_CHARGES["bind_session"])
         self._require_open()
         if not isinstance(session_id, str) or not session_id:
@@ -802,29 +821,38 @@ class ReferenceMeshEngine(MeshContract):
                     "multipath constituent-path shape; the same route "
                     "may not)",
                 )
-        self._sequence += 1
-        bearer_ref = derive_bearer_ref(session_id, route_ref, self._sequence)
+        # Derive from a CANDIDATE sequence: the nonce advances only
+        # in the commit phase, so a failed validation (or a
+        # commit-phase defensive failure) leaves the derivation
+        # state untouched and future derived refs are exactly what
+        # they would have been had the failed operation never
+        # occurred (the PR #24 architectural-review correction).
+        candidate_sequence = self._sequence + 1
+        bearer_ref = derive_bearer_ref(session_id, route_ref, candidate_sequence)
         binding_id = derive_binding_id(session_id, bearer_ref)
         # The binding's relay-technology classification is the first
         # hop link's classification (registry DATA; the same contract
         # path serves every technology).
         first_hop_link = self._links[route.hop_link_refs[0]]
-        return MeshBinding(
+        binding = MeshBinding(
             session_id=session_id,
             bearer_ref=bearer_ref,
             binding_id=binding_id,
             path_ref=route_ref,
             technology=first_hop_link.view.technology,
-        ), hop_budget
+        )
+        return binding, hop_budget, candidate_sequence
 
     def _commit_bind_session(
-        self, binding: MeshBinding, hop_budget: int
+        self, binding: MeshBinding, hop_budget: int, candidate_sequence: int
     ) -> None:
         if binding.bearer_ref in self._bindings:  # defensive re-assert
             raise MeshError(
                 MeshReasonCode.ILLEGAL_STATE,
                 "bearer ref collision (deterministic derivation broken)",
             )
+        # The sequence advances ONLY here, in the commit phase.
+        self._sequence = candidate_sequence
         self._bindings[binding.bearer_ref] = _BindingEntry(binding, hop_budget)
 
     def bind_session(
@@ -835,13 +863,13 @@ class ReferenceMeshEngine(MeshContract):
         route_ref: str,
         requirements: Optional[Mapping[str, Any]] = None,
     ) -> MeshBinding:
-        binding, hop_budget = self._validate_bind_session(
+        binding, hop_budget, candidate_sequence = self._validate_bind_session(
             context,
             session_id=session_id,
             route_ref=route_ref,
             requirements=requirements,
         )
-        self._commit_bind_session(binding, hop_budget)
+        self._commit_bind_session(binding, hop_budget, candidate_sequence)
         return binding
 
     def _validate_unbind_session(

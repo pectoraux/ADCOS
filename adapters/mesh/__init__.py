@@ -96,7 +96,9 @@ Verification: ``python3 tools/mesh_selftest.py`` (the WORK-023
 selftest battery: multi-hop construction, evidence preservation,
 partition/recovery, queue exhaustion/expiry, duplicate replay,
 loop prevention with no-state-change proofs, implementation swap,
-IAB/sidelink DATA seam, determinism, frozen-spec identity).
+IAB/sidelink DATA seam, determinism, frozen-spec identity, and
+validate/commit sequence discipline -- failed operations consume
+no identity-derivation state).
 """
 
 from __future__ import annotations

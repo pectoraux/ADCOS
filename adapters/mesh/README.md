@@ -164,7 +164,7 @@ state merely because the implementation identity changed.
 
 ## Verification
 
-`python3 tools/mesh_selftest.py` — the 37-case battery covering the
+`python3 tools/mesh_selftest.py` — the 38-case battery covering the
 frozen handoff's verification matrix: 2-hop and 3-hop ordinary-Path
 construction (including the real WORK-011 engine composition),
 same-session continuity across relay changes, reporter/evidence
@@ -176,3 +176,14 @@ live bindings preserved, IAB/sidelink external identifiers as DATA,
 the WORK-016 nine-op SDK bridge, cross-implementation byte identity,
 determinism across repeated runs and PYTHONHASHSEED variation, and
 frozen `spec/` byte-identity.
+
+The validate/commit sequence discipline (case 38, the PR #24
+architectural-review regression): the engine's identity-derivation
+nonce advances ONLY inside `_commit_allocate`/`_commit_bind_session`
+— validation derives allocation/bearer refs from a *candidate*
+sequence. Failed operations (validate-phase rejections and
+commit-phase faults alike) therefore consume no derivation state:
+canonical manager bytes stay byte-identical, the nonce is
+unchanged, and the next successful derived refs are byte-identical
+to a clean twin run — a failed operation is unobservable in every
+future derived ref.

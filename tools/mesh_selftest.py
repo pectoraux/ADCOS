@@ -35,7 +35,13 @@ frozen WORK-023 handoff's required verification matrix:
 * full determinism across repeated runs and PYTHONHASHSEED
   variation (cases 33, 34);
 * frozen ``spec/`` byte-identity and family/standards boundary
-  audits (cases 31, 32, 35).
+  audits (cases 31, 32, 35);
+* validate/commit transactional discipline: the identity-derivation
+  nonce advances ONLY in commit phases, so failed operations
+  (validate- or commit-phase) leave canonical state AND derivation
+  state untouched, and the next successful derived refs are
+  byte-identical to a clean twin run (case 38 -- the PR #24
+  architectural-review regression).
 """
 
 from __future__ import annotations
@@ -2925,6 +2931,295 @@ def case_37_full_journey_deterministic_fuzz() -> Result:
 
 
 # --------------------------------------------------------------------------
+# Validate/commit transactional discipline (PR #24 architectural review)
+# --------------------------------------------------------------------------
+
+
+class _OnceFailingCommitEngine(ReferenceMeshEngine):
+    """Probe: a commit-phase failure must not consume derivation state.
+
+    Raises exactly ONCE from each commit phase (simulating the
+    defensive collision guard or any downstream commit fault AFTER
+    the validate phase completed).  Under the PR #24 architectural
+    review correction the validate phase derives refs from a
+    CANDIDATE sequence and the nonce advances only inside the commit
+    phase, so these failures leave ``_sequence`` untouched and are
+    unobservable in every future derived ref.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.fail_allocate_commit = True
+        self.fail_bind_commit = True
+
+    def _commit_allocate(self, allocation, candidate_sequence):  # type: ignore[override]
+        if self.fail_allocate_commit:
+            self.fail_allocate_commit = False
+            raise MeshError(
+                MeshReasonCode.ILLEGAL_STATE,
+                "probe: simulated commit-phase allocate failure",
+            )
+        super()._commit_allocate(allocation, candidate_sequence)
+
+    def _commit_bind_session(  # type: ignore[override]
+        self, binding, hop_budget, candidate_sequence
+    ):
+        if self.fail_bind_commit:
+            self.fail_bind_commit = False
+            raise MeshError(
+                MeshReasonCode.ILLEGAL_STATE,
+                "probe: simulated commit-phase bind failure",
+            )
+        super()._commit_bind_session(binding, hop_budget, candidate_sequence)
+
+
+def case_38_validation_commit_sequence_discipline() -> Result:
+    name = "case_38_validation_commit_sequence_discipline"
+
+    def fresh_stack(engine=None):
+        engine = engine if engine is not None else ReferenceMeshEngine()
+        mgr = MeshManager(session_reader=_TestSessionReader())
+        mgr.register_implementation(engine, label="r", now=_NOW)
+        _provision_chain(
+            mgr,
+            (
+                (_HOP_AB, _NODE_A, _NODE_B),
+                (_HOP_BC, _NODE_B, _NODE_C),
+                (_HOP_AC, _NODE_A, _NODE_C),
+            ),
+        )
+        r1 = mgr.register_route(now=_NOW, path=_PATH_2HOP)
+        r2 = mgr.register_route(now=_NOW, path=_PATH_ALT_2HOP)
+        if not r1.ok or not r2.ok:
+            raise AssertionError("fixture routes failed")
+        return mgr, engine
+
+    # -- leg 1: failed allocate leaves canonical state unchanged ------
+    mgr, engine = fresh_stack()
+    baseline = mgr.bind_session(
+        now=_NOW, session_id=_SESSION_ID, route_ref=_PATH_2HOP.path_id
+    )
+    if not baseline.ok:
+        return fail(name, "fixture bind failed: %s" % baseline.detail)
+    full = mgr.allocate(
+        now=_NOW,
+        kind=STORAGE_KIND_BYTES,
+        quantity_base=DEFAULT_STORE_AND_FORWARD_CONFIG.max_queued_bytes,
+        purpose="fill-the-queue",
+    )
+    if not full.ok:
+        return fail(name, "full reservation failed: %s" % full.detail)
+    before_bytes = mgr.to_canonical_bytes()
+    before_seq = engine._sequence  # noqa: SLF001 (regression probe)
+    for bad, want in (
+        # non-storage kind fails closed (honest queue resource model)
+        (
+            {"kind": "bandwidth", "quantity_base": 10, "purpose": "x"},
+            MeshReasonCode.INVALID_INPUT,
+        ),
+        # zero quantity violates the [1, max] byte bound
+        (
+            {"kind": STORAGE_KIND_BYTES, "quantity_base": 0, "purpose": "x"},
+            MeshReasonCode.INVALID_INPUT,
+        ),
+        # over-config quantity violates the same bound
+        (
+            {
+                "kind": STORAGE_KIND_BYTES,
+                "quantity_base": DEFAULT_STORE_AND_FORWARD_CONFIG.max_queued_bytes + 1,
+                "purpose": "x",
+            },
+            MeshReasonCode.INVALID_INPUT,
+        ),
+        # the queue is fully reserved: one more byte is exhausted
+        (
+            {"kind": STORAGE_KIND_BYTES, "quantity_base": 1, "purpose": "x"},
+            MeshReasonCode.QUEUE_EXHAUSTED,
+        ),
+    ):
+        res = mgr.allocate(now=_NOW, **bad)
+        if res.ok or res.reason != want:
+            return fail(
+                name, "failed allocate mistyped: %s != %s" % (res.reason, want)
+            )
+        if mgr.to_canonical_bytes() != before_bytes:
+            return fail(name, "failed allocate mutated canonical bytes")
+        if engine._sequence != before_seq:  # noqa: SLF001
+            return fail(
+                name,
+                "failed allocate consumed the derivation nonce "
+                "(%r -> %r)" % (before_seq, engine._sequence),  # noqa: SLF001
+            )
+
+    # -- leg 2: failed bind leaves canonical state unchanged ----------
+    # NOTE on failure styles: the manager's caller-side guards
+    # (unknown session, unknown route) RAISE MeshError before any
+    # implementation call, while engine-mediated failures (e.g.
+    # BINDING_EXISTS) return typed results.  BOTH styles must leave
+    # the canonical bytes and the derivation nonce untouched.
+    mgr, engine = fresh_stack()
+    baseline = mgr.bind_session(
+        now=_NOW, session_id=_SESSION_ID, route_ref=_PATH_2HOP.path_id
+    )
+    if not baseline.ok:
+        return fail(name, "fixture bind failed: %s" % baseline.detail)
+    before_bytes = mgr.to_canonical_bytes()
+    before_seq = engine._sequence  # noqa: SLF001 (regression probe)
+
+    def bind_fails(want, **kw):
+        try:
+            res = mgr.bind_session(now=_NOW, **kw)
+        except MeshError as exc:
+            if exc.reason != want:
+                return "wrong raised reason: %s != %s" % (exc.reason, want)
+            return None
+        if res.ok or res.reason != want:
+            return "wrong result reason: %s != %s" % (res.reason, want)
+        return None
+
+    for bad, want in (
+        # unknown to the WORK-012 authority (caller-side guard)
+        (
+            {"session_id": _SESSION_ID_2, "route_ref": _PATH_2HOP.path_id},
+            MeshReasonCode.SESSION_NOT_SECUREABLE,
+        ),
+        # route never registered (caller-side guard)
+        (
+            {"session_id": _SESSION_ID, "route_ref": "sha256:" + "9" * 64},
+            MeshReasonCode.ROUTE_UNKNOWN,
+        ),
+        # same session + same route twice (engine-mediated)
+        (
+            {"session_id": _SESSION_ID, "route_ref": _PATH_2HOP.path_id},
+            MeshReasonCode.BINDING_EXISTS,
+        ),
+    ):
+        problem = bind_fails(want, **bad)
+        if problem is not None:
+            return fail(name, "failed bind mistyped: %s" % problem)
+        if mgr.to_canonical_bytes() != before_bytes:
+            return fail(name, "failed bind mutated canonical bytes")
+        if engine._sequence != before_seq:  # noqa: SLF001
+            return fail(
+                name,
+                "failed bind consumed the derivation nonce (%r -> %r)"
+                % (before_seq, engine._sequence),  # noqa: SLF001
+            )
+
+    # -- leg 3: a failed operation (validate- OR commit-phase) never
+    #    changes what the NEXT successful derived ref would have been.
+    #    This is the assertion a snapshot cannot make: _sequence is
+    #    intentionally NOT canonicalized, so the derived refs must be
+    #    compared against a clean twin run.  The commit-phase probe
+    #    would consume sequence under the pre-review implementation.
+    def clean_refs():
+        mgr, engine = fresh_stack()
+        refs = []
+        refs.append(
+            mgr.allocate(
+                now=_NOW, kind=STORAGE_KIND_BYTES, quantity_base=100,
+                purpose="reserve-a",
+            ).value.allocation_ref
+        )
+        refs.append(
+            mgr.bind_session(
+                now=_NOW, session_id=_SESSION_ID, route_ref=_PATH_2HOP.path_id
+            ).value.bearer_ref
+        )
+        refs.append(
+            mgr.allocate(
+                now=_NOW, kind=STORAGE_KIND_BYTES, quantity_base=200,
+                purpose="reserve-b",
+            ).value.allocation_ref
+        )
+        refs.append(
+            mgr.bind_session(
+                now=_NOW, session_id=_SESSION_ID,
+                route_ref=_PATH_ALT_2HOP.path_id,
+            ).value.bearer_ref
+        )
+        return mgr, engine, refs
+
+    _, clean_engine, wanted = clean_refs()
+    if clean_engine._sequence != 4:  # noqa: SLF001
+        return fail(name, "clean-run sequence drift: %r" % clean_engine._sequence)  # noqa: SLF001
+
+    mgr, probe = fresh_stack(_OnceFailingCommitEngine())
+    # validate-phase failures first (the unknown session is a
+    # caller-side guard: it RAISES before any implementation call).
+    v1 = mgr.allocate(
+        now=_NOW, kind="bandwidth", quantity_base=10, purpose="x"
+    )
+    if v1.ok or v1.reason != MeshReasonCode.INVALID_INPUT:
+        return fail(name, "probe run: invalid kind not rejected")
+    try:
+        mgr.bind_session(
+            now=_NOW, session_id=_SESSION_ID_2, route_ref=_PATH_2HOP.path_id
+        )
+        return fail(name, "probe run: unknown session not rejected")
+    except MeshError as exc:
+        if exc.reason != MeshReasonCode.SESSION_NOT_SECUREABLE:
+            return fail(name, "probe run: unknown session mistyped")
+    # commit-phase failures: the validate phase completed and derived
+    # a ref, then the commit faulted -- the nonce must NOT advance.
+    c1 = mgr.allocate(
+        now=_NOW, kind=STORAGE_KIND_BYTES, quantity_base=100,
+        purpose="reserve-a",
+    )
+    if c1.ok or c1.reason != MeshReasonCode.ILLEGAL_STATE:
+        return fail(name, "commit-phase allocate failure mistyped: %s" % c1.reason)
+    c2 = mgr.bind_session(
+        now=_NOW, session_id=_SESSION_ID, route_ref=_PATH_2HOP.path_id
+    )
+    if c2.ok or c2.reason != MeshReasonCode.ILLEGAL_STATE:
+        return fail(name, "commit-phase bind failure mistyped: %s" % c2.reason)
+    if probe._sequence != 0:  # noqa: SLF001
+        return fail(
+            name,
+            "commit-phase failures consumed derivation state: %r"
+            % probe._sequence,  # noqa: SLF001
+        )
+    # The same successful sequence derives byte-identical refs.
+    got = [
+        mgr.allocate(
+            now=_NOW, kind=STORAGE_KIND_BYTES, quantity_base=100,
+            purpose="reserve-a",
+        ).value.allocation_ref,
+        mgr.bind_session(
+            now=_NOW, session_id=_SESSION_ID, route_ref=_PATH_2HOP.path_id
+        ).value.bearer_ref,
+        mgr.allocate(
+            now=_NOW, kind=STORAGE_KIND_BYTES, quantity_base=200,
+            purpose="reserve-b",
+        ).value.allocation_ref,
+        mgr.bind_session(
+            now=_NOW, session_id=_SESSION_ID,
+            route_ref=_PATH_ALT_2HOP.path_id,
+        ).value.bearer_ref,
+    ]
+    for i, (g, w) in enumerate(zip(got, wanted)):
+        if g != w:
+            return fail(
+                name,
+                "derived ref %d diverged after failed operations:\n  "
+                "got    %s\n  wanted %s" % (i, g, w),
+            )
+    if probe._sequence != 4:  # noqa: SLF001
+        return fail(
+            name,
+            "probe-run sequence drift: %r" % probe._sequence,  # noqa: SLF001
+        )
+    return ok(
+        name,
+        "validate phases never mutate the derivation nonce: failed "
+        "allocates/binds leave canonical bytes AND the nonce "
+        "unchanged (validate- and commit-phase failures alike), and "
+        "the next successful derived refs are byte-identical to a "
+        "clean twin run",
+    )
+
+
+# --------------------------------------------------------------------------
 # Main
 # --------------------------------------------------------------------------
 
@@ -2968,6 +3263,7 @@ def main() -> int:
         case_35_frozen_spec_intact,
         case_36_observation_honesty_degraded_service,
         case_37_full_journey_deterministic_fuzz,
+        case_38_validation_commit_sequence_discipline,
     ]
     print("ADCOS mesh/relay adapter self-test (WORK-023)")
     print("=" * 72)
