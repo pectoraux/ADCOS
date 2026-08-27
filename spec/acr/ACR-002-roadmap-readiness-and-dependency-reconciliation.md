@@ -1,7 +1,7 @@
 # ACR-002: Roadmap Readiness and Dependency Reconciliation
 
 ## Status
-PROPOSED
+ACCEPTED
 
 ## Proposed change
 
@@ -9,13 +9,13 @@ Formalize two roadmap/governance distinctions that are already implicit in the f
 
 1. **Separate DAG readiness from execution readiness.** A Work Item may be DAG-ready when all hard dependencies in the frozen dependency graph are Architect-accepted, but it remains execution-blocked unless the Architect designates it as the single active Work Item under the repository's one-Work-Item-at-a-time execution rule.
 2. **Separate architectural acceptance from external evidence completion.** A Work Item may be Architect-accepted for architectural conformance while carrying an explicitly open external-environment evidence gate where the frozen Work Item requires real implementation interoperability or hardware/lab evidence. An open evidence gate must never be represented as a passed criterion or silently substituted with a simulator/reference peer.
-3. **Reconcile dependency declarations with the DAG.** The current frozen backlog declares `WORK-008` depends on `WORK-007`, while the frozen DAG does not contain `WORK-007 → WORK-008`. The backlog declares `WORK-021` depends on `WORK-018, WORK-019`, while the frozen DAG contains `WORK-018 → WORK-021` but omits `WORK-019 → WORK-021`. The proposed synchronized correction is to add those missing DAG edges. This is a consistency reconciliation of dependencies already declared by the frozen backlog; it does not introduce a new implementation dependency.
+3. **Reconcile dependency declarations with the DAG.** The frozen backlog declares `WORK-008` depends on `WORK-007`, while the frozen DAG did not contain `WORK-007 → WORK-008`. The backlog declares `WORK-021` depends on `WORK-018, WORK-019`, while the frozen DAG contained `WORK-018 → WORK-021` but omitted `WORK-019 → WORK-021`. The synchronized correction adds those missing DAG edges. This is a consistency reconciliation of dependencies already declared by the frozen backlog; it does not introduce a new implementation dependency.
 4. **Record the historical W014/W017 discrepancy as resolved.** ACR-001 already established that `WORK-014` does not depend on `WORK-017`; no new edge is proposed and the old advisory must not be revived.
 
 Alternatives considered:
 
-- Leave the current advisory state indefinitely. Rejected because it preserves ambiguity in the frozen roadmap.
-- Change only `spec/governance.md` / `spec/workflow.md` and leave the frozen DAG inconsistent. Rejected because the governance documents already state that frozen dependency divergence must be resolved by the Architect.
+- Leave the advisory state indefinitely. Rejected because it preserves ambiguity in the frozen roadmap.
+- Change only process documentation and leave the frozen DAG inconsistent. Rejected because frozen dependency divergence must be resolved by the Architect.
 - Treat environment-gated evidence as architectural acceptance automatically. Rejected because it would weaken the Definition-of-Done semantics and permit reference implementations to substitute for real external evidence.
 - Add hidden dependency edges in implementation code. Rejected by the frozen dependency-graph rules.
 
@@ -24,7 +24,7 @@ Alternatives considered:
 - `spec/architecture.md` sections: no semantic architecture section changes; this is a roadmap/process clarification.
 - `spec/architecture-lock.md` locks: no LOCK-001 … LOCK-025 semantics changed.
 - Frozen process/ordering artifacts affected: `spec/work-items.md`, `spec/dependency-graph.md`.
-- Process authority clarification: `spec/workflow.md` and `spec/governance.md` may be updated to describe the two readiness/acceptance states.
+- Process authority clarification: `spec/workflow.md` is updated to distinguish DAG readiness, execution readiness, architectural acceptance, automated verification, and external evidence.
 
 ## Compatibility analysis
 
@@ -34,28 +34,26 @@ Alternatives considered:
 - **Federation relationships:** none.
 - **Deployments:** none.
 - **Mixed-version operation:** none.
-- **Implementation compatibility:** no existing implementation contract changes. The dependency additions merely make the frozen backlog's already-declared dependencies explicit in the DAG.
-- **Status semantics:** the distinction between architectural acceptance and open external evidence changes reporting clarity only; it does not weaken any Work Item acceptance criterion.
+- **Implementation compatibility:** no existing implementation contract changes. The dependency additions make the frozen backlog's already-declared dependencies explicit in the DAG.
+- **Status semantics:** reporting now distinguishes architectural acceptance from outstanding external evidence without weakening any Work Item criterion.
 
 ## Work-item and dependency impact
 
 Affected Work Items:
 
-- `WORK-008` — synchronize DAG to existing declaration `WORK-008 depends on WORK-007`.
-- `WORK-021` — synchronize DAG to existing declaration `WORK-021 depends on WORK-019`.
+- `WORK-008` — DAG synchronized to existing declaration `WORK-008 depends on WORK-007`.
+- `WORK-021` — DAG synchronized to existing declaration `WORK-021 depends on WORK-019`.
 - `WORK-014` — historical reference only; ACR-001 remains authoritative that `WORK-017` is not a dependency.
-- `WORK-019`, `WORK-020`, `WORK-021` — reporting should distinguish architectural acceptance from their environment-gated interoperability evidence where applicable.
-- `WORK-027` and later Phase-5 items — execution readiness must remain distinct from graph readiness.
+- `WORK-019`, `WORK-020`, `WORK-021` — reporting distinguishes architectural acceptance from environment-gated interoperability evidence where applicable.
+- `WORK-027` and later Phase-5 items — execution readiness remains distinct from graph readiness.
 
 Dependency graph recalculation:
 
 ```text
-Existing:
+Synchronized edges:
 W005 → W008
-W018 → W021
-
-Proposed synchronized DAG edges:
 W007 → W008
+W018 → W021
 W019 → W021
 
 Result:
@@ -68,18 +66,19 @@ Result:
 
 ## Migration / rollback plan
 
-1. Merge the process-authority clarification first, without altering implementation code.
-2. After explicit Architect approval of this ACR, update `spec/dependency-graph.md` and any corresponding frozen backlog wording atomically in one architecture-change PR.
-3. Update `tools/spec_check.py`/tests only as needed to make the reconciled state blocking rather than advisory; do not weaken the checker.
-4. If the Architect rejects the proposal, close the ACR as REJECTED and leave all frozen documents unchanged.
-5. If later evidence shows either proposed dependency is not actually required, open a new ACR rather than editing the graph ad hoc.
+1. Synchronize the frozen DAG to the dependencies already declared by the frozen backlog.
+2. Retain the process-authority readiness/evidence distinctions in `spec/workflow.md`.
+3. If later evidence shows either dependency is not actually required, open a new ACR rather than editing the graph ad hoc.
+4. No runtime migration or rollback is required because this change introduces no wire, persisted-state, session, federation, or implementation semantics.
 
 ## Architect decision
 
-**PROPOSED — awaiting Architect decision.**
+**ACCEPTED — 2026-08-27.**
 
-The implementation must continue to treat the current frozen documents as authoritative until this ACR is explicitly accepted. No frozen-document edits are made by this proposal alone.
+The Architect accepts ACR-002 because the proposed edges reconcile existing frozen Work Item declarations with the approved DAG, while the readiness and evidence-state changes clarify process semantics without altering the frozen runtime architecture or protocol meaning.
+
+The synchronized frozen DAG may now carry `W007 → W008` and `W019 → W021`. The implementation workflow must treat DAG readiness and execution readiness separately, and must report external evidence independently from architectural conformance where required.
 
 ## Resulting architecture version
 
-Unchanged. The proposal is intended as dependency/document consistency reconciliation plus process clarification; no core architecture semantics or protocol meaning is changed.
+Unchanged. This is a dependency/document consistency reconciliation and process clarification; no core architecture semantics or protocol meaning changes.
