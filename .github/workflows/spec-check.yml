@@ -95,3 +95,6 @@ jobs:
 
       - name: Run telemetry/observability tests
         run: python3 tools/telemetry_selftest.py
+
+      - name: Run energy/resilience tests
+        run: python3 tools/energy_selftest.py
