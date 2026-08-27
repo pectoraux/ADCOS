@@ -62,7 +62,7 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Protocol, Tuple
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Protocol, Tuple
 
 from policy.model import PolicyDecision, PolicyError
 
@@ -697,8 +697,14 @@ class OfflinePolicyCache:
       a receipt minted by the ONLINE
       :class:`~policy.revalidation.PolicyRevalidationAuthority`
       (constructor-injected) and verified against THAT authority's
-      mint ledger -- revalidation is a recorded authority
-      interaction, never an inference from caller-supplied bytes.
+      closure-owned mint ledger -- revalidation is a recorded
+      authority interaction, never an inference from caller-supplied
+      bytes.  The verification capability is CAPTURED AT INJECTION
+      TIME (the accepted WORK-013 multipath capture precedent): a
+      later rebinding of the authority object's public attributes
+      cannot alter the cache's gate, and the authority's issuance
+      boundary itself is closure-owned (no callable mint surface
+      exists -- see ``policy/revalidation.py``).
 
     The cache NEVER evaluates policy (WORK-010 stays the sole policy
     authority) -- it replays recorded verdicts, and everything it
@@ -750,13 +756,26 @@ class OfflinePolicyCache:
         # every recovery.  A decision is honorable through the offline
         # path only while its recording epoch == the current epoch.
         self._authorization_epoch = 0
-        # The ONLINE WORK-010 revalidation authority (the composition
-        # root's trust anchor for post-recovery recording): every
-        # authoritative recording is verified through THIS object's
-        # mint ledger.  A receipt minted by any other instance never
+        # The ONLINE WORK-010 revalidation authority's VERIFICATION
+        # CAPABILITY (the composition root's trust anchor for
+        # post-recovery recording), CAPTURED AT INJECTION TIME (the
+        # accepted WORK-013 multipath capture precedent): the cache
+        # holds the verify callable itself, so a later rebinding or
+        # shadowing of the AUTHORITY object's public attributes can
+        # never redirect or neuter the cache's verification gate (the
+        # PR #28 review B2 round-4 "mutated helper" attack fails
+        # closed).  Every authoritative recording is verified through
+        # THIS captured capability and the authority's closure-owned
+        # mint ledger; a receipt minted by any other instance never
         # verifies.  None = the authoritative recording path is
         # unavailable (fail closed).
-        self._revalidation_authority = revalidation_authority
+        self._authority_verify: Optional[
+            Callable[["RevalidationReceipt", PolicyDecision], None]
+        ] = (
+            revalidation_authority.verify_revalidation_receipt
+            if revalidation_authority is not None
+            else None
+        )
 
     # -- recording while online (CLOSED while partitioned) ---------------
 
@@ -842,12 +861,15 @@ class OfflinePolicyCache:
         The pair (decision, receipt) is verified THROUGH the
         constructor-injected
         :class:`~policy.revalidation.PolicyRevalidationAuthority`:
-        the authority checks its own mint ledger for a receipt
-        vouching for EXACTLY this decision.  This is the actual
-        boundary crossing -- the cache never inspects receipt fields,
-        and a receipt minted by any other authority instance (or
+        the authority checks its own closure-owned mint ledger for a
+        receipt vouching for EXACTLY this decision.  This is the
+        actual boundary crossing -- the cache never inspects receipt
+        fields, a receipt minted by any other authority instance (or
         fabricated from scratch, however self-consistent) never
-        verifies (``offline-authority-proof-invalid``).
+        verifies (``offline-authority-proof-invalid``), and the
+        verify capability was captured at injection time so a later
+        rebinding of the authority object's public attributes cannot
+        redirect or neuter the gate.
 
         Additional gates (in order): the recording channel is CLOSED
         while partitioned (B1); the decision id must bind to its
@@ -876,8 +898,8 @@ class OfflinePolicyCache:
                 "(WORK-010 authority; the cache never evaluates policy)",
             )
         validate_instant(now, label="now")
-        authority = self._revalidation_authority
-        if authority is None:
+        authority_verify = self._authority_verify
+        if authority_verify is None:
             raise EnergyError(
                 EnergyReasonCode.ILLEGAL_STATE,
                 "the authoritative recording path requires the "
@@ -886,10 +908,12 @@ class OfflinePolicyCache:
                 "recording fails closed",
             )
         # THE AUTHORITY BOUNDARY: the receipt is proven by the
-        # authority's own mint ledger, never by field inspection of
-        # a caller-supplied object.
+        # authority's own closure-owned mint ledger through the
+        # injection-time-captured verify capability -- never by field
+        # inspection of a caller-supplied object, and never by a
+        # callable rebound on the authority object after construction.
         try:
-            authority.verify_revalidation_receipt(receipt, decision)
+            authority_verify(receipt, decision)
         except PolicyError as error:
             raise EnergyError(
                 EnergyReasonCode.OFFLINE_AUTHORITY_PROOF_INVALID,

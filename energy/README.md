@@ -115,7 +115,12 @@ closed, explicit reasons: `shed-droppable`, `shed-deferrable`,
   authority's own mint ledger (a fabricated receipt, a receipt
   from a different authority instance, and a genuine receipt
   paired with the wrong decision all fail closed), with the
-  fresh-evaluation-instant anchor kept as defense in depth).
+  fresh-evaluation-instant anchor kept as defense in depth. The
+  cache captures the authority's verify capability at injection
+  time (a later rebinding of the authority object's public
+  attributes cannot alter the gate), and the authority's
+  issuance boundary is closure-owned -- no callable mint surface
+  exists (PR #28 review B2 round 4; see policy/README.md).
   Unknown decisions, tampered decisions, and expired verdicts
   fail closed throughout; a pre-recovery decision is never
   resurrected, not even by a subsequent partition.

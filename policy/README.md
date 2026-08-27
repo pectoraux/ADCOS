@@ -170,6 +170,20 @@ PLUS the authority-internal chain root, so it is not computable from the
 public fields alone.  All clocks are injected; the ledger is a pure function
 of the mint sequence (deterministic).
 
+The ISSUANCE boundary is mechanically closed (PR #28 review B2 round 4; the
+accepted WORK-013 multipath authority-seam precedent): the ledger (an
+IMMUTABLE tuple), the sequence, the chain root, the engine, and the
+policy-set snapshot are CLOSURE-OWNED — never class/instance attributes,
+never module globals, never a mutable collection — and the mint path is
+INLINE CODE in the genuine `revalidate` frame, so no `_mint` callable exists
+at all.  An attacker holding a GENUINE authority instance can neither invoke
+issuance (there is no callable to reach), manufacture ledger membership
+(there is no attribute or mutable collection to write — decoy `_minted`
+attributes are never consulted), extract an issuance capability from closure
+cells (they hold immutable data only), nor neuter a consumer's gate
+(consumers such as the WORK-027 offline cache capture the verify capability
+at injection time).
+
 The engine itself is unchanged: `PolicyEngine.evaluate` stays pure and
 stateless; the authority only wraps it with the mint ledger.
 
@@ -218,9 +232,11 @@ policy/
   evaluation.py      # PolicyEngine.evaluate(): pure, deterministic,
                      #   injected instant, no wall-clock, no state mutation
   revalidation.py   # PolicyRevalidationAuthority: the authority-owned
-                     #   revalidation boundary (PR #28 review B2 round 3) --
-                     #   fresh evaluation + mint-ledger receipts; the ONLY
-                     #   receipt validity check is the authority itself
+                     #   revalidation boundary (PR #28 review B2 rounds
+                     #   3-4) -- fresh evaluation + closure-owned
+                     #   mint-ledger receipts (inline mint path, NO
+                     #   callable issuance surface); the ONLY receipt
+                     #   validity check is the authority itself
   serialization.py  # rule_from_mapping / policy_set_from_mapping /
                      #   context_from_mapping / canonical-bytes helpers
                      #   (WORK-003 machinery)

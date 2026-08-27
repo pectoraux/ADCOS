@@ -80,6 +80,18 @@ the WORK-027 work-item contract to discriminating cases:
   genuine authority revaluation records
   and honors
                                          -> case_37
+- REGRESSION (PR #28 B2 round 4): the
+  receipt ISSUANCE boundary is
+  mechanically closed -- no callable mint
+  surface exists, the mint state lives in
+  closure-owned immutable cells (never
+  instance attributes, never a mutable
+  collection), and an attacker holding a
+  GENUINE authority instance can neither
+  mint for a forged decision, manufacture
+  ledger membership, extract an issuance
+  capability, nor neuter the cache gate
+                                         -> case_38
 - deferred sync queue replays REAL
   telemetry into a REAL TelemetryStore               -> case_20
 - power simulation: solar day/night cycle,
@@ -2857,6 +2869,300 @@ def case_37_forged_fresh_decision_rejected() -> Result:
     )
 
 
+def case_38_authority_issuance_boundary_closed() -> Result:
+    name = "case_38_authority_issuance_boundary_closed"
+    # PR #28 review B2 (round 4 -- the issuance boundary): the
+    # receipt-minting authority itself must be mechanically protected.
+    # An attacker holding a GENUINE PolicyRevalidationAuthority
+    # instance must not be able to manufacture a receipt that
+    # verifies for a forged decision.  Directed attack matrix:
+    #   authority._mint(forged)            -> must not exist at all
+    #   forged / re-created issuance
+    #     helper                           -> never verifies
+    #   direct ledger manipulation (decoy
+    #     _minted/_sequence/_chain_root)   -> never consulted
+    #   closure-cell extraction            -> immutable data only
+    #   rebinding the authority's verify
+    #     attribute post-construction      -> cache gate holds
+    # The crucial property (the review's words): a self-consistent
+    # forged PolicyDecision must remain unverifiable even when the
+    # attacker possesses a genuine authority instance, while the
+    # genuine revalidation path stays green throughout.
+    from policy.model import PolicyError  # lazy: the round-4 surface
+    from policy.revalidation import RevalidationReceipt
+
+    rule = PolicyRule(
+        rule_id="allow-reserve", domain=PolicyDomain.RESOURCE,
+        effect=Effect.ALLOW, operation=Operation.RESOURCE_RESERVE,
+    )
+    policy_set = PolicySet(
+        set_id="ps-w027", version=1, rules=(rule,), issuer_node_id=_ISSUER,
+        valid_from="2026-01-01T00:00:00Z", valid_until="2028-01-01T00:00:00Z",
+    )
+    engine = PolicyEngine()
+    old = _genuine_policy_decision(engine, policy_set, _NOW)
+    authority = _revalidation_authority(policy_set)
+    cache = OfflinePolicyCache(_profile(grace=3600), revalidation_authority=authority)
+    problems: List[str] = []
+
+    # POSITIVE CONTROL -- the genuine boundary works end to end.
+    cache.record_decision(old, now=_NOW)
+    cache.mark_partition(now="2026-09-01T12:10:00Z")
+    cache.mark_recovered(now="2026-09-01T13:10:00Z")
+    genuine_decision, genuine_receipt = _revalidated(authority, "2026-09-01T13:10:30Z")
+    cache.record_authoritative_decision(
+        genuine_decision, genuine_receipt, now="2026-09-01T13:10:30Z"
+    )
+    if not cache.honor(genuine_decision, now="2026-09-01T13:11:00Z").honored:
+        return fail(name, "fixture broken: genuine revalidation must record and honor")
+
+    # THE ATTACK OBJECT: a forged self-consistent ALLOW the engine
+    # never produced (same demand, same instant -- a DIFFERENT
+    # decision id: content the authority cannot and will not mint).
+    forged = _forged_fresh_allow("2026-09-01T13:10:30Z")
+    if hashlib.sha256(forged.canonical_bytes()).hexdigest() != forged.decision_id:
+        return fail(name, "fixture broken: the forged ALLOW must be self-consistent")
+    if forged.decision_id == genuine_decision.decision_id:
+        return fail(name, "fixture broken: the forgery must differ from the engine output")
+
+    # ATTACK 1 -- the callable mint surface: authority._mint must NOT
+    # exist (naming is not a boundary; the mint path is inline code in
+    # the genuine revalidate frame).
+    mint = getattr(authority, "_mint", None)
+    if mint is not None:
+        minted = mint(forged)
+        try:
+            authority.verify_revalidation_receipt(minted, forged)
+            problems.append(
+                "callable _mint surface exists and mints a VERIFYING receipt "
+                "for the forged decision (issuance boundary open)"
+            )
+        except PolicyError:
+            problems.append(
+                "callable _mint surface exists (it must be ELIMINATED, not "
+                "merely unreachable-by-convention)"
+            )
+        try:
+            cache.record_authoritative_decision(
+                forged, minted, now="2026-09-01T13:10:45Z"
+            )
+            problems.append("a _mint-forged pair was accepted by the cache")
+        except EnergyError:
+            pass
+
+    # ISSUANCE-SURFACE AUDIT -- the instance dict holds exactly the
+    # public callables: no mint state as attributes of ANY name.
+    public_surface = {
+        "revalidate",
+        "verify_revalidation_receipt",
+        "minted_receipt_ids",
+        "chain_root",
+    }
+    trust_state = {"_minted", "_sequence", "_chain_root", "_engine", "_policy_set"}
+    leaked = set(authority.__dict__) & trust_state
+    if leaked:
+        problems.append(
+            "trust state held as instance attributes: %s" % (sorted(leaked),)
+        )
+    extra = set(authority.__dict__) - public_surface - trust_state
+    if extra:
+        problems.append(
+            "instance attributes beyond the public callables: %s" % (sorted(extra),)
+        )
+
+    # ATTACK 2 -- the FORGED issuance helper: the attacker writes a
+    # perfect mimic of the mint (same fields, plausible id).  Its
+    # output can never verify: membership is decided exclusively by
+    # the authority's own closure-owned ledger.
+    def attacker_mint(decision: PolicyDecision) -> RevalidationReceipt:
+        return RevalidationReceipt(
+            decision_id=decision.decision_id,
+            evaluation_instant=decision.evaluation_instant,
+            authority_sequence=1,
+            receipt_id=hashlib.sha256(decision.decision_id.encode("ascii")).hexdigest(),
+        )
+
+    helper_receipt = attacker_mint(forged)
+    try:
+        authority.verify_revalidation_receipt(helper_receipt, forged)
+        problems.append("forged issuance helper manufactured a verifying receipt")
+    except PolicyError:
+        pass
+    try:
+        cache.record_authoritative_decision(
+            forged, helper_receipt, now="2026-09-01T13:10:45Z"
+        )
+        problems.append("forged-helper receipt accepted by the cache")
+    except EnergyError as error:
+        if error.reason != EnergyReasonCode.OFFLINE_AUTHORITY_PROOF_INVALID:
+            problems.append("wrong forged-helper rejection reason: %r" % (error.reason,))
+
+    # ATTACK 2b -- the RE-CREATED helper: even an attacker who SETS a
+    # ``_mint``-named attribute on the authority object holds a plain
+    # function with no authority (the boundary is structural, not
+    # naming).
+    authority._mint = attacker_mint
+    try:
+        recreated = authority._mint(forged)
+        try:
+            authority.verify_revalidation_receipt(recreated, forged)
+            problems.append(
+                "attacker-set _mint attribute manufactured a verifying receipt"
+            )
+        except PolicyError:
+            pass
+    finally:
+        try:
+            del authority._mint
+        except AttributeError:
+            pass
+
+    # ATTACK 3 -- DIRECT LEDGER MANIPULATION: decoy trust-state
+    # attributes, however plausible, are never consulted -- the
+    # ledger lives in closure cells, not in the instance dict.
+    original_state = {
+        key: authority.__dict__[key]
+        for key in trust_state
+        if key in authority.__dict__
+    }
+    decoy = RevalidationReceipt(
+        decision_id=forged.decision_id,
+        evaluation_instant=forged.evaluation_instant,
+        authority_sequence=1,
+        receipt_id=hashlib.sha256(
+            ("decoy:" + forged.decision_id).encode("ascii")
+        ).hexdigest(),
+    )
+    authority._minted = {decoy.receipt_id: decoy}
+    authority._sequence = 99
+    authority._chain_root = "f" * 64
+    try:
+        authority.verify_revalidation_receipt(decoy, forged)
+        problems.append("decoy _minted attribute manufactured ledger membership")
+    except PolicyError:
+        pass
+    try:
+        cache.record_authoritative_decision(
+            forged, decoy, now="2026-09-01T13:10:45Z"
+        )
+        problems.append("decoy attribute manipulation accepted by the cache")
+    except EnergyError as error:
+        if error.reason != EnergyReasonCode.OFFLINE_AUTHORITY_PROOF_INVALID:
+            problems.append("wrong decoy rejection reason: %r" % (error.reason,))
+    # cleanup: post-fix the decoys were pure junk attributes (remove
+    # them); pre-fix they were real attributes (restore the clobbered
+    # values so the remaining beats stay comparable -- the case is
+    # already red by this point in a pre-fix tree).
+    for junk in ("_minted", "_sequence", "_chain_root"):
+        if junk in original_state:
+            setattr(authority, junk, original_state[junk])
+        else:
+            try:
+                delattr(authority, junk)
+            except AttributeError:
+                pass
+
+    # ATTACK 4 -- EXTRACTED NESTED CALLABLE / CLOSURE CAPABILITY:
+    # walk the closure cells of every public callable -- there must be
+    # no nested issuance callable to extract and no mutable collection
+    # to insert into; the cells hold immutable data only.
+    for public_name in sorted(public_surface):
+        fn = getattr(authority, public_name, None)
+        for cell in getattr(fn, "__closure__", None) or ():
+            value = cell.cell_contents
+            if callable(value):
+                problems.append(
+                    "callable capability extractable from %r closure cells"
+                    % (public_name,)
+                )
+            if isinstance(value, (dict, list, set)):
+                problems.append(
+                    "mutable collection reachable from %r closure cells"
+                    % (public_name,)
+                )
+
+    # ATTACK 5 -- the MUTATED verification helper: rebinding the
+    # authority object's public verify attribute AFTER cache
+    # construction must not neuter the cache's gate (the cache holds
+    # the injection-time-captured capability).
+    genuine_verify = authority.verify_revalidation_receipt
+    authority.verify_revalidation_receipt = lambda receipt, decision: None
+    try:
+        cache.record_authoritative_decision(
+            forged, helper_receipt, now="2026-09-01T13:12:30Z"
+        )
+        problems.append(
+            "rebinding the authority verify attribute neutered the cache gate"
+        )
+    except EnergyError as error:
+        if error.reason != EnergyReasonCode.OFFLINE_AUTHORITY_PROOF_INVALID:
+            problems.append("wrong mutated-helper rejection reason: %r" % (error.reason,))
+    finally:
+        authority.verify_revalidation_receipt = genuine_verify
+
+    # GENUINE EVALUATION IS NOT ISSUANCE FOR THE FORGERY: submitting
+    # the demand to the genuine authority mints a receipt for the
+    # AUTHORITY'S decision -- never for the forged object.
+    submitted_decision, submitted_receipt = _revalidated(authority, "2026-09-01T13:14:00Z")
+    if submitted_decision.decision_id == forged.decision_id:
+        problems.append("the genuine authority minted the forged decision id")
+    try:
+        authority.verify_revalidation_receipt(submitted_receipt, forged)
+        problems.append("a genuine receipt verifies for the forged decision")
+    except PolicyError:
+        pass
+
+    # POST-ATTACK INTEGRITY: the authority's ledger survived every
+    # attack attempt; the audit reads reflect exactly the genuine
+    # mints; the lawful path still records and honors.
+    recheck_decision, recheck_receipt = _revalidated(authority, "2026-09-01T13:15:00Z")
+    cache.record_authoritative_decision(
+        recheck_decision, recheck_receipt, now="2026-09-01T13:15:00Z"
+    )
+    if not cache.honor(recheck_decision, now="2026-09-01T13:15:30Z").honored:
+        problems.append("the genuine path stopped working after the attacks")
+    expected_ids = {
+        genuine_receipt.receipt_id,
+        submitted_receipt.receipt_id,
+        recheck_receipt.receipt_id,
+    }
+    if set(authority.minted_receipt_ids()) != expected_ids:
+        problems.append(
+            "mint ledger drifted (expected exactly the genuine mints): %r"
+            % (authority.minted_receipt_ids(),)
+        )
+    root = authority.chain_root()
+    if not isinstance(root, str) or len(root) != 64:
+        problems.append("audit read chain_root() broken: %r" % (root,))
+
+    # FINAL POST-CONDITIONS: the forged decision was never recorded
+    # through any avenue; the genuine material is intact.
+    if cache.honor(forged, now="2026-09-01T13:16:00Z").reason != HonorResult.UNKNOWN_DECISION:
+        problems.append("the forged decision became known to the cache")
+    if set(cache.recorded_decision_ids()) != {
+        old.decision_id,
+        genuine_decision.decision_id,
+        recheck_decision.decision_id,
+    }:
+        problems.append(
+            "recorded ids drifted: %r" % (cache.recorded_decision_ids(),)
+        )
+
+    if problems:
+        return fail(name, "; ".join(problems))
+    return ok(
+        name,
+        "no callable mint surface exists (the mint path is inline code in the "
+        "genuine revalidate frame); the ledger/sequence/chain live in "
+        "closure-owned immutable cells (no instance attributes, no mutable "
+        "collection); decoy attribute injection, forged/re-created issuance "
+        "helpers, closure-cell extraction, and post-construction verify "
+        "rebinding all fail closed; a self-consistent forged decision stays "
+        "unverifiable even for an attacker holding the GENUINE authority "
+        "instance",
+    )
+
+
 # --------------------------------------------------------------------------
 # Runner
 # --------------------------------------------------------------------------
@@ -2899,6 +3205,7 @@ CASES = [
     case_35_energy_never_terminates_established_sessions,
     case_36_offline_laundering_multicycle,
     case_37_forged_fresh_decision_rejected,
+    case_38_authority_issuance_boundary_closed,
 ]
 
 
