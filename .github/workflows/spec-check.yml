@@ -90,6 +90,7 @@ jobs:
 
       - name: Run distributed-core adapter family tests
         run: python3 tools/distcore_selftest.py
+
       - name: Run service registry/edge compute tests
         run: python3 tools/service_selftest.py
 
@@ -98,3 +99,6 @@ jobs:
 
       - name: Run energy/resilience tests
         run: python3 tools/energy_selftest.py
+
+      - name: Run cross-cutting security hardening tests
+        run: python3 tools/security_selftest.py
