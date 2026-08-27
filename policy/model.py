@@ -260,6 +260,13 @@ class Operation:
     SERVICE_INVOKE = "service.invoke"
     PRIVACY_REQUIREMENT_OVERRIDE = "privacy.requirement-override"
     EMERGENCY_PREEMPT = "emergency.preempt"
+    #: WORK-026 deliberate vocabulary extension ("policy-controlled
+    #: authority" acceptance criterion): the ONLY operation under which
+    #: telemetry observations may be promoted toward topology
+    #: authority.  Privileged (deny-by-default), so without an explicit
+    #: policy ALLOW the promotion is impossible -- telemetry can never
+    #: silently become topology authority.
+    TELEMETRY_TOPOLOGY_PROMOTE = "telemetry.topology-promote"
 
     @classmethod
     def values(cls) -> Tuple[str, ...]:
@@ -277,6 +284,7 @@ class Operation:
             cls.SERVICE_INVOKE,
             cls.PRIVACY_REQUIREMENT_OVERRIDE,
             cls.EMERGENCY_PREEMPT,
+            cls.TELEMETRY_TOPOLOGY_PROMOTE,
         )
 
 
@@ -316,6 +324,7 @@ class Privileged:
         Operation.SERVICE_INVOKE,
         Operation.PRIVACY_REQUIREMENT_OVERRIDE,
         Operation.EMERGENCY_PREEMPT,
+        Operation.TELEMETRY_TOPOLOGY_PROMOTE,
     )
 
     NON_PRIVILEGED: Tuple[str, ...] = ()

@@ -40,6 +40,11 @@ from .invocation import (
     INVOCATION_BINDING_KEYS,
     invocation_binding_from_context,
 )
+from .promotion import (
+    PROMOTION_BINDING_KIND,
+    PROMOTION_BINDING_KEYS,
+    promotion_binding_from_context,
+)
 from .model import (
     Condition,
     DecisionCode,
@@ -99,6 +104,12 @@ __all__ = [
     "INVOCATION_BINDING_KIND",
     "INVOCATION_BINDING_KEYS",
     "invocation_binding_from_context",
+    # Promotion binding (the policy authority's born-bound scope
+    # derivation for telemetry.topology-promote decisions; WORK-026
+    # "policy-controlled authority")
+    "PROMOTION_BINDING_KIND",
+    "PROMOTION_BINDING_KEYS",
+    "promotion_binding_from_context",
     # Validation
     "validate_context",
     "validate_policy_set",
