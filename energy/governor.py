@@ -21,7 +21,18 @@ authority:
 - policy authority stays WORK-010: nothing here mints authorization;
   the survival profile is the node's own local policy artifact
   (§16 local policy cache), and its enforcement conserves resources
-  -- it never grants authority to anyone.
+  -- it never grants authority to anyone;
+- session authority stays WORK-012: the survival gate is a
+  NEW-DEMAND admission gate.  It may shed NEW demand and NEW route
+  candidates; it NEVER terminates or mutates an established
+  session -- it holds no session/connection state (it cannot even
+  distinguish an established essential session from a new essential
+  request) and imports nothing from the sessions family.  The
+  survival floor's reserve is the benefit of the essential
+  connectivity the session layer has already established;
+  preserving that established connectivity is the caller/session
+  layer's authority (the PR #28 review B3 conservative-composition
+  declaration).
 
 Every decision is a pure function of its explicit inputs (deterministic:
 no wall clock, no randomness, no dict-iteration-order dependence;
@@ -226,11 +237,19 @@ class EnergyGovernor:
         - DEFERRABLE: admitted at NORMAL/CONSERVE, shed from CRITICAL
           on (``shed-deferrable``);
         - ESSENTIAL: admitted at every stage above the survival floor;
-          at/below the floor (``reserve <= survival_reserve_bp``) the
-          node keeps only its established essential connectivity and
-          admits nothing new (``shed-survival-floor``) -- the §18
-          "reserve capacity for essential connectivity when energy is
-          scarce" made mechanical.
+          at/below the floor (``reserve <= survival_reserve_bp``) NO
+          NEW demand is admitted -- essential included
+          (``shed-survival-floor``): the floor is an absolute
+          NEW-DEMAND admission floor, and its reserve is held for the
+          essential connectivity the WORK-012 session layer has
+          ALREADY established.  The gate deliberately implements the
+          §18 "reserve capacity for essential connectivity when
+          energy is scarce" as the conservative subset -- at/below
+          the floor, admit no new demand -- because it holds no
+          session/connection state: preserving the established
+          essential connectivity itself is the caller/session
+          layer's authority (the gate never terminates or mutates an
+          established session).
         """
         if not isinstance(demand, ServiceDemand):
             raise EnergyError(
@@ -292,8 +311,10 @@ class EnergyGovernor:
                 return _verdict(
                     False,
                     SurvivalVerdict.SHED_SURVIVAL_FLOOR,
-                    "reserve %d bp at/below the survival floor %d bp; the floor "
-                    "is reserved for essential connectivity"
+                    "reserve %d bp at/below the survival floor %d bp: the floor "
+                    "is an absolute new-demand admission floor -- its reserve "
+                    "is held for established essential connectivity (the "
+                    "session layer's authority)"
                     % (posture.reserve_basis_points, profile.survival_reserve_bp),
                 )
             return _verdict(
@@ -306,8 +327,11 @@ class EnergyGovernor:
             return _verdict(
                 False,
                 SurvivalVerdict.SHED_SURVIVAL_FLOOR,
-                "reserve %d bp at/below the survival floor %d bp; only established "
-                "essential connectivity may draw the floor"
+                "reserve %d bp at/below the survival floor %d bp: no NEW demand "
+                "is admitted -- essential included; the floor's reserve is the "
+                "benefit of the essential connectivity the WORK-012 session "
+                "layer has already established (new-demand admission only -- "
+                "the gate never terminates an established session)"
                 % (posture.reserve_basis_points, profile.survival_reserve_bp),
             )
         return _verdict(
@@ -387,8 +411,12 @@ class EnergyGovernor:
            - in the SURVIVAL stage, a candidate whose energy cost
              would take the LOCAL node's projected reserve at/below
              the survival floor is shed
-             (``survival-floor-breach``) -- the floor is reserved for
-             essential connectivity (§18);
+             (``survival-floor-breach``) -- the floor's reserve is
+             held for established essential connectivity (§18); the
+             adaptation gates NEW selections only: whether an
+             ESTABLISHED session moves to an adapted selection is
+             the WORK-012 session layer's explicit decision, never
+             the energy layer's;
 
            when every candidate is shed the adaptation fails closed
            (``no-candidate``) -- never a silent fallback to an

@@ -64,11 +64,19 @@ The admission gate `evaluate_service_demand()`: the demand's
 priority is the PROFILE's classification -- never caller-supplied
 (unclassified services are deferrable; protection is explicit, never
 inferred). Essential services are admitted at every stage above the
-survival floor; at/below the floor the node keeps only its
-established essential connectivity and admits nothing new; nothing
-is ever admitted beyond the measured level (fail closed, explicit
-reasons: `shed-droppable`, `shed-deferrable`, `shed-survival-floor`,
-`shed-insufficient-reserve`).
+survival floor; at/below the floor **no new demand is admitted --
+essential included** (`shed-survival-floor`): the floor is an
+absolute *new-demand admission floor*, and its reserve is held for
+the essential connectivity the WORK-012 session layer has already
+established. The gate is a **new-demand admission gate** (the PR #28
+review B3 conservative composition): it holds no session/connection
+state, never distinguishes an established essential session from a
+new essential request, never terminates or mutates an established
+session, and imports nothing from the sessions family -- preserving
+established essential connectivity is the caller/session layer's
+authority. Nothing is ever admitted beyond the measured level (fail
+closed, explicit reasons: `shed-droppable`, `shed-deferrable`,
+`shed-survival-floor`, `shed-insufficient-reserve`).
 
 ## Restart/rejoin, intermittent upstream, offline grace
 
@@ -84,10 +92,20 @@ reasons: `shed-droppable`, `shed-deferrable`, `shed-survival-floor`,
   service). Every transition mints an auditable content-addressed
   `UpstreamEvent`.
 - `OfflinePolicyCache` -- §16 configurable offline authorization
-  grace: decisions recorded while UP are honored within the grace
-  window during a partition; unknown decisions (minted during the
-  partition), tampered decisions, and expired verdicts fail closed;
-  recovery closes the offline-honor channel.
+  grace with an explicit lifecycle (the PR #28 review B1/B2
+  correction): **ONLINE** (recording open; recorded verdicts replay
+  while UP) → **OFFLINE_GRACE** (partition: recording CLOSED -- a
+  decision minted during the partition is never learnable by the
+  cache, it must be obtained from the online policy authority after
+  recovery; recorded verdicts honored within the grace window only)
+  → **ONLINE_REAUTH_REQUIRED** (recovery: the offline-honor channel
+  CLOSES -- every pre-recovery decision is rejected until it has
+  been revalidated and re-recorded by the online authority;
+  post-recovery recordings -- including an identical re-record of a
+  pre-recovery decision the authority re-issued -- replay
+  normally). Unknown decisions, tampered decisions, and expired
+  verdicts fail closed throughout; a pre-recovery decision is never
+  resurrected, not even by a subsequent partition.
 - `DeferredSyncQueue` -- §16 delayed synchronization: telemetry
   observations recorded while offline are queued idempotently by
   observation id and replayed into a real `TelemetryStore` on

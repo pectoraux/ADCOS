@@ -16,7 +16,11 @@ and resilience:
   descending stage-threshold ladder in basis points, the survival
   reserve floor reserved for essential connectivity (§18: "Policies
   can reserve capacity for essential connectivity when energy is
-  scarce"), the essential/deferrable/droppable service
+  scarce"; enforced as an absolute NEW-DEMAND admission floor -- at or
+  below it no new demand is admitted, essential included, and the
+  established essential connectivity of the WORK-012 session layer
+  is the floor's beneficiary, never the gate's concern), the
+  essential/deferrable/droppable service
   classifications, the configurable offline authorization grace
   (§16), the upstream degradation rules, and the physics bound used
   by deterministic restart/rejoin continuity.
@@ -123,7 +127,10 @@ class EnergyStage:
     energy is scarce").  Ordered NORMAL -> CONSERVE -> CRITICAL ->
     SURVIVAL; the thresholds live in the SurvivalProfile (descending
     reserve basis points).  SURVIVAL is the protective stage: only
-    essential-service energy is admitted below the survival floor."""
+    essential-service energy is admitted (above the survival reserve
+    floor -- at/below the floor NO new demand is admitted at all,
+    essential included; the floor's reserve is held for the essential
+    connectivity the session layer has already established)."""
 
     NORMAL = "normal"
     CONSERVE = "conserve"
@@ -215,6 +222,42 @@ class UpstreamEventKind:
     @classmethod
     def values(cls) -> Tuple[str, ...]:
         return (cls.DEGRADED, cls.DOWN, cls.RECOVERED)
+
+
+class OfflineCacheLifecycle:
+    """The frozen offline-policy-cache lifecycle vocabulary (spec/
+    architecture §16 local-first offline authorization grace; the PR
+    #28 review B1/B2 correction):
+
+    - ``online`` -- the online policy authority is reachable:
+      recording is OPEN and decisions recorded in the current
+      authorization epoch replay while UP (the §16 local policy
+      cache);
+    - ``offline-grace`` -- partitioned: recording is CLOSED (a
+      decision minted during the partition is never learnable by the
+      cache -- the cache replays verdicts recorded while connected,
+      it never becomes a policy evaluator/authority during the
+      partition) and the decisions recorded before the partition
+      remain honored within the configured grace window only;
+    - ``online-reauth-required`` -- recovered: the offline-honor
+      channel is CLOSED for every decision recorded before the
+      recovery (each must be revalidated and re-recorded by the
+      online policy authority); recording is OPEN again and
+      post-recovery recordings replay normally.
+
+    The cache enters ``online-reauth-required`` on every recovery and
+    stays there until the next partition: after a partition/recovery
+    cycle the offline channel may never again be the sole basis for
+    honoring a pre-recovery decision.
+    """
+
+    ONLINE = "online"
+    OFFLINE_GRACE = "offline-grace"
+    ONLINE_REAUTH_REQUIRED = "online-reauth-required"
+
+    @classmethod
+    def values(cls) -> Tuple[str, ...]:
+        return (cls.ONLINE, cls.OFFLINE_GRACE, cls.ONLINE_REAUTH_REQUIRED)
 
 
 #: Reason codes a route-adaptation shed entry may carry (frozen).
@@ -544,10 +587,13 @@ class SurvivalProfile:
       ``conserve > critical > survival``; a depleting node at or
       below a threshold enters that stage;
     - ``survival_reserve_bp`` -- the floor RESERVED for essential
-      connectivity: when the node's reserve ratio is at/below this
-      floor, only essential-service energy is admitted (§18); MUST
-      be <= the survival threshold (the floor bites inside the
-      survival stage);
+      connectivity (§18): an absolute NEW-DEMAND admission floor --
+      when the node's reserve ratio is at/below this floor, NO new
+      demand is admitted (essential included); the floor's reserve is
+      the benefit of the essential connectivity the WORK-012 session
+      layer has already established (the profile/gate hold no session
+      state); MUST be <= the survival threshold (the floor bites
+      inside the survival stage);
     - ``essential_services`` / ``deferrable_services`` /
       ``droppable_services`` -- the WORK-025 service refs by priority
       class; disjoint by construction;
@@ -867,14 +913,21 @@ def derive_demand_id(
 @dataclass(frozen=True)
 class SurvivalVerdict:
     """The deterministic outcome of the survival admission gate (a
-    derived evaluation result, not a content-addressed record):
+    derived evaluation result, not a content-addressed record).  The
+    gate is a NEW-DEMAND admission gate (the PR #28 review B3
+    correction): a verdict speaks only to whether a NEW demand may
+    consume its energy cost now -- it carries no session/connection
+    state and never terminates or mutates an established session
+    (session authority stays WORK-012):
 
     - ``admitted`` -- the demand may consume its energy cost now;
     - ``stage`` / ``priority`` -- the posture stage and the profile's
       classification under which the verdict was reached;
     - ``reason`` -- one of the frozen gate reasons: ``admitted``,
       ``shed-droppable``, ``shed-deferrable``, ``shed-survival-floor``
-      (a deferrable demand below the survival floor), or
+      (ANY new demand -- essential included -- at/below the survival
+      floor: the floor's reserve is held for the essential
+      connectivity the session layer has already established), or
       ``shed-insufficient-reserve`` (even an essential demand cannot
       breach the physical reserve: the level itself cannot cover the
       cost -- the gate fails closed and says so);

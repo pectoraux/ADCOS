@@ -51,6 +51,16 @@ the WORK-027 work-item contract to discriminating cases:
 - offline policy cache with GENUINE WORK-010
   engine decisions (grace window, fail
   closed, recovery closes the channel)               -> case_19
+- REGRESSION (PR #28 B1): the cache never
+  learns a decision minted during the
+  partition (record_decision closed)    -> case_33
+- REGRESSION (PR #28 B2): recovery closes
+  the offline-honor channel until online
+  revalidation (explicit lifecycle)     -> case_34
+- REGRESSION (PR #28 B3): an energy
+  decision can never terminate or mutate
+  an established WORK-012 session
+  (new-demand admission only)           -> case_35
 - deferred sync queue replays REAL
   telemetry into a REAL TelemetryStore               -> case_20
 - power simulation: solar day/night cycle,
@@ -395,6 +405,10 @@ def case_01_posture_from_real_energy_state() -> Result:
 
 def case_02_frozen_vocabularies() -> Result:
     name = "case_02_frozen_vocabularies"
+    # PR #28 review B2: the explicit offline-cache lifecycle vocabulary
+    # (lazy import: the vocabulary is the B2 correction surface).
+    from energy import OfflineCacheLifecycle
+
     expected = {
         "power_sources": ("grid", "battery", "solar-hybrid", "generator", "harvesting"),
         "thermal": ("normal", "hot", "critical"),
@@ -403,6 +417,8 @@ def case_02_frozen_vocabularies() -> Result:
         "connectivity": ("up", "degraded", "down"),
         "outcomes": ("passthrough", "reordered", "survival-filtered", "no-candidate"),
         "upstream_events": ("degraded", "down", "recovered"),
+        # PR #28 review B2: the explicit offline-cache lifecycle.
+        "cache_lifecycle": ("online", "offline-grace", "online-reauth-required"),
     }
     actual = {
         "power_sources": PowerSource.values(),
@@ -412,17 +428,20 @@ def case_02_frozen_vocabularies() -> Result:
         "connectivity": ConnectivityState.values(),
         "outcomes": AdaptationOutcome.values(),
         "upstream_events": UpstreamEventKind.values(),
+        "cache_lifecycle": OfflineCacheLifecycle.values(),
     }
     for key in expected:
         if tuple(expected[key]) != tuple(actual[key]):
             return fail(name, "vocabulary %s = %r (expected %r)" % (key, actual[key], expected[key]))
     codes = EnergyReasonCode.values()
-    if len(codes) != 27 or len(set(codes)) != 27:
-        return fail(name, "reason-code vocabulary must stay frozen at 27 unique codes")
+    # 27 at db7c455; the PR #28 review B1/B2 remediation deliberately
+    # added offline-record-closed and offline-reauth-required.
+    if len(codes) != 29 or len(set(codes)) != 29:
+        return fail(name, "reason-code vocabulary must stay frozen at 29 unique codes")
     depleting = {PowerSource.BATTERY, PowerSource.SOLAR_HYBRID, PowerSource.GENERATOR, PowerSource.HARVESTING}
     if PowerSource.DEPLETING != depleting or PowerSource.is_depleting(PowerSource.GRID):
         return fail(name, "grid must never be a depleting source")
-    return ok(name, "all vocabularies closed + frozen (27 reason codes)")
+    return ok(name, "all vocabularies closed + frozen (29 reason codes)")
 
 
 def case_03_survival_profile_validation_and_tamper_matrix() -> Result:
@@ -784,8 +803,9 @@ def case_08_essential_service_protection_composed() -> Result:
         return fail(name, "essential service shed at the survival threshold: %s" % verdict_essential.detail)
     if verdict_droppable.admitted or verdict_droppable.reason != SurvivalVerdict.SHED_DROPPABLE:
         return fail(name, "droppable service not shed at the survival threshold")
-    # Below the floor: nothing new is admitted (established essential
-    # connectivity keeps the reserve).
+    # Below the floor: no NEW demand is admitted (the floor's reserve
+    # is held for the essential connectivity the WORK-012 session
+    # layer has already established).
     floor_posture = _posture(level=1000, capacity=10_000, draw=10)
     floor_verdict = _GOVERNOR.evaluate_service_demand(
         _demand(ref_essential, cost=50), floor_posture, profile,
@@ -1431,20 +1451,49 @@ def case_19_offline_policy_cache_grace() -> Result:
     future_query = cache.honor(decision, now="2026-09-01T11:00:00Z")
     if future_query.reason != HonorResult.DECISION_FUTURE:
         problems.append("future-dated query reason wrong: %r" % (future_query.reason,))
-    # Recovery closes the honor channel: the same recorded decision
-    # is honored only after re-verification (re-record).
+    # Recording is CLOSED while partitioned (the PR #28 review B1
+    # authority boundary): a decision minted during the partition is
+    # never learnable by the cache.
+    try:
+        minted = PolicyContext(
+            operation=Operation.RESOURCE_RESERVE, requester_node_id=_NODE_A,
+            evaluation_instant="2026-09-01T13:11:00Z",
+        )
+        minted_eval = engine.evaluate(policy_set, minted)
+        assert minted_eval.decision is not None
+        cache.record_decision(minted_eval.decision, now="2026-09-01T13:11:00Z")
+        problems.append("decision minted during the partition recorded")
+    except EnergyError:
+        pass
+    # Recovery closes the offline-honor channel (the PR #28 review B2
+    # correction): the same recorded decision is REJECTED until it is
+    # revalidated and re-recorded by the online policy authority.
     cache.mark_recovered(now="2026-09-01T13:11:00Z")
     after = cache.honor(decision, now="2026-09-01T13:12:00Z")
-    if not after.honored:
-        problems.append("recorded verdict must replay idempotently while UP")
+    if after.honored or after.reason != HonorResult.REAUTH_REQUIRED:
+        problems.append(
+            "pre-recovery verdict must be rejected after recovery (offline "
+            "honor channel closed): %r" % (after,)
+        )
+    # The online authority re-issues the decision and the caller
+    # re-records it: the revalidated verdict replays again.
+    cache.record_decision(decision, now="2026-09-01T13:12:30Z")
+    revalidated = cache.honor(decision, now="2026-09-01T13:13:00Z")
+    if not revalidated.honored or revalidated.effect != Effect.ALLOW:
+        problems.append("re-recorded (revalidated) verdict not honored: %r" % (revalidated,))
     try:
-        cache.mark_recovered(now="2026-09-01T13:13:00Z")
+        cache.mark_recovered(now="2026-09-01T13:14:00Z")
         problems.append("double recovery accepted")
     except EnergyError:
         pass
     if problems:
         return fail(name, "; ".join(problems))
-    return ok(name, "genuine WORK-010 verdicts: digest-bound, grace-bounded, fail-closed")
+    return ok(
+        name,
+        "genuine WORK-010 verdicts: digest-bound, grace-bounded, fail-closed; "
+        "recording closed while partitioned; recovery closes the honor channel "
+        "until online revalidation",
+    )
 
 
 def case_20_deferred_sync_replay() -> Result:
@@ -2063,6 +2112,313 @@ def case_32_policy_composition_energy_facts() -> Result:
     return ok(name, "posture facts drive a REAL WORK-010 energy-reserve rule (allow -> deny)")
 
 
+def _genuine_policy_decision(engine: PolicyEngine, policy_set: PolicySet, at: str) -> PolicyDecision:
+    """A GENUINE WORK-010 engine decision evaluated at ``at`` (used by
+    the PR #28 review regression cases)."""
+    evaluation = engine.evaluate(
+        policy_set,
+        PolicyContext(
+            operation=Operation.RESOURCE_RESERVE, requester_node_id=_NODE_A,
+            evaluation_instant=at,
+        ),
+    )
+    decision = evaluation.decision
+    assert evaluation.ok and decision is not None, evaluation.detail
+    return decision
+
+
+def case_33_offline_cache_never_learns_partition_decisions() -> Result:
+    name = "case_33_offline_cache_never_learns_partition_decisions"
+    # PR #28 review B1: once partitioned, record_decision must REJECT.
+    # The offline cache REPLAYS decisions recorded while connected; it
+    # never becomes a policy evaluator/authority during the partition,
+    # so a decision minted during the outage can only be obtained from
+    # the online policy authority after recovery -- never learned by
+    # the cache mid-partition.
+    rule = PolicyRule(
+        rule_id="allow-reserve", domain=PolicyDomain.RESOURCE,
+        effect=Effect.ALLOW, operation=Operation.RESOURCE_RESERVE,
+    )
+    policy_set = PolicySet(
+        set_id="ps-w027", version=1, rules=(rule,), issuer_node_id=_ISSUER,
+        valid_from="2026-01-01T00:00:00Z", valid_until="2028-01-01T00:00:00Z",
+    )
+    engine = PolicyEngine()
+    first = _genuine_policy_decision(engine, policy_set, _NOW)
+    # A second GENUINE allow, minted at a later instant (distinct
+    # content -> a genuinely distinct decision id).
+    second = _genuine_policy_decision(engine, policy_set, "2026-09-01T12:30:00Z")
+    if first.decision_id == second.decision_id:
+        return fail(name, "fixture broken: distinct instants minted identical decisions")
+    cache = OfflinePolicyCache(_profile(grace=3600))
+    problems: List[str] = []
+    # Genuine ALLOW recorded while UP.
+    cache.record_decision(first, now=_NOW)
+    cache.mark_partition(now="2026-09-01T12:10:00Z")
+    # Attempt to record the partition-minted decision: REJECTION (the
+    # cache's recording channel is CLOSED while partitioned).
+    try:
+        cache.record_decision(second, now="2026-09-01T12:30:00Z")
+        problems.append("record_decision accepted a decision minted DURING the partition")
+    except EnergyError as error:
+        if error.reason != EnergyReasonCode.OFFLINE_RECORD_CLOSED:
+            problems.append("wrong rejection reason: %r" % (error.reason,))
+    # The rejected decision also fails closed at honor time (unknown
+    # to the cache -- it was never learnable during the partition).
+    unknown = cache.honor(second, now="2026-09-01T12:31:00Z")
+    if unknown.honored or unknown.reason != HonorResult.UNKNOWN_DECISION:
+        problems.append("partition-minted decision honored: %r" % (unknown,))
+    # The original cached decision can still be honored within grace
+    # (partition 12:10 + 3600 s; at 12:31 exactly 2340 s remain).
+    still = cache.honor(first, now="2026-09-01T12:31:00Z")
+    if not still.honored or still.effect != Effect.ALLOW or still.remaining_grace_seconds != 2340:
+        problems.append("pre-partition decision no longer honored within grace: %r" % (still,))
+    # After recovery the recording channel re-opens: the online
+    # authority re-issues the second decision and the caller records
+    # it (the only lawful path for a partition-minted decision).
+    cache.mark_recovered(now="2026-09-01T12:40:00Z")
+    cache.record_decision(second, now="2026-09-01T12:40:00Z")
+    if not cache.honor(second, now="2026-09-01T12:41:00Z").honored:
+        problems.append("post-recovery recording of the genuine decision not honored")
+    if problems:
+        return fail(name, "; ".join(problems))
+    return ok(
+        name,
+        "recording closed while partitioned; partition-minted decisions never "
+        "learned/honored; pre-partition verdict still honored within grace",
+    )
+
+
+def case_34_recovery_closes_offline_honor_channel() -> Result:
+    name = "case_34_recovery_closes_offline_honor_channel"
+    # PR #28 review B2: mark_recovered must actually CLOSE the offline
+    # honor channel.  Explicit lifecycle: ONLINE -> OFFLINE_GRACE ->
+    # ONLINE_REAUTH_REQUIRED; a previously cached decision is rejected
+    # after recovery until it has been revalidated/recorded by the
+    # online policy authority, and a fresh post-recovery decision is
+    # usable immediately.
+    rule = PolicyRule(
+        rule_id="allow-reserve", domain=PolicyDomain.RESOURCE,
+        effect=Effect.ALLOW, operation=Operation.RESOURCE_RESERVE,
+    )
+    policy_set = PolicySet(
+        set_id="ps-w027", version=1, rules=(rule,), issuer_node_id=_ISSUER,
+        valid_from="2026-01-01T00:00:00Z", valid_until="2028-01-01T00:00:00Z",
+    )
+    engine = PolicyEngine()
+    cached = _genuine_policy_decision(engine, policy_set, _NOW)
+    cache = OfflinePolicyCache(_profile(grace=3600))
+    problems: List[str] = []
+    # UP: the genuine ALLOW is cached and replays.
+    cache.record_decision(cached, now=_NOW)
+    if not cache.honor(cached, now=_NOW).honored:
+        return fail(name, "recorded decision not honored while UP")
+    # PARTITION: honored within grace (600 s remain at 13:00).
+    cache.mark_partition(now="2026-09-01T12:10:00Z")
+    inside = cache.honor(cached, now="2026-09-01T13:00:00Z")
+    if not inside.honored or inside.remaining_grace_seconds != 600:
+        return fail(name, "grace-bounded honor broken: %r" % (inside,))
+    # RECOVERY: the SAME cached ALLOW = rejected (the channel closed).
+    # This is the discriminating B2 check -- at the reviewed commit the
+    # cached verdict stayed honored indefinitely after recovery.
+    cache.mark_recovered(now="2026-09-01T13:10:00Z")
+    rejected = cache.honor(cached, now="2026-09-01T13:11:00Z")
+    if rejected.honored or rejected.reason != HonorResult.REAUTH_REQUIRED:
+        return fail(
+            name,
+            "pre-recovery decision honored after recovery (the offline-honor "
+            "channel never closed): %r" % (rejected,),
+        )
+    # A FRESH genuine decision recorded after recovery = usable.
+    fresh = _genuine_policy_decision(engine, policy_set, "2026-09-01T13:11:30Z")
+    if fresh.decision_id == cached.decision_id:
+        return fail(name, "fixture broken: fresh decision must differ from the cached one")
+    cache.record_decision(fresh, now="2026-09-01T13:11:30Z")
+    if not cache.honor(fresh, now="2026-09-01T13:12:00Z").honored:
+        return fail(name, "fresh post-recovery decision not usable")
+    # Lifecycle reads (the explicit vocabulary pins; the lazy import
+    # is the PR #28 review B2 correction surface): a fresh cache is
+    # ONLINE (epoch 0) -> OFFLINE_GRACE (partitioned) ->
+    # ONLINE_REAUTH_REQUIRED (recovered, epoch advanced).
+    from energy import OfflineCacheLifecycle
+
+    lifecycle_cache = OfflinePolicyCache(_profile(grace=3600))
+    if lifecycle_cache.lifecycle() != OfflineCacheLifecycle.ONLINE:
+        problems.append("fresh cache must be ONLINE: %r" % (lifecycle_cache.lifecycle(),))
+    if lifecycle_cache.authorization_epoch() != 0:
+        problems.append("fresh cache must be at authorization epoch 0")
+    lifecycle_cache.mark_partition(now="2026-09-01T13:20:00Z")
+    if lifecycle_cache.lifecycle() != OfflineCacheLifecycle.OFFLINE_GRACE:
+        problems.append("partitioned cache must be OFFLINE_GRACE")
+    lifecycle_cache.mark_recovered(now="2026-09-01T13:30:00Z")
+    if lifecycle_cache.lifecycle() != OfflineCacheLifecycle.ONLINE_REAUTH_REQUIRED:
+        problems.append("recovered cache must be ONLINE_REAUTH_REQUIRED")
+    if lifecycle_cache.authorization_epoch() != 1:
+        problems.append("recovery must advance the authorization epoch")
+    if cache.authorization_epoch() != 1:
+        problems.append("the scenario cache must also be at authorization epoch 1")
+    # A NEW partition must NOT resurrect the stale (pre-recovery)
+    # decision -- partitioning cannot launder a stale verdict -- while
+    # the current-epoch decision stays grace-bounded honored
+    # (partition 14:00; at 14:01 exactly 3540 s remain).
+    cache.mark_partition(now="2026-09-01T14:00:00Z")
+    resurrected = cache.honor(cached, now="2026-09-01T14:01:00Z")
+    if resurrected.honored or resurrected.reason != HonorResult.REAUTH_REQUIRED:
+        problems.append("stale decision resurrected by a new partition: %r" % (resurrected,))
+    survivor = cache.honor(fresh, now="2026-09-01T14:01:00Z")
+    if not survivor.honored or survivor.remaining_grace_seconds != 3540:
+        problems.append("current-epoch decision not honored in the new partition: %r" % (survivor,))
+    # A SECOND recovery closes the channel for BOTH generations.
+    cache.mark_recovered(now="2026-09-01T15:00:00Z")
+    if cache.authorization_epoch() != 2:
+        problems.append("second recovery must advance the epoch to 2")
+    if cache.honor(fresh, now="2026-09-01T15:01:00Z").reason != HonorResult.REAUTH_REQUIRED:
+        problems.append("second recovery must close the channel for the fresh decision too")
+    if problems:
+        return fail(name, "; ".join(problems))
+    return ok(
+        name,
+        "explicit lifecycle; recovery closes the honor channel until online "
+        "revalidation; stale verdicts never resurrected",
+    )
+
+
+def case_35_energy_never_terminates_established_sessions() -> Result:
+    name = "case_35_energy_never_terminates_established_sessions"
+    # PR #28 review B3 (option A -- conservative composition): the
+    # energy gate is a NEW-DEMAND admission gate.  It may shed NEW
+    # demand and NEW route candidates; an energy decision can NEVER
+    # itself terminate or mutate an existing WORK-012 session.  This
+    # case composes a REAL WORK-012 session (the selftest is the
+    # composition root -- the energy family itself imports nothing
+    # from sessions/, pinned below) and proves it byte-identical
+    # across the harshest energy decisions.
+    problems: List[str] = []
+    import hashlib as _hashlib
+    from dataclasses import fields as _dataclass_fields
+
+    from sessions import SessionState, SessionStore
+
+    # A REAL WORK-011 route decision computed under a REAL WORK-010
+    # allow decision (the same composition pattern the routing cases
+    # use), then a REAL WORK-012 session established over it.
+    probe = PolicyDecision(
+        decision_id="0" * 64, effect="allow", code="allow", detail="fixture",
+        matched_rule_ids=("r1",), policy_set_id="ps-1", policy_set_version=1,
+        evaluation_instant=_NOW,
+    )
+    policy_decision = PolicyDecision(
+        decision_id=_hashlib.sha256(probe.canonical_bytes()).hexdigest(),
+        effect="allow", code="allow", detail="fixture",
+        matched_rule_ids=("r1",), policy_set_id="ps-1",
+        policy_set_version=1, evaluation_instant=_NOW,
+    )
+    route = _routing_decision(policy_decision=policy_decision)
+    store = SessionStore()
+    created = store.create(
+        route, policy_decision,
+        source_node_id=_NODE_A, destination_node_id=_NODE_B,
+        creation_instant=_NOW,
+    )
+    if not created.ok or created.session is None:
+        return fail(name, "session fixture failed: %s" % (created.detail,))
+    session_id = created.session.session_id
+    for state, at in (
+        (SessionState.AUTHORIZED, "2026-09-01T12:00:10Z"),
+        (SessionState.ESTABLISHED, "2026-09-01T12:00:20Z"),
+    ):
+        step = store.transition(session_id, state, event_instant=at)
+        if not step.ok:
+            return fail(name, "session fixture failed to reach %s: %s" % (state, step.detail))
+    established = store.get(session_id)
+    if established is None or established.state != SessionState.ESTABLISHED:
+        return fail(name, "session fixture not ESTABLISHED")
+    before_bytes = store.to_canonical_bytes()
+    before_events = store.get_events(session_id)
+
+    # The harshest energy posture: at/below the survival floor
+    # (800 bp <= the 1000 bp floor) -- SURVIVAL stage.
+    profile = _profile(essential=("svc:emergency-relay",))
+    floor_posture = _posture(level=800, capacity=10_000)
+    if _GOVERNOR.classify_stage(floor_posture, profile) != EnergyStage.SURVIVAL:
+        return fail(name, "fixture broken: the floor posture must be SURVIVAL stage")
+    # Energy decision 1 -- the survival gate: the NEW essential demand
+    # is shed (the floor is an absolute new-demand admission floor).
+    verdict = _GOVERNOR.evaluate_service_demand(
+        _demand("svc:emergency-relay", cost=10, seq=2), floor_posture, profile,
+    )
+    if verdict.admitted or verdict.reason != SurvivalVerdict.SHED_SURVIVAL_FLOOR:
+        problems.append("new essential demand must shed at the floor: %r" % (verdict,))
+    # Energy decision 2 -- the route adaptation at SURVIVAL stage:
+    # every candidate breaches the projected floor -> fail-closed
+    # no-candidate (new selections only).
+    adaptation = _GOVERNOR.adapt_route_decision(
+        route, postures={_NODE_A: floor_posture}, profile=profile, now=_NOW,
+    )
+    if adaptation.outcome != AdaptationOutcome.NO_CANDIDATE:
+        problems.append(
+            "fixture mismatch: expected no-candidate at the floor, got %r"
+            % (adaptation.outcome,)
+        )
+    # The ESTABLISHED session is UNTOUCHED by both energy decisions:
+    # canonical store bytes, session record, event log, state.
+    if store.to_canonical_bytes() != before_bytes:
+        problems.append("energy decisions mutated the session store")
+    after = store.get(session_id)
+    if after is None or after != established or after.state != SessionState.ESTABLISHED:
+        problems.append("energy decisions mutated the session record/state")
+    if store.get_events(session_id) != before_events:
+        problems.append("energy decisions appended session events")
+    # Structural isolation: the energy family imports NOTHING from
+    # the sessions family (session authority stays WORK-012).
+    energy_dir = os.path.join(_ROOT, "energy")
+    for filename in sorted(os.listdir(energy_dir)):
+        if not filename.endswith(".py"):
+            continue
+        with open(os.path.join(energy_dir, filename), "r", encoding="utf-8") as handle:
+            source = handle.read()
+        if re.search(r"^\s*(from\s+sessions|import\s+sessions)\b", source, re.M):
+            problems.append("energy/%s imports sessions (session authority breach)" % filename)
+    # Data-shape: the energy verdict/adaptation carry no session
+    # handles -- no field names a session, no termination surface.
+    verdict_fields = {field.name for field in _dataclass_fields(verdict)}
+    adaptation_fields = {field.name for field in _dataclass_fields(adaptation)}
+    if any("session" in field for field in verdict_fields | adaptation_fields):
+        problems.append("energy records carry session fields")
+    if verdict_fields != {"admitted", "stage", "priority", "reason", "detail"}:
+        problems.append("SurvivalVerdict surface changed: %r" % (sorted(verdict_fields),))
+    # Static declaration: the corrected new-demand-admission-only
+    # composition is declared, and the overstated session-aware claim
+    # ("keeps only its established essential connectivity") is gone.
+    with open(os.path.join(energy_dir, "governor.py"), "r", encoding="utf-8") as handle:
+        governor_source = handle.read()
+    with open(os.path.join(energy_dir, "README.md"), "r", encoding="utf-8") as handle:
+        readme_source = handle.read()
+    if "NEW-DEMAND admission gate" not in governor_source:
+        problems.append("governor must declare the new-demand-admission-only composition")
+    if "new-demand admission gate" not in readme_source:
+        problems.append("README must declare the new-demand-admission-only composition")
+    overclaims = (
+        "keeps only its established essential connectivity",
+        "only established essential connectivity may draw the floor",
+    )
+    for filename in sorted(os.listdir(energy_dir)):
+        if not (filename.endswith(".py") or filename == "README.md"):
+            continue
+        with open(os.path.join(energy_dir, filename), "r", encoding="utf-8") as handle:
+            source = handle.read()
+        for overclaim in overclaims:
+            if overclaim in source:
+                problems.append("energy/%s still claims session-aware floor semantics" % filename)
+    if problems:
+        return fail(name, "; ".join(problems))
+    return ok(
+        name,
+        "energy gates new demand only; the established WORK-012 session stays "
+        "ESTABLISHED, byte-identical across the harshest energy decisions",
+    )
+
+
 # --------------------------------------------------------------------------
 # Runner
 # --------------------------------------------------------------------------
@@ -2100,6 +2456,9 @@ CASES = [
     case_30_import_discipline,
     case_31_serialization_round_trips,
     case_32_policy_composition_energy_facts,
+    case_33_offline_cache_never_learns_partition_decisions,
+    case_34_recovery_closes_offline_honor_channel,
+    case_35_energy_never_terminates_established_sessions,
 ]
 
 

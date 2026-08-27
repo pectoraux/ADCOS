@@ -11,9 +11,12 @@ remains WORK-011 (``routing/`` -- the frozen candidate total order is
 never rewritten), resource authority remains WORK-008 (``resources/``
 -- energy states are its measurements), policy authority remains
 WORK-010 (``policy/`` -- offline grace honors its decisions as DATA),
-and observability data remains WORK-026 (``telemetry/``).  The energy
-layer derives per-node energy posture, applies the node's configured
-survival profile (spec/architecture §18: "Policies can reserve
+and observability data remains WORK-026 (``telemetry/``).  Session
+authority remains WORK-012 (``sessions/``): the energy survival gate
+is a NEW-DEMAND admission gate -- it may shed new demand and new
+route candidates, it never terminates or mutates an established
+session.  The energy layer derives per-node energy posture, applies
+the node's configured survival profile (spec/architecture §18: "Policies can reserve
 capacity for essential connectivity when energy is scarce"), adapts
 path PREFERENCE among already-feasible and already-policy-eligible
 candidates, and owns the resilience mechanics: deterministic node
@@ -69,6 +72,16 @@ class EnergyReasonCode:
     OFFLINE_GRACE_EXPIRED = "offline-grace-expired"
     OFFLINE_UNKNOWN_DECISION = "offline-unknown-decision"
     OFFLINE_DECISION_FUTURE = "offline-decision-future"
+    #: PR #28 review B1: the cache's recording channel is CLOSED while
+    #: partitioned -- a decision minted during the partition is never
+    #: learnable by the cache (new policy decisions come from the
+    #: online policy authority after recovery).
+    OFFLINE_RECORD_CLOSED = "offline-record-closed"
+    #: PR #28 review B2: the offline-honor channel is CLOSED after
+    #: recovery until the decision is revalidated/recorded by the
+    #: online policy authority (the vocabulary twin of the
+    #: ``HonorResult.REAUTH_REQUIRED`` reason).
+    OFFLINE_REAUTH_REQUIRED = "offline-reauth-required"
     QUEUE_EXISTS = "queue-exists"
     ILLEGAL_STATE = "illegal-state"
 
@@ -100,6 +113,8 @@ class EnergyReasonCode:
             cls.OFFLINE_GRACE_EXPIRED,
             cls.OFFLINE_UNKNOWN_DECISION,
             cls.OFFLINE_DECISION_FUTURE,
+            cls.OFFLINE_RECORD_CLOSED,
+            cls.OFFLINE_REAUTH_REQUIRED,
             cls.QUEUE_EXISTS,
             cls.ILLEGAL_STATE,
         )

@@ -22,15 +22,22 @@ local-first offline mechanics:
   an auditable, content-addressed
   :class:`~energy.model.UpstreamEvent`.
 - :class:`OfflinePolicyCache` -- the §16 "configurable offline
-  authorization grace periods" + "local policy cache": WORK-010
-  :class:`~policy.model.PolicyDecision` records observed while UP are
-  digest-verified and cached; during a partition the recorded
-  verdicts are honored within the configured grace window; unknown
-  decisions (minted during the partition) and expired verdicts fail
-  closed; recovery closes the offline-honor channel (upstream
-  re-verification resumes).  The cache REPLAYS recorded verdicts --
-  it never evaluates policy (WORK-010 stays the sole policy
-  authority).
+  authorization grace periods" + "local policy cache" with an
+  EXPLICIT lifecycle (ONLINE / OFFLINE_GRACE /
+  ONLINE_REAUTH_REQUIRED).  While ONLINE, callers
+  :meth:`~OfflinePolicyCache.record_decision` genuine WORK-010
+  decisions (digest-verified against their canonical bytes) and the
+  recorded verdicts replay while UP.  A partition enters
+  OFFLINE_GRACE: the recording channel CLOSES (a decision minted
+  during the partition is never learnable by the cache -- the cache
+  replays verdicts recorded while connected; it never becomes a
+  policy evaluator/authority during the partition) and the recorded
+  verdicts remain honored within the configured grace window only.
+  Recovery enters ONLINE_REAUTH_REQUIRED: the offline-honor channel
+  CLOSES -- every decision recorded before the recovery is rejected
+  until it has been revalidated and re-recorded by the online policy
+  authority.  The cache REPLAYS recorded verdicts -- it never
+  evaluates policy (WORK-010 stays the sole policy authority).
 - :class:`DeferredSyncQueue` -- the §16 "delayed synchronization":
   WORK-026 telemetry observations recorded while offline are queued
   content-addressed (idempotent by observation id) and replayed into
@@ -51,6 +58,7 @@ from policy.model import PolicyDecision
 from .errors import EnergyError, EnergyReasonCode
 from .model import (
     ConnectivityState,
+    OfflineCacheLifecycle,
     RejoinRecord,
     SurvivalProfile,
     UpstreamEvent,
@@ -560,7 +568,11 @@ class HonorResult:
     - ``effect`` -- the recorded decision's effect (ALLOW/DENY) when
       honored;
     - ``reason`` -- one of ``honored``, ``offline-grace-expired``,
-      ``offline-unknown-decision``, ``offline-decision-future``;
+      ``offline-unknown-decision``, ``offline-decision-future``, or
+      ``offline-reauth-required`` (the decision was recorded before
+      the last recovery: the offline-honor channel closed at
+      recovery and the decision must be revalidated/re-recorded by
+      the online policy authority);
     - ``remaining_grace_seconds`` -- the integer seconds of grace
       left (0 when not honored/expired);
     - ``detail`` -- deterministic diagnostics.
@@ -570,6 +582,7 @@ class HonorResult:
     GRACE_EXPIRED = "offline-grace-expired"
     UNKNOWN_DECISION = "offline-unknown-decision"
     DECISION_FUTURE = "offline-decision-future"
+    REAUTH_REQUIRED = "offline-reauth-required"
 
     honored: bool
     effect: str
@@ -583,6 +596,7 @@ class HonorResult:
             self.GRACE_EXPIRED,
             self.UNKNOWN_DECISION,
             self.DECISION_FUTURE,
+            self.REAUTH_REQUIRED,
         )
         if self.reason not in allowed:
             raise EnergyError(
@@ -613,13 +627,29 @@ class HonorResult:
 
 class OfflinePolicyCache:
     """The §16 local policy cache with configurable offline
-    authorization grace.
+    authorization grace, governed by an EXPLICIT lifecycle (the PR
+    #28 review B1/B2 correction):
 
-    While UP, callers :meth:`record_decision` genuine WORK-010
-    decisions (digest-verified against their canonical bytes).  When
-    the upstream partitions (``mark_partition``), the recorded
-    verdicts remain honored for ``offline_grace_seconds``; the cache
-    NEVER evaluates policy (WORK-010 stays the sole policy
+    - ``ONLINE`` (initial): :meth:`record_decision` is OPEN for
+      genuine WORK-010 decisions (digest-verified against their
+      canonical bytes); the recorded verdicts replay while UP (the
+      §16 local policy cache);
+    - ``OFFLINE_GRACE`` (``mark_partition``): the recording channel
+      is CLOSED -- a decision minted during the partition is never
+      learnable by the cache (the cache replays verdicts recorded
+      while connected; it never becomes a policy evaluator/authority
+      during the partition).  The verdicts recorded before the
+      partition remain honored within ``offline_grace_seconds``;
+    - ``ONLINE_REAUTH_REQUIRED`` (``mark_recovered``): the
+      offline-honor channel is CLOSED for every decision recorded
+      before the recovery -- each is rejected
+      (``offline-reauth-required``) until it has been revalidated and
+      re-recorded by the online policy authority; recording is OPEN
+      again, and post-recovery recordings (including an identical
+      re-record of a pre-recovery decision, i.e. the authority
+      re-issued it) replay normally.
+
+    The cache NEVER evaluates policy (WORK-010 stays the sole policy
     authority) -- it replays recorded verdicts, and everything it
     cannot replay fails closed:
 
@@ -629,9 +659,14 @@ class OfflinePolicyCache:
       to the query instant fails closed;
     - after the grace window expires, even recorded verdicts stop
       being honored;
-    - on recovery (``mark_recovered``) the offline-honor channel
-      closes: every decision re-verifies upstream before it is
-      honored again, and the cache resumes recording.
+    - a decision recorded before the last recovery is never
+      resurrected -- not after recovery, and not by a subsequent
+      partition (partitioning cannot launder a stale verdict).
+
+    Every recorded decision carries the authorization epoch it was
+    recorded in; :meth:`mark_recovered` advances the epoch, which is
+    what mechanically closes the offline-honor channel for all
+    pre-recovery decisions at once.
     """
 
     def __init__(self, profile: SurvivalProfile) -> None:
@@ -642,18 +677,41 @@ class OfflinePolicyCache:
                 "is profile-owned configuration)",
             )
         self._profile = profile
-        self._decisions: Dict[str, Tuple[PolicyDecision, str]] = {}
+        # decision_id -> (decision, recorded_at, authorization_epoch)
+        self._decisions: Dict[str, Tuple[PolicyDecision, str, int]] = {}
         self._partition_started_at: Optional[str] = None
+        # The authorization epoch: 0 until the first recovery, +1 on
+        # every recovery.  A decision is honorable through the offline
+        # path only while its recording epoch == the current epoch.
+        self._authorization_epoch = 0
 
-    # -- recording while UP ---------------------------------------------------
+    # -- recording while online (CLOSED while partitioned) ---------------
 
     def record_decision(self, decision: PolicyDecision, *, now: str) -> str:
-        """Record a genuine WORK-010 decision observed while online.
+        """Record a genuine WORK-010 decision observed while ONLINE
+        (the recording channel is CLOSED while partitioned -- a
+        decision minted during the partition is never learnable by
+        the cache; new policy decisions must be obtained from the
+        online policy authority after recovery).
 
         The decision id MUST bind to the decision's canonical bytes
         (tamper evidence); the decision's evaluation instant must not
-        be in the future.  Returns the decision id (idempotent for an
-        identical re-record)."""
+        be in the future.  Returns the decision id.  Recording a
+        decision that is already recorded with IDENTICAL content
+        re-stamps it (recorded-at + current authorization epoch):
+        after a recovery this is the online-revalidation path -- the
+        authority re-issued the decision and the cache honors it
+        again."""
+        if self._partition_started_at is not None:
+            raise EnergyError(
+                EnergyReasonCode.OFFLINE_RECORD_CLOSED,
+                "recording is CLOSED while partitioned (lifecycle %s, "
+                "partition opened %r): a decision minted during the "
+                "partition is never learnable by the cache -- new policy "
+                "decisions must be obtained from the online policy "
+                "authority after recovery"
+                % (self.lifecycle(), self._partition_started_at),
+            )
         if not isinstance(decision, PolicyDecision):
             raise EnergyError(
                 EnergyReasonCode.INVALID_INPUT,
@@ -679,20 +737,33 @@ class OfflinePolicyCache:
         existing = self._decisions.get(decision.decision_id)
         if existing is not None:
             if existing[0] == decision:
+                # Identical content: re-stamp (the online-revalidation
+                # path after a recovery; a no-op refresh while the
+                # epoch is unchanged).
+                self._decisions[decision.decision_id] = (
+                    decision,
+                    now,
+                    self._authorization_epoch,
+                )
                 return decision.decision_id
             raise EnergyError(
                 EnergyReasonCode.ILLEGAL_STATE,
                 "decision id %r already recorded with different content"
                 % (decision.decision_id[:16],),
             )
-        self._decisions[decision.decision_id] = (decision, now)
+        self._decisions[decision.decision_id] = (
+            decision,
+            now,
+            self._authorization_epoch,
+        )
         return decision.decision_id
 
     # -- partition lifecycle ----------------------------------------------------
 
     def mark_partition(self, *, now: str) -> None:
-        """The upstream went DOWN at ``now``: the grace window opens
-        (or re-arms)."""
+        """The upstream went DOWN at ``now``: the lifecycle enters
+        OFFLINE_GRACE (the grace window opens, or re-arms after a
+        recovery); the recording channel CLOSES."""
         validate_instant(now, label="now")
         if self._partition_started_at is not None:
             if self._partition_started_at == now:
@@ -705,10 +776,11 @@ class OfflinePolicyCache:
         self._partition_started_at = now
 
     def mark_recovered(self, *, now: str) -> None:
-        """The upstream recovered at ``now``: the offline-honor channel
-        CLOSES (every decision re-verifies upstream; nothing recorded
-        before the partition is honored on the strength of the cache
-        alone until it is re-recorded)."""
+        """The upstream recovered at ``now``: the lifecycle enters
+        ONLINE_REAUTH_REQUIRED -- the offline-honor channel CLOSES
+        for every decision recorded before the recovery (each is
+        rejected until revalidated and re-recorded by the online
+        policy authority); recording is OPEN again."""
         validate_instant(now, label="now")
         if self._partition_started_at is None:
             raise EnergyError(
@@ -716,17 +788,27 @@ class OfflinePolicyCache:
                 "no partition is open (nothing to recover from)",
             )
         self._partition_started_at = None
+        self._authorization_epoch += 1
 
     # -- the honor query -----------------------------------------------------------
 
     def honor(self, decision: PolicyDecision, *, now: str) -> HonorResult:
         """Is the decision's recorded verdict honored at ``now``?
 
-        - while UP (no partition): a recorded decision is honored
-          (idempotent replay of the recorded verdict); an unrecorded
-          one fails closed (the cache never fabricates a verdict);
-        - during a partition: additionally bounded by the grace
-          window ``[partition_start, partition_start + grace]``.
+        - ONLINE / ONLINE_REAUTH_REQUIRED: a decision recorded in the
+          CURRENT authorization epoch is honored (idempotent replay
+          of the recorded verdict); an unrecorded one fails closed
+          (the cache never fabricates a verdict); a decision recorded
+          before the last recovery is rejected
+          (``offline-reauth-required``) -- the offline-honor channel
+          closed at recovery and only the online policy authority
+          re-opens it (by re-issuing the decision, which the caller
+          re-records);
+        - OFFLINE_GRACE: the same, additionally bounded by the grace
+          window ``[partition_start, partition_start + grace]``; a
+          decision recorded before the last recovery is NOT
+          resurrected by a partition (partitioning cannot launder a
+          stale verdict).
         """
         if not isinstance(decision, PolicyDecision):
             raise EnergyError(
@@ -756,7 +838,7 @@ class OfflinePolicyCache:
                 "never fabricates a verdict -- fail closed)"
                 % (decision.decision_id[:16],),
             )
-        recorded_decision, recorded_at = entry
+        recorded_decision, recorded_at, recorded_epoch = entry
         if recorded_decision != decision:
             return HonorResult(
                 honored=False,
@@ -766,6 +848,25 @@ class OfflinePolicyCache:
                 detail="decision id %r is recorded with different content "
                 "(tampered or rebound decision -- fail closed)"
                 % (decision.decision_id[:16],),
+            )
+        if recorded_epoch < self._authorization_epoch:
+            # The offline-honor channel closed at the last recovery:
+            # the decision predates it and only the online policy
+            # authority re-opens the channel (revalidation +
+            # re-record).  This also holds during a NEW partition --
+            # partitioning cannot launder a stale verdict.
+            return HonorResult(
+                honored=False,
+                effect="",
+                reason=HonorResult.REAUTH_REQUIRED,
+                remaining_grace_seconds=0,
+                detail="decision %r was recorded before the last recovery "
+                "(authorization epoch %d < %d): the offline-honor "
+                "channel closed at recovery -- the decision must be "
+                "revalidated and re-recorded by the online policy "
+                "authority"
+                % (decision.decision_id[:16], recorded_epoch,
+                   self._authorization_epoch),
             )
         if self._partition_started_at is not None:
             from protocol.temporal import parse_instant as _parse
@@ -808,8 +909,9 @@ class OfflinePolicyCache:
             effect=recorded_decision.effect,
             reason=HonorResult.HONORED,
             remaining_grace_seconds=0,
-            detail="recorded verdict (recorded at %r) replayed while UP"
-            % (recorded_at,),
+            detail="recorded verdict (recorded at %r, authorization epoch "
+            "%d) replayed while online"
+            % (recorded_at, self._authorization_epoch),
         )
 
     # -- reads ------------------------------------------------------------------------
@@ -819,6 +921,24 @@ class OfflinePolicyCache:
 
     def partition_started_at(self) -> Optional[str]:
         return self._partition_started_at
+
+    def lifecycle(self) -> str:
+        """The explicit cache lifecycle state (a frozen
+        :class:`~energy.model.OfflineCacheLifecycle` value): ONLINE
+        before the first partition, OFFLINE_GRACE while partitioned,
+        ONLINE_REAUTH_REQUIRED after a recovery."""
+        if self._partition_started_at is not None:
+            return OfflineCacheLifecycle.OFFLINE_GRACE
+        if self._authorization_epoch == 0:
+            return OfflineCacheLifecycle.ONLINE
+        return OfflineCacheLifecycle.ONLINE_REAUTH_REQUIRED
+
+    def authorization_epoch(self) -> int:
+        """The current authorization epoch (0 until the first
+        recovery; +1 on every recovery).  A decision is honorable
+        through the offline path only while its recording epoch
+        equals this value."""
+        return self._authorization_epoch
 
     def recorded_decision_ids(self) -> Tuple[str, ...]:
         """The recorded decision ids (deterministic order)."""

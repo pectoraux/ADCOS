@@ -2,10 +2,12 @@
 
 Energy-aware control and resilience: per-node energy posture derived
 from WORK-008 measurements, the §18 survival profile protecting
-essential services, energy-aware path adaptation over WORK-011
-route decisions, deterministic node restart/rejoin, intermittent
-upstream connectivity with §16 offline authorization grace and
-delayed synchronization, and the deterministic power simulation.
+essential services (a NEW-DEMAND admission gate -- established
+sessions stay the WORK-012 session layer's authority), energy-aware
+path adaptation over WORK-011 route decisions, deterministic node
+restart/rejoin, intermittent upstream connectivity with §16 offline
+authorization grace and delayed synchronization, and the
+deterministic power simulation.
 
 The family is a CONTROL-COMPOSITION layer, not a new authority:
 
@@ -15,7 +17,13 @@ The family is a CONTROL-COMPOSITION layer, not a new authority:
 - resource authority stays WORK-008 (postures derive from its
   EnergyState measurements);
 - policy authority stays WORK-010 (the offline cache REPLAYS its
-  recorded decisions; it never evaluates policy);
+  recorded decisions; it never evaluates policy -- recording closes
+  while partitioned and recovery closes the honor channel until
+  online revalidation);
+- session authority stays WORK-012 (the survival gate is a
+  new-demand admission gate: it may shed NEW demand and NEW route
+  candidates, it never terminates or mutates an established
+  session);
 - observability data stays WORK-026 (upstream observations and the
   deferred-sync payload are real telemetry observations).
 
@@ -44,6 +52,7 @@ from .model import (
     EnergyPosture,
     EnergyRouteAdaptation,
     EnergyStage,
+    OfflineCacheLifecycle,
     PowerProfile,
     PowerSource,
     PowerStep,
@@ -113,6 +122,7 @@ __all__ = [
     "EnergyPosture",
     "EnergyRouteAdaptation",
     "EnergyStage",
+    "OfflineCacheLifecycle",
     "PowerProfile",
     "PowerSource",
     "PowerStep",
