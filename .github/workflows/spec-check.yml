@@ -84,3 +84,6 @@ jobs:
 
       - name: Run backhaul adapter family tests
         run: python3 tools/backhaul_selftest.py
+
+      - name: Run mesh/relay adapter family tests
+        run: python3 tools/mesh_selftest.py
