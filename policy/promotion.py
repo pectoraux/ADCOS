@@ -58,6 +58,16 @@ What this structurally guarantees:
   observation: rebinding the descriptor breaks the digest, and the
   telemetry layer (WORK-026) re-derives the authorized scope from the
   stored observation and fails closed on any divergence;
+- the born-bound promotion scope IS the complete evaluated scope
+  (SCOPE EQUALITY, pinned by the PR #27 remediation-2 regression
+  suites): the descriptor's ``(observation_id, subject_ref)`` pair
+  must equal the context's ``resource_refs`` set EXACTLY --
+  membership is not authorization.  In a context that evaluated
+  ``[observation-A, subject-A, observation-B, subject-B]`` neither
+  the cross-pairing ``observation-A + subject-B`` nor the subset
+  pairing ``observation-A + subject-A`` is an exact-scope promotion;
+  each pairing requires its own decision born into exactly that
+  scope (fail closed on any broader evaluated scope);
 - a promotion can never disclose information at a privacy level
   greater than the authorization explicitly permits: the privacy
   disclosure scope rides the digest-covered binding, and no
@@ -137,19 +147,21 @@ def promotion_binding_from_context(
     ``subject_ref``, ``privacy_scope`` and ``source_disclosure`` (the
     privacy disclosure authorization is REQUIRED -- a promotion
     decision without an explicit privacy boundary can never exist),
-    and MIRROR the context's first-class facts:
+    and restate the context's first-class facts under SCOPE
+    EQUALITY:
 
-    - ``descriptor["subject_ref"]`` must be among
-      ``context.resource_refs`` (the rules must have evaluated the
-      promoted subject);
-    - ``descriptor["observation_id"]`` must be among
-      ``context.resource_refs`` (the rules must have evaluated the
-      exact observation being promoted).
+    - the descriptor's ``(observation_id, subject_ref)`` pair must
+      equal the context's ``resource_refs`` set EXACTLY (the complete
+      evaluated scope IS the authorized promotion scope).  Both
+      members must be among the evaluated ``resource_refs`` AND no
+      other ref may be: membership alone is not authorization, so a
+      broader evaluated scope can never be narrowed post hoc to a
+      subset or cross-pairing.
 
     A descriptor that disagrees with the context it rides in is a
     self-inconsistent authorization input: the rules evaluated the
     first-class fields, so the binding must restate exactly those
-    facts.
+    facts -- all of them and nothing else.
 
     Returns the validated descriptor as a plain mapping (verbatim
     content).  Raises :class:`~policy.model.PolicyError` with code
@@ -254,6 +266,33 @@ def promotion_binding_from_context(
             "context resource_refs the rules evaluated (the promoted "
             "observation must be exactly what the rules saw; fail "
             "closed)",
+        )
+    # Scope EQUALITY (the invariant pinned by the PR #27 remediation-2
+    # regression suites): membership is not authorization.  The
+    # born-bound promotion scope must BE the complete evaluated scope
+    # -- the descriptor's (observation, subject) pair equals the
+    # context's resource_refs set exactly.  A decision born into a
+    # broader evaluated scope can never be narrowed post hoc to a
+    # subset pairing: in a context that evaluated [observation-A,
+    # subject-A, observation-B, subject-B] neither the cross-pairing
+    # observation-A + subject-B nor the subset pairing observation-A
+    # + subject-A is an exact-scope promotion -- each pairing
+    # requires its own decision born into exactly that scope.
+    if set(resource_refs) != {
+        descriptor["subject_ref"], descriptor["observation_id"],
+    }:
+        raise PolicyError(
+            "promotion-binding",
+            "promotion descriptor scope (observation %r, subject %r) "
+            "does not equal the complete evaluated context "
+            "resource_refs scope %s -- the born-bound promotion scope "
+            "must BE the evaluated scope exactly (membership is not "
+            "authorization; cross-pairing and subset pairing fail "
+            "closed)"
+            % (
+                descriptor["observation_id"], descriptor["subject_ref"],
+                sorted(set(resource_refs)),
+            ),
         )
     return dict(descriptor)
 

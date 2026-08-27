@@ -72,6 +72,28 @@ the WORK-026 work-item contract to discriminating cases:
   exports under pseudonymous-only
   authorization; no caller disclosure
   flag exists -- fails on e504684                    -> case_31
+- REGRESSION (PR #27 review, remediation
+  2 -- B1): the observation identity
+  covers the COMPLETE canonical DATA --
+  every previously uncovered field
+  (freshness, evidence, provenance,
+  privacy class, context, extensions)
+  individually rejects a retained id --
+  fails on c8dbec5                                -> case_32
+- REGRESSION (PR #27 review, remediation
+  2 -- B2): the promotion identity
+  covers the COMPLETE canonical DATA
+  (subject scope, source class, the
+  privacy-governed source_display,
+  matched rule lineage) -- fails on
+  c8dbec5                                         -> case_33
+- REGRESSION (PR #27 review, remediation
+  2 -- pinned invariant): the born-bound
+  promotion scope EQUALS the complete
+  evaluated context scope (membership
+  is not authorization; cross-pairing
+  and subset pairing fail closed) --
+  fails on c8dbec5                                -> case_34
 """
 
 from __future__ import annotations
@@ -127,11 +149,15 @@ from policy import (  # noqa: E402
     PolicyDecision,
     PolicyDomain,
     PolicyEngine,
+    PolicyEvaluationResult,
     PolicyRule,
     PolicySet,
     Privileged,
     PROMOTION_BINDING_KIND,
     promotion_binding_from_context,
+)
+from protocol.canonicalization import (  # noqa: E402
+    canonical_json_bytes as _canonical_bytes,
 )
 
 Result = Tuple[str, bool, str]
@@ -454,15 +480,17 @@ def case_07_validity_window_required() -> Result:
 def case_08_tamper_evident_ids() -> Result:
     name = "case_08_tamper_evident_ids"
     observation = _observation()
-    expected = derive_observation_id(
-        observation.subject_kind, observation.subject_ref,
-        observation.source_node_id, observation.source_class,
-        observation.metric, observation.value,
-        observation.confidence_basis_points, observation.observed_at,
-        observation.sequence,
-    )
+    # COMPLETE-CONTENT identity (PR #27 Architect review, remediation
+    # 2 blocker 1): the id is EXACTLY the sha256 over the canonical
+    # DATA minus the id itself -- every semantically meaningful field
+    # participates in the identity.
+    data = observation.to_dict()
+    material = {k: v for k, v in data.items() if k != "observation_id"}
+    expected = OBSERVATION_ID_PREFIX + hashlib.sha256(
+        _canonical_bytes(material)
+    ).hexdigest()
     if observation.observation_id != expected:
-        return fail(name, "id is not the canonical derivation")
+        return fail(name, "id is not the complete-content derivation")
     probe = _expect_error(
         name, "forged id", TelemetryReasonCode.INVALID_INPUT,
         lambda: _observation(observation_id=OBSERVATION_ID_PREFIX + "f" * 64),
@@ -472,9 +500,22 @@ def case_08_tamper_evident_ids() -> Result:
     other = _observation(value=42_001)
     if other.observation_id == observation.observation_id:
         return fail(name, "content change did not change the id")
+    # No field is invisible to the identity: a change confined to a
+    # previously UNCOVERED field (freshness, privacy class, context,
+    # evidence, provenance, extensions) changes the id too.
+    for label, kwargs in (
+        ("freshness_until", {"freshness_until": _T3}),
+        ("privacy_class", {"privacy_class": PrivacyClass.PUBLIC}),
+        ("context", {"context": (("interface", "eth1"),)}),
+        ("evidence_refs", {"evidence_refs": ("evidence-ref-1",)}),
+        ("provenance", {"provenance": "aggregated-observation"}),
+        ("extensions", {"extensions": (("sample-count", "2"),)}),
+    ):
+        if _observation(**kwargs).observation_id == observation.observation_id:
+            return fail(name, "%s change did not change the id" % (label,))
     if _observation().observation_id != observation.observation_id:
         return fail(name, "identical material produced a different id")
-    return ok(name, "content-derived tamper-evident observation ids")
+    return ok(name, "complete-content tamper-evident observation ids")
 
 
 def case_09_ingest_monotonic_sequence() -> Result:
@@ -508,29 +549,30 @@ def case_09_ingest_monotonic_sequence() -> Result:
     )
     if not probe[1]:
         return probe
-    # Same id, different content elsewhere: deterministic conflict.
+    # Same id, different content: the COMPLETE-CONTENT identity makes
+    # this unconstructible -- the constructor itself rejects a
+    # retained id over divergent DATA of ANY field (PR #27 Architect
+    # review, remediation 2 blocker 1; the store's OBSERVATION_EXISTS
+    # branch remains as defense-in-depth behind it).
     probe = _expect_error(
-        name, "id collision", TelemetryReasonCode.OBSERVATION_EXISTS,
-        lambda: store.record_observation(
-            TelemetryObservation(
-                subject_kind=first.subject_kind,
-                subject_ref=first.subject_ref,
-                source_node_id=first.source_node_id,
-                source_class=first.source_class,
-                metric=first.metric,
-                value=first.value,
-                confidence_basis_points=first.confidence_basis_points,
-                observed_at=first.observed_at,
-                freshness_until=first.freshness_until,
-                sequence=first.sequence,
-                evidence_refs=first.evidence_refs,
-                provenance="different-provenance",
-                privacy_class=first.privacy_class,
-                context=first.context,
-                extensions=first.extensions,
-                observation_id=first.observation_id,
-            ),
-            now=_T1,
+        name, "id collision", TelemetryReasonCode.INVALID_INPUT,
+        lambda: TelemetryObservation(
+            subject_kind=first.subject_kind,
+            subject_ref=first.subject_ref,
+            source_node_id=first.source_node_id,
+            source_class=first.source_class,
+            metric=first.metric,
+            value=first.value,
+            confidence_basis_points=first.confidence_basis_points,
+            observed_at=first.observed_at,
+            freshness_until=first.freshness_until,
+            sequence=first.sequence,
+            evidence_refs=first.evidence_refs,
+            provenance="different-provenance",
+            privacy_class=first.privacy_class,
+            context=first.context,
+            extensions=first.extensions,
+            observation_id=first.observation_id,
         ),
     )
     if not probe[1]:
@@ -1071,7 +1113,7 @@ def case_22_explain_lineage() -> Result:
     store = TelemetryStore()
     observation = _recorded(store, _observation())
     decision = _promotion_decision(observation)
-    store.authorize_topology_promotion(
+    promotion = store.authorize_topology_promotion(
         now=_T1, observation_id=observation.observation_id,
         policy_decision=decision,
     )
@@ -1081,9 +1123,7 @@ def case_22_explain_lineage() -> Result:
     )
     if explanation["validity"] != ValidityState.STALE:
         return fail(name, "explanation validity not derived at query time")
-    if explanation["promotion"] is None or explanation["promotion_id"] != derive_promotion_id(
-        observation.observation_id, decision.decision_id, _T1,
-    ):
+    if explanation["promotion"] is None or explanation["promotion_id"] != promotion.promotion_id:
         return fail(name, "explanation lost the promotion")
     types = [e["event_type"] for e in explanation["events"]]
     if types != ["observation-recorded", "promotion-authorized"]:
@@ -1405,7 +1445,16 @@ def case_30_audit_event_lock023_boundary() -> Result:
     # credential-like rule id fails closed at record construction.
     obs_id = OBSERVATION_ID_PREFIX + "b" * 64
     promotion_kwargs: Dict[str, Any] = dict(
-        promotion_id=derive_promotion_id(obs_id, "0" * 64, _T1),
+        promotion_id=derive_promotion_id(
+            obs_id,
+            TelemetrySubjectKind.LINK,
+            _LINK_REF,
+            TelemetrySourceClass.PEER_OBSERVED,
+            _NODE_A,
+            "0" * 64,
+            ("promo-allow",),
+            _T1,
+        ),
         observation_id=obs_id,
         subject_kind=TelemetrySubjectKind.LINK,
         subject_ref=_LINK_REF,
@@ -1416,11 +1465,29 @@ def case_30_audit_event_lock023_boundary() -> Result:
         authorized_at=_T1,
     )
     TopologyPromotion(**promotion_kwargs)  # control: clean ids pass
+    # The tainted rule ids ride under an HONESTLY derived id (the id
+    # is content-derived over the tainted tuple itself), so the ONLY
+    # violation left is the credential-like content: the LOCK-023
+    # boundary cannot be bypassed by deriving a "valid" id over
+    # tainted rule ids.
     probe = _expect_error(
         name, "matched rule id", TelemetryReasonCode.CREDENTIAL_LIKE_INPUT,
         partial(
             TopologyPromotion,
-            **dict(promotion_kwargs, matched_rule_ids=("rule-with-password",)),
+            **dict(
+                promotion_kwargs,
+                promotion_id=derive_promotion_id(
+                    obs_id,
+                    TelemetrySubjectKind.LINK,
+                    _LINK_REF,
+                    TelemetrySourceClass.PEER_OBSERVED,
+                    _NODE_A,
+                    "0" * 64,
+                    ("rule-with-password",),
+                    _T1,
+                ),
+                matched_rule_ids=("rule-with-password",),
+            ),
         ),
     )
     if not probe[1]:
@@ -1670,6 +1737,318 @@ def case_31_promotion_privacy_authorization_boundary() -> Result:
     )
 
 
+def case_32_observation_identity_complete_content() -> Result:
+    """REGRESSION (PR #27 Architect review, remediation 2 -- blocker
+    1): the observation identity covers the COMPLETE canonical
+    observation DATA.
+
+    At the reviewed head c8dbec5 ``derive_observation_id`` hashed
+    only (subject kind/ref, source node/class, metric, value,
+    confidence, observed_at, sequence), so ``freshness_until``,
+    ``evidence_refs``, ``provenance``, ``privacy_class``, ``context``
+    and ``extensions`` were serialized into the canonical DATA but
+    NOT covered by ``observation_id``: a valid observation could be
+    altered in any of them while retaining its original id, and both
+    the constructor and ``observation_from_dict()`` would accept the
+    result -- the ids were not in fact tamper-evident (the freshness
+    boundary decides promotability; the privacy class and its
+    location-bearing context define the privacy semantics of the
+    DATA).  This case FAILS on c8dbec5."""
+    name = "case_32_observation_identity_complete_content"
+    from telemetry.serialization import observation_from_dict
+
+    observation = _observation(
+        freshness_until=_T2,
+        evidence_refs=("evidence-ref-1",),
+        provenance="edge-observation",
+        privacy_class=PrivacyClass.PUBLIC,
+        context=(("interface", "eth0"),),
+        extensions=(("sample-count", "3"),),
+    )
+    data = observation.to_dict()
+    # The rule, pinned structurally: observation_id ==
+    # H(canonical DATA excluding only observation_id itself).
+    material = {k: v for k, v in data.items() if k != "observation_id"}
+    expected = OBSERVATION_ID_PREFIX + hashlib.sha256(
+        _canonical_bytes(material)
+    ).hexdigest()
+    if observation.observation_id != expected:
+        return fail(name, "id does not cover the complete canonical DATA")
+    # The PUBLIC derivation function accepts (and covers) the complete
+    # observation content -- at c8dbec5 it took only the nine
+    # originally-covered fields.
+    try:
+        derived = derive_observation_id(
+            subject_kind=data["subject_kind"],
+            subject_ref=data["subject_ref"],
+            source_node_id=data["source_node_id"],
+            source_class=data["source_class"],
+            metric=data["metric"],
+            value=data["value"],
+            confidence_basis_points=data["confidence_basis_points"],
+            observed_at=data["observed_at"],
+            freshness_until=data["freshness_until"],
+            sequence=data["sequence"],
+            evidence_refs=tuple(data["evidence_refs"]),
+            provenance=data["provenance"],
+            privacy_class=data["privacy_class"],
+            context=tuple((k, v) for k, v in data["context"]),
+            extensions=tuple((k, v) for k, v in data["extensions"]),
+        )
+    except TypeError:
+        return fail(name, "derive_observation_id does not cover the complete content")
+    if derived != observation.observation_id:
+        return fail(name, "public derivation drifted from the canonical DATA hash")
+    # Mutate each previously UNCOVERED field to a different VALID
+    # value, retain the original observation_id, reconstruct: every
+    # leg must fail closed (the mutated values are individually
+    # legal, so only the identity can reject them).
+    mutations: List[Tuple[str, Any]] = [
+        ("freshness_until", _T3),
+        ("evidence_refs", ["evidence-ref-2"]),
+        ("provenance", "aggregated-observation"),
+        ("privacy_class", PrivacyClass.OPERATIONAL),
+        ("context", [["interface", "eth1"]]),
+        ("extensions", [["sample-count", "4"]]),
+    ]
+    for field, replacement in mutations:
+        tampered = dict(data)
+        tampered[field] = replacement
+        if tampered == data:
+            return fail(name, "mutation of %s was not a real change" % (field,))
+        probe = _expect_error(
+            name, "mutated %s" % (field,), TelemetryReasonCode.INVALID_INPUT,
+            partial(observation_from_dict, tampered),
+        )
+        if not probe[1]:
+            return probe
+    # Controls: the previously covered fields stay covered.
+    for field, replacement in (
+        ("value", data["value"] + 1),
+        ("sequence", 2),
+    ):
+        tampered = dict(data)
+        tampered[field] = replacement
+        probe = _expect_error(
+            name, "mutated %s (control)" % (field,),
+            TelemetryReasonCode.INVALID_INPUT,
+            partial(observation_from_dict, tampered),
+        )
+        if not probe[1]:
+            return probe
+    # The pristine DATA still reconstructs byte-identically.
+    if (
+        observation_from_dict(json.loads(json.dumps(data))).canonical_bytes()
+        != observation.canonical_bytes()
+    ):
+        return fail(name, "pristine reconstruction not byte-identical")
+    return ok(
+        name,
+        "observation identity covers the COMPLETE canonical DATA; "
+        "every field mutation rejects a retained id",
+    )
+
+
+def case_33_promotion_identity_complete_content() -> Result:
+    """REGRESSION (PR #27 Architect review, remediation 2 -- blocker
+    2): the promotion identity covers the COMPLETE canonical
+    promotion DATA.
+
+    At the reviewed head c8dbec5 ``derive_promotion_id`` hashed only
+    (observation_id, policy_decision_id, authorized_at), so
+    ``subject_kind``, ``subject_ref``, ``source_class``,
+    ``source_display`` and ``matched_rule_ids`` were export DATA not
+    covered by ``promotion_id``: a serialized promotion could be
+    altered in those fields while retaining its id and
+    ``TopologyPromotion.from_dict()`` would accept it -- above all
+    ``source_display``, the privacy-governed disclosure the
+    remediation-1 authorization boundary exists to control.  This
+    case FAILS on c8dbec5."""
+    name = "case_33_promotion_identity_complete_content"
+    from telemetry.serialization import promotion_from_dict
+
+    store = TelemetryStore()
+    recorded = _recorded(store, _observation())
+    decision = _promotion_decision(recorded)
+    promotion = store.authorize_topology_promotion(
+        now=_T1, observation_id=recorded.observation_id,
+        policy_decision=decision,
+    )
+    data = promotion.to_dict()
+    # The rule, pinned structurally: promotion_id ==
+    # H(canonical promotion DATA excluding only promotion_id itself).
+    material = {k: v for k, v in data.items() if k != "promotion_id"}
+    expected = PROMOTION_ID_PREFIX + hashlib.sha256(
+        _canonical_bytes(material)
+    ).hexdigest()
+    if promotion.promotion_id != expected:
+        return fail(name, "promotion id does not cover the complete canonical DATA")
+    try:
+        derived = derive_promotion_id(
+            observation_id=data["observation_id"],
+            subject_kind=data["subject_kind"],
+            subject_ref=data["subject_ref"],
+            source_class=data["source_class"],
+            source_display=data["source_display"],
+            policy_decision_id=data["policy_decision_id"],
+            matched_rule_ids=tuple(data["matched_rule_ids"]),
+            authorized_at=data["authorized_at"],
+        )
+    except TypeError:
+        return fail(name, "derive_promotion_id does not cover the complete content")
+    if derived != promotion.promotion_id:
+        return fail(name, "public derivation drifted from the canonical DATA hash")
+    # Mutate each previously UNCOVERED field to a different VALID
+    # value, retain the original promotion_id, reconstruct: every leg
+    # must fail closed.
+    mutations: List[Tuple[str, Any]] = [
+        ("subject_kind", TelemetrySubjectKind.PATH),
+        ("subject_ref", "adcos:link:" + "f" * 32),
+        ("source_class", TelemetrySourceClass.SELF_ADVERTISED),
+        ("source_display", derive_pseudonym(_NODE_A)),
+        ("matched_rule_ids", ["promo-allow", "promo-allow-extra"]),
+    ]
+    for field, replacement in mutations:
+        tampered = dict(data)
+        tampered[field] = replacement
+        if tampered == data:
+            return fail(name, "mutation of %s was not a real change" % (field,))
+        probe = _expect_error(
+            name, "mutated %s" % (field,), TelemetryReasonCode.INVALID_INPUT,
+            partial(promotion_from_dict, tampered),
+        )
+        if not probe[1]:
+            return probe
+    # Controls: the previously covered fields stay covered.
+    for field, replacement in (
+        ("observation_id", OBSERVATION_ID_PREFIX + "c" * 64),
+        ("policy_decision_id", "1" * 64),
+        ("authorized_at", _T2),
+    ):
+        tampered = dict(data)
+        tampered[field] = replacement
+        probe = _expect_error(
+            name, "mutated %s (control)" % (field,),
+            TelemetryReasonCode.INVALID_INPUT,
+            partial(promotion_from_dict, tampered),
+        )
+        if not probe[1]:
+            return probe
+    if promotion_from_dict(json.loads(json.dumps(data))).to_dict() != data:
+        return fail(name, "pristine promotion reconstruction not identical")
+    return ok(
+        name,
+        "promotion identity covers the COMPLETE canonical DATA "
+        "(subject scope, source class, privacy-governed source_display, "
+        "rule lineage); every field mutation rejects a retained id",
+    )
+
+
+def case_34_promotion_binding_scope_equality() -> Result:
+    """REGRESSION (PR #27 Architect review, remediation 2 -- the
+    pinned invariant): the born-bound promotion scope EQUALS the
+    complete evaluated context scope.
+
+    At the reviewed head c8dbec5 the binding derivation only checked
+    MEMBERSHIP (subject_ref and observation_id each individually
+    among ``context.resource_refs``), so a context that evaluated
+    ``[observation-A, subject-A, observation-B, subject-B]`` could
+    mint a promotion decision for the CROSS-pairing observation-A +
+    subject-B -- and equally the subset pairing observation-A +
+    subject-A: membership was being treated as authorization.  The
+    invariant is now explicit: the authorized pair must BE the
+    evaluated scope exactly.  This case FAILS on c8dbec5."""
+    name = "case_34_promotion_binding_scope_equality"
+    engine = PolicyEngine()
+    policy_set = _promotion_policy_set()
+
+    def _descriptor(observation_id: str, subject_ref: str) -> Dict[str, Any]:
+        return {
+            "kind": PROMOTION_BINDING_KIND,
+            "operation": TELEMETRY_PROMOTION_OPERATION,
+            "observation_id": observation_id,
+            "subject_kind": TelemetrySubjectKind.LINK,
+            "subject_ref": subject_ref,
+            "privacy_scope": PrivacyClass.OPERATIONAL,
+            "source_disclosure": SourceDisclosure.IDENTITY,
+        }
+
+    obs_a = OBSERVATION_ID_PREFIX + "a" * 64
+    obs_b = OBSERVATION_ID_PREFIX + "b" * 64
+    subj_a = "adcos:link:" + "1" * 32
+    subj_b = "adcos:link:" + "2" * 32
+
+    def _evaluate(
+        refs: Tuple[str, ...], descriptor: Dict[str, Any]
+    ) -> PolicyEvaluationResult:
+        return engine.evaluate(
+            policy_set,
+            PolicyContext(
+                operation=Operation.TELEMETRY_TOPOLOGY_PROMOTE,
+                requester_node_id=_NODE_A,
+                evaluation_instant=_T1,
+                resource_refs=refs,
+                extensions=(descriptor,),
+            ),
+        )
+
+    def _expect_not_born(label: str, result: PolicyEvaluationResult) -> Optional[Result]:
+        if result.ok or result.decision is not None:
+            return fail(name, "%s minted a promotion decision" % (label,))
+        if result.code != DecisionCode.INVALID_POLICY:
+            return fail(name, "%s: wrong code %r" % (label, result.code))
+        return None
+
+    # Control: the exact-pair scope still yields the born-bound ALLOW.
+    control = _evaluate((obs_a, subj_a), _descriptor(obs_a, subj_a))
+    if not (
+        control.ok
+        and control.decision is not None
+        and control.decision.effect == Effect.ALLOW
+    ):
+        return fail(name, "exact-pair promotion scope no longer authorizes")
+    broad_refs = (obs_a, subj_a, obs_b, subj_b)
+    # Cross-pairing inside a broader evaluated scope: BOTH members
+    # are individually present, but the pairing is not the evaluated
+    # scope -- membership is not authorization.
+    verdict = _expect_not_born(
+        "cross-pairing in a broader scope",
+        _evaluate(broad_refs, _descriptor(obs_a, subj_b)),
+    )
+    if verdict is not None:
+        return verdict
+    # Subset pairing inside the same broader scope: even the
+    # "consistent" pairing is not an exact-scope promotion.
+    verdict = _expect_not_born(
+        "subset pairing in a broader scope",
+        _evaluate(broad_refs, _descriptor(obs_a, subj_a)),
+    )
+    if verdict is not None:
+        return verdict
+    # Any third ref beside the authorized pair breaks scope equality.
+    verdict = _expect_not_born(
+        "third ref beside the pair",
+        _evaluate((obs_a, subj_a, _NODE_B), _descriptor(obs_a, subj_a)),
+    )
+    if verdict is not None:
+        return verdict
+    # End-to-end: the exact-pair born-bound decision authorizes the
+    # promotion of exactly that observation.
+    store = TelemetryStore()
+    recorded = _recorded(store, _observation())
+    promotion = store.authorize_topology_promotion(
+        now=_T1, observation_id=recorded.observation_id,
+        policy_decision=_promotion_decision(recorded),
+    )
+    if promotion.observation_id != recorded.observation_id:
+        return fail(name, "exact-scope promotion lost its observation")
+    return ok(
+        name,
+        "promotion scope EQUALS the evaluated scope exactly; "
+        "cross-pairing and subset pairing fail closed",
+    )
+
+
 # --------------------------------------------------------------------------
 # Runner
 # --------------------------------------------------------------------------
@@ -1706,6 +2085,9 @@ CASES = (
     case_29_serialization_round_trip,
     case_30_audit_event_lock023_boundary,
     case_31_promotion_privacy_authorization_boundary,
+    case_32_observation_identity_complete_content,
+    case_33_promotion_identity_complete_content,
+    case_34_promotion_binding_scope_equality,
 )
 
 

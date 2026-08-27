@@ -423,9 +423,34 @@ class TelemetryStore:
                     binding.privacy_scope,
                 ),
             )
+        # The exported source identity is governed ENTIRELY by the
+        # born-bound authorization's disclosure mode: ``identity``
+        # exports the raw canonical NodeID, ``pseudonymous``
+        # exports only the deterministic pseudonym.  No caller
+        # flag exists (PR #27 Architect review blocker 2: the
+        # security property is authorization-driven).
+        source_display = (
+            observation.source_node_id
+            if binding.source_disclosure == SourceDisclosure.IDENTITY
+            else derive_pseudonym(observation.source_node_id)
+        )
+        matched_rule_ids = tuple(policy_decision.matched_rule_ids)
+        # COMPLETE-CONTENT identity (PR #27 Architect review,
+        # remediation 2 blocker 2): the promotion id is derived from
+        # the exact values the record below carries -- every field of
+        # the canonical promotion DATA participates, so the id is
+        # bound to the exported subject scope, the LOCK-008 source
+        # class, the privacy-governed source_display, the decision
+        # id, the matched rule lineage, and the authorization
+        # instant alike.
         promotion_id = derive_promotion_id(
             observation.observation_id,
+            observation.subject_kind,
+            observation.subject_ref,
+            observation.source_class,
+            source_display,
             policy_decision.decision_id,
+            matched_rule_ids,
             now,
         )
         existing = self._promotions.get(promotion_id)
@@ -445,19 +470,9 @@ class TelemetryStore:
             subject_kind=observation.subject_kind,
             subject_ref=observation.subject_ref,
             source_class=observation.source_class,
-            # The exported source identity is governed ENTIRELY by the
-            # born-bound authorization's disclosure mode: ``identity``
-            # exports the raw canonical NodeID, ``pseudonymous``
-            # exports only the deterministic pseudonym.  No caller
-            # flag exists (PR #27 Architect review blocker 2: the
-            # security property is authorization-driven).
-            source_display=(
-                observation.source_node_id
-                if binding.source_disclosure == SourceDisclosure.IDENTITY
-                else derive_pseudonym(observation.source_node_id)
-            ),
+            source_display=source_display,
             policy_decision_id=policy_decision.decision_id,
-            matched_rule_ids=tuple(policy_decision.matched_rule_ids),
+            matched_rule_ids=matched_rule_ids,
             authorized_at=now,
         )
         self._promotions[promotion_id] = promotion

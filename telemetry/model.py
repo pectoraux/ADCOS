@@ -51,7 +51,7 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass
-from typing import Any, Dict, NamedTuple, Tuple
+from typing import Any, Dict, NamedTuple, Sequence, Tuple
 
 from protocol.canonicalization import canonical_json_bytes
 from protocol.temporal import TemporalError, parse_instant
@@ -348,12 +348,32 @@ def derive_observation_id(
     value: int,
     confidence_basis_points: int,
     observed_at: str,
+    freshness_until: str,
     sequence: int,
+    evidence_refs: Sequence[str] = (),
+    provenance: str = "",
+    privacy_class: str = PrivacyClass.OPERATIONAL,
+    context: Sequence[Tuple[str, str]] = (),
+    extensions: Sequence[Tuple[str, str]] = (),
 ) -> str:
-    """The tamper-evident, content-derived observation id (sha256 over
-    the canonical derivation material).  Two observations with equal
-    derivation material are the SAME observation (idempotent ingest);
-    any divergence yields a different id."""
+    """The tamper-evident, content-derived observation id.
+
+    COMPLETE-CONTENT IDENTITY (PR #27 Architect review, remediation 2
+    blocker 1): the derivation material is the COMPLETE canonical
+    observation DATA -- exactly ``TelemetryObservation.to_dict()``
+    minus ``observation_id`` itself.  Every semantically meaningful
+    field participates in the identity: the freshness boundary (it
+    decides promotability), the evidence lineage (``evidence_refs``,
+    ``provenance``), the privacy classification and its location-
+    bearing ``context``, and ``extensions`` alike.  A record whose
+    DATA diverges in ANY field while retaining a previous id is
+    rejected at construction -- there is no field whose mutation is
+    invisible to the identity.
+
+    Two observations with equal canonical content are the SAME
+    observation (idempotent ingest); any divergence yields a
+    different id.
+    """
     material = canonical_json_bytes(
         {
             "subject_kind": subject_kind,
@@ -364,20 +384,50 @@ def derive_observation_id(
             "value": value,
             "confidence_basis_points": confidence_basis_points,
             "observed_at": observed_at,
+            "freshness_until": freshness_until,
             "sequence": sequence,
+            "evidence_refs": list(evidence_refs),
+            "provenance": provenance,
+            "privacy_class": privacy_class,
+            "context": [list(pair) for pair in context],
+            "extensions": [list(pair) for pair in extensions],
         }
     )
     return OBSERVATION_ID_PREFIX + hashlib.sha256(material).hexdigest()
 
 
 def derive_promotion_id(
-    observation_id: str, policy_decision_id: str, authorized_at: str
+    observation_id: str,
+    subject_kind: str,
+    subject_ref: str,
+    source_class: str,
+    source_display: str,
+    policy_decision_id: str,
+    matched_rule_ids: Sequence[str],
+    authorized_at: str,
 ) -> str:
-    """The tamper-evident, content-derived promotion id."""
+    """The tamper-evident, content-derived promotion id.
+
+    COMPLETE-CONTENT IDENTITY (PR #27 Architect review, remediation 2
+    blocker 2): the derivation material is the COMPLETE canonical
+    promotion DATA -- exactly ``TopologyPromotion.to_dict()`` minus
+    ``promotion_id`` itself.  The exported subject scope, the LOCK-008
+    source class, the privacy-governed ``source_display`` (raw
+    NodeID vs deterministic pseudonym), the authorizing decision id,
+    the matched rule lineage, and the authorization instant ALL
+    participate in the identity: a serialized promotion whose DATA
+    is altered in any field while retaining a previous id is
+    rejected at reconstruction.
+    """
     material = canonical_json_bytes(
         {
             "observation_id": observation_id,
+            "subject_kind": subject_kind,
+            "subject_ref": subject_ref,
+            "source_class": source_class,
+            "source_display": source_display,
             "policy_decision_id": policy_decision_id,
+            "matched_rule_ids": list(matched_rule_ids),
             "authorized_at": authorized_at,
         }
     )
@@ -495,12 +545,20 @@ class TelemetryObservation:
             )
         validate_context_pairs(self.context, "context", self.privacy_class)
         validate_context_pairs(self.extensions, "extensions", self.privacy_class)
-        # Tamper-evident identity: the id must equal the content
-        # derivation (or be derived when absent).
+        # Tamper-evident identity over the COMPLETE canonical content
+        # (to_dict() minus the id itself; PR #27 Architect review,
+        # remediation 2 blocker 1): the id must equal the content
+        # derivation (or be derived when absent).  Because the
+        # derivation covers freshness, evidence, provenance, privacy
+        # classification, context, and extensions alike, a retained id
+        # over mutated DATA of ANY field is rejected here.
         expected = derive_observation_id(
             self.subject_kind, self.subject_ref, self.source_node_id,
             self.source_class, self.metric, self.value,
-            self.confidence_basis_points, self.observed_at, self.sequence,
+            self.confidence_basis_points, self.observed_at,
+            self.freshness_until, self.sequence, self.evidence_refs,
+            self.provenance, self.privacy_class, self.context,
+            self.extensions,
         )
         if not self.observation_id:
             object.__setattr__(self, "observation_id", expected)
@@ -695,15 +753,26 @@ class TopologyPromotion:
                 "promotion_id must carry the %r prefix" % (PROMOTION_ID_PREFIX,),
             )
         validate_observation_ref_text(self.observation_id, "observation id")
+        # COMPLETE-CONTENT identity (PR #27 Architect review,
+        # remediation 2 blocker 2): the id is verified against the
+        # derivation over the ENTIRE canonical promotion DATA (subject
+        # scope, source class, the privacy-governed source_display,
+        # decision id, matched rule lineage, authorization instant) --
+        # not a subset -- so a retained id over altered DATA of any
+        # field is rejected here.
         expected = derive_promotion_id(
-            self.observation_id, self.policy_decision_id, self.authorized_at
+            self.observation_id, self.subject_kind, self.subject_ref,
+            self.source_class, self.source_display,
+            self.policy_decision_id, self.matched_rule_ids,
+            self.authorized_at,
         )
         if self.promotion_id != expected:
             raise TelemetryError(
                 TelemetryReasonCode.INVALID_INPUT,
                 "promotion_id must equal the content-derived "
-                "derive_promotion_id(...) -- a tampered or miscomputed id "
-                "is rejected",
+                "derive_promotion_id(...) over the COMPLETE canonical "
+                "promotion DATA -- a tampered or miscomputed id is "
+                "rejected",
             )
         validate_subject_kind(self.subject_kind)
         validate_subject_ref(self.subject_ref)

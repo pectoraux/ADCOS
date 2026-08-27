@@ -2087,8 +2087,11 @@ def case_74_promotion_binding_born_bound(results: List[Result]) -> None:
     - a promotion context WITHOUT a valid descriptor fails closed
       (ok=False, INVALID_POLICY, no decision);
     - the descriptor schema is strict (seven keys, strings, frozen
-      operation) and MIRRORS the context's first-class resource_refs
-      (subject and observation must be exactly what the rules saw);
+      operation) and its (observation, subject) scope EQUALS the
+      context's first-class resource_refs scope EXACTLY (scope
+      equality: membership is not authorization -- cross-pairing,
+      subset pairing, and any third ref beside the authorized pair
+      fail closed; PR #27 Architect review, remediation 2);
     - the privacy disclosure authorization keys (privacy_scope,
       source_disclosure) are REQUIRED, non-empty strings -- a
       promotion decision without an explicit privacy boundary can
@@ -2239,6 +2242,40 @@ def case_74_promotion_binding_born_bound(results: List[Result]) -> None:
             resource_refs=(subject_ref,),  # observation dropped
         ),
     )
+    # Scope EQUALITY (PR #27 Architect review, remediation 2 -- the
+    # pinned invariant): membership is not authorization.  The
+    # born-bound promotion scope must BE the complete evaluated
+    # scope exactly: the descriptor's (observation, subject) pair
+    # equals the context's resource_refs set.  In a context that
+    # evaluated [observation-A, subject-A, observation-B, subject-B]
+    # neither the cross-pairing observation-A + subject-B nor the
+    # subset pairing observation-A + subject-A is an exact-scope
+    # promotion -- each pairing requires its own decision born into
+    # exactly that scope.
+    obs_b = "telemetry:observation:" + "1" * 64
+    subj_b = "adcos:link:" + "2" * 32
+    broad_refs = (obs_id, subject_ref, obs_b, subj_b)
+    _expect_invalid(
+        "cross-pairing in broader scope",
+        _ctx(
+            extensions=({**descriptor, "subject_ref": subj_b},),
+            resource_refs=broad_refs,
+        ),
+    )
+    _expect_invalid(
+        "subset pairing in broader scope",
+        _ctx(
+            extensions=(dict(descriptor),),
+            resource_refs=broad_refs,
+        ),
+    )
+    _expect_invalid(
+        "third ref beside the pair",
+        _ctx(
+            extensions=(dict(descriptor),),
+            resource_refs=(obs_id, subject_ref, _NODE_B),
+        ),
+    )
     # 4. The derivation function self-defends against foreign
     #    operations (direct call contract).
     try:
@@ -2270,9 +2307,10 @@ def case_74_promotion_binding_born_bound(results: List[Result]) -> None:
             ok(
                 name,
                 "telemetry.topology-promote is deny-by-default privileged and born "
-                "bound (digest-covered, resource_refs-mirrored, privacy "
-                "disclosure authorization required); malformed/absent "
-                "descriptor fails closed; inert on other operations",
+                "bound (digest-covered, scope-EQUAL to the evaluated "
+                "resource_refs, privacy disclosure authorization required); "
+                "malformed/absent descriptor and non-exact scopes fail "
+                "closed; inert on other operations",
             )
         )
 
