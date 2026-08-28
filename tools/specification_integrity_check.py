@@ -124,14 +124,13 @@ def check() -> List[str]:
         if term not in w031:
             errors.append(f"W031-COVERAGE: missing '{term}'")
     w030 = read("docs/handoffs/WORK-030.md").lower()
-    required_status = [
+    for marker in [
         "architect-accepted",
         "pr #32",
         "cleared for merge",
         "not yet merged",
-        "prr_kwdoub21ts8aa aab l nt-lw".replace(" ", ""),
-    ]
-    for marker in required_status:
+        "prr_kwdoub21ts8aaaablntl-w",
+    ]:
         if marker not in w030:
             errors.append(f"W030-STATUS: accepted-but-unmerged marker missing: {marker}")
     return errors
