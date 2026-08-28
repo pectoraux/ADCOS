@@ -27,6 +27,7 @@ def copy_fixture(dst: Path) -> None:
         "docs/specification/lessons.md",
         "docs/specification/open-architectural-questions.md",
         "docs/specification/work-item-status.md",
+        "docs/specification/no-architecture-drift-template.md",
         "tools/specification_integrity_check.py",
     ]:
         src = ROOT / rel
@@ -111,12 +112,21 @@ def main() -> int:
                 encoding="utf-8",
             ),
         ),
+        (
+            "handoff-metadata",
+            lambda root: (root / "docs/handoffs/WORK-034.md").write_text(
+                (root / "docs/handoffs/WORK-034.md")
+                .read_text(encoding="utf-8")
+                .replace("- Phase: Phase 7 — Hardware/device profiles", "- Stage: hardware", 1),
+                encoding="utf-8",
+            ),
+        ),
     ]
     for label, mutate in cases:
         if not assert_case(label, mutate):
             return 1
 
-    print("ADCOS derived specification integrity self-test: PASS (5/5)")
+    print("ADCOS derived specification integrity self-test: PASS (6/6)")
     return 0
 
 
