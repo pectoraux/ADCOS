@@ -30,8 +30,7 @@ def parse_work_items() -> Dict[str, List[str]]:
     out: Dict[str, List[str]] = {}
     for i, m in enumerate(heads):
         wi = m.group(1)
-        num = int(wi[-3:])
-        if num not in WI_RANGE:
+        if int(wi[-3:]) not in WI_RANGE:
             continue
         end = heads[i + 1].start() if i + 1 < len(heads) else len(text)
         block = text[m.end():end]
@@ -57,11 +56,20 @@ def parse_dag() -> Set[Tuple[str, str]]:
         edges.update(zip(nodes, nodes[1:]))
     return edges
 
-def dep_heading_line(text: str) -> Set[str]:
+def declared_hard_dependencies(text: str) -> Set[str]:
+    """Extract dependency IDs from the first Hard dependencies section/line.
+
+    Accepts Markdown heading + following line, or a prose/metadata line such as
+    '- Hard dependencies: W001, W002'. The semantic content, not formatting,
+    is what the checker enforces.
+    """
     lines = text.splitlines()
     for i, line in enumerate(lines):
-        if line.strip() == "## Hard dependencies":
-            return set(re.findall(r"WORK-\d{3}", lines[i + 1])) if i + 1 < len(lines) else set()
+        if re.search(r"\bHard dependencies\b", line, re.I):
+            window = "\n".join(lines[i:i + 4])
+            found = set(re.findall(r"WORK-\d{3}", window))
+            if found:
+                return found
     return set()
 
 def check() -> List[str]:
@@ -87,8 +95,9 @@ def check() -> List[str]:
         for meta in ["Work Item:", "Title:", "Phase:", "Status:", "Frozen source:"]:
             if meta.lower() not in text.lower():
                 errors.append(f"HANDOFF-METADATA: {wi} missing '{meta}'")
-        if dep_heading_line(text) != set(backlog.get(wi, [])):
-            errors.append(f"HANDOFF-DEPS: {wi} expected {sorted(backlog.get(wi, []))}, got {sorted(dep_heading_line(text))}")
+        declared = declared_hard_dependencies(text)
+        if declared != set(backlog.get(wi, [])):
+            errors.append(f"HANDOFF-DEPS: {wi} expected {sorted(backlog.get(wi, []))}, got {sorted(declared)}")
         for dep in backlog.get(wi, []):
             edge = (dep, wi)
             if edge not in dag and edge not in KNOWN_NON_DAG_DECLARATIONS:
@@ -127,7 +136,7 @@ def main() -> int:
             print(f"[FAIL] {error}")
         return 1
     print("ADCOS derived specification integrity: PASS")
-    print("[PASS] canonical artifacts, handoff completeness, exact backlog/DAG agreement (with registered OAQ-001 exception), contract registry, and W031 controls")
+    print("[PASS] canonical artifacts, handoff metadata/dependencies, backlog/DAG agreement, contract registry, OAQ-001, and W031 controls")
     return 0
 
 if __name__ == "__main__":
