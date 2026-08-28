@@ -84,7 +84,7 @@ Derived artifacts cannot acquire authority merely by being referenced more often
 
 ## 4. Current baseline
 
-At the migration baseline, `main` is `62f5b9d3075871a9f06d9806f51b37658a6995cc`, W029 is merged, and W030 remains under Architect re-review and is not accepted on current `main`. This snapshot must be refreshed when `main` changes.
+At the original migration baseline, `main` was `62f5b9d3075871a9f06d9806f51b37658a6995cc` with W029 merged. W030 was subsequently **Architect-accepted and cleared for merge at head `7cfe4fb` on PR #32**, but that PR must still be merged before downstream execution can proceed. This derived page must be refreshed when `main` changes.
 
 ## 5. Integrity commands
 
