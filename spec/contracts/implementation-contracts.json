@@ -7,7 +7,7 @@
   "work_items": {
     "WORK-030": {"hard_dependencies": ["WORK-010", "WORK-011", "WORK-012", "WORK-015", "WORK-026"], "handoff": "docs/handoffs/WORK-030.md", "evidence_class": ["architecture-conformance", "automated-verification"]},
     "WORK-031": {"hard_dependencies": ["WORK-007", "WORK-011", "WORK-012", "WORK-013", "WORK-027"], "handoff": "docs/handoffs/WORK-031.md", "evidence_class": ["architecture-conformance", "automated-verification"]},
-    "WORK-032": {"hard_dependencies": ["WORK-003", "WORK-004", "WORK-005", "WORK-007", "WORK-011", "WORK-012", "WORK-015", "WORK-017", "WORK-016"], "handoff": "docs/handoffs/WORK-032.md", "evidence_class": ["architecture-conformance", "automated-verification"]},
+    "WORK-032": {"hard_dependencies": ["WORK-003", "WORK-004", "WORK-005", "WORK-007", "WORK-011", "WORK-012", "WORK-015", "WORK-017", "WORK-016"], "handoff": "docs/handoffs/WORK-032.md", "evidence_class": ["architecture-conformance", "automated-verification"], "open_questions": ["OAQ-001"]},
     "WORK-033": {"hard_dependencies": ["WORK-016", "WORK-017", "WORK-018", "WORK-026", "WORK-029", "WORK-030", "WORK-032"], "handoff": "docs/handoffs/WORK-033.md", "evidence_class": ["architecture-conformance", "automated-verification"]},
     "WORK-034": {"hard_dependencies": ["WORK-020", "WORK-021", "WORK-022", "WORK-023", "WORK-024", "WORK-033"], "handoff": "docs/handoffs/WORK-034.md", "evidence_class": ["architecture-conformance", "automated-verification", "external-evidence"]},
     "WORK-035": {"hard_dependencies": ["WORK-012", "WORK-013", "WORK-018", "WORK-033"], "handoff": "docs/handoffs/WORK-035.md", "evidence_class": ["architecture-conformance", "automated-verification", "external-evidence"]},
@@ -30,6 +30,7 @@
     "acr_registry": "docs/specification/acr-registry.md",
     "review_protocol": "docs/specification/architect-review-protocol.md",
     "lessons": "docs/specification/lessons.md",
+    "open_questions": "docs/specification/open-architectural-questions.md",
     "status": "docs/specification/work-item-status.md"
   },
   "required_invariant_ids": ["AUTH-001", "AUTH-002", "AUTH-003", "AUTH-004", "AUTH-005", "AUTH-006", "AUTH-007", "AUTH-008", "AUTH-009", "AUTH-010", "DET-001", "DET-002", "FUT-001"]

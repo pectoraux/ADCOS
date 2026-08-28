@@ -1,9 +1,13 @@
 # WORK-031 — Network and Behavior Simulator
 
-**Handoff status:** AUTHORITATIVE DERIVED HANDOFF — frozen Work Item and architecture remain normative.
+**Handoff status:** AUTHORITATIVE DERIVED HANDOFF — frozen Work Item is normative.
 
 ## 1. Identity / source
-Frozen source: `spec/work-items.md` WORK-031. Hard dependencies: WORK-007, W011, W012, W013, W027. Acceptance: reproducible scenarios; injected failures; observable topology/policy behavior; no core-semantic alteration. Verification: deterministic scenario tests. No real-hardware evidence is specified.
+- Work Item: WORK-031
+- Phase: Phase 6 — Executable reference platform
+- Status: DAG-ready on current accepted ancestors; execution-blocked until Architect explicitly designates it active under the one-Work-Item rule.
+- Frozen source: `spec/work-items.md` WORK-031; `spec/dependency-graph.md`.
+- Hard dependencies: W007, W011, W012, W013, W027.
 
 ## 2. Objective
 Build a deterministic simulator for ADCOS nodes, links, failures, resources, mobility, and policies. The simulator is a controlled environment around the existing authorities, not a replacement protocol implementation.
@@ -17,7 +21,7 @@ Use real accepted W007 topology, W011 routing, W012 session, W013 multipath, and
 ## 5. Simulation boundary
 **MAY:** create simulated nodes/links/failure schedules, controlled resource observations, mobility events, policy inputs, partitions, restart/rejoin events, and deterministic scenario traces; compose accepted authorities through explicit test seams; collect observations.
 
-**MUST NOT:** mutate production authority state except through an explicitly provided test seam whose purpose and restoration are proven; reimplement routing, policy, session, topology, multipath, resource, telemetry or identity semantics; mint authority-bearing production objects outside their owners; turn simulator state into protocol truth; use the simulator to satisfy an independent external-evidence gate.
+**MUST NOT:** mutate production authority state except through an explicitly provided test seam whose purpose and restoration are proven; reimplement routing, policy, session, topology, multipath, resource, telemetry or identity semantics; mint authority-bearing production objects outside their owners; turn simulator state into protocol truth; become a **second protocol authority**; use the simulator to satisfy an independent external-evidence gate.
 
 ## 6. Deterministic execution contract
 Time is always injected through scenario time; no uncontrolled wall clock. Randomness, where simulation semantics genuinely require stochastic variation, is generated only from an explicit scenario seed and a documented deterministic PRNG stream; identical seed + scenario + execution order produces byte-identical results. Tests must pin both seed and time. No hidden object-id/hash-seed dependence.

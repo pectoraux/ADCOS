@@ -23,6 +23,8 @@ These four artifacts are the normative specification set:
 ### Level 4 — derived implementation system
 `docs/specification/` and `docs/handoffs/` summarize frozen requirements, authority ownership, invariants, matrices, and implementation instructions. They are intentionally non-authoritative. They must never override a frozen rule.
 
+`docs/specification/open-architectural-questions.md` is the controlled exception for unresolved contradictions: it records them explicitly so no implementation guesses. It has no authority to resolve the question.
+
 `spec/prompts/` remains the Architect-authored per-Work-Item prompt surface where present; a prompt is subordinate to the frozen Work Item and architecture.
 
 ### Level 5 — accepted implementation precedent and evidence
@@ -41,6 +43,9 @@ spec/README.md
 → docs/specification/state-ownership-matrix.md
 → docs/specification/minting-authority-registry.md
 → docs/specification/forbidden-dependency-matrix.md
+→ docs/specification/dependency-model.md
+→ docs/specification/recovery-failure-contract.md
+→ docs/specification/open-architectural-questions.md
 → docs/handoffs/WORK-XXX.md
 → accepted implementation precedent / review history
 ```
@@ -63,6 +68,7 @@ Semantic changes to frozen artifacts follow the existing ACR/schema rules.
 ### Derived / process surface
 ```text
 spec/README.md
+spec/contracts/
 spec/governance.md
 spec/change-control.md
 spec/workflow.md
@@ -88,7 +94,7 @@ python3 tools/specification_integrity_check.py
 python3 tools/specification_integrity_selftest.py
 ```
 
-The first validates existing repository specification mechanics. The second validates the migration's canonical derived artifacts. The third validates the new checker.
+The first validates existing repository specification mechanics. The second validates the migration's canonical derived artifacts. The third validates the new checker with deliberate mutations.
 
 ## 6. Zero-drift rule
 

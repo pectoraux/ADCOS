@@ -7,7 +7,6 @@ import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-CHECKER = ROOT / "tools/specification_integrity_check.py"
 
 
 def copy_fixture(dst: Path) -> None:
@@ -26,6 +25,7 @@ def copy_fixture(dst: Path) -> None:
         "docs/specification/acr-registry.md",
         "docs/specification/architect-review-protocol.md",
         "docs/specification/lessons.md",
+        "docs/specification/open-architectural-questions.md",
         "docs/specification/work-item-status.md",
         "tools/specification_integrity_check.py",
     ]:
@@ -57,6 +57,18 @@ def make_fixture() -> tuple[tempfile.TemporaryDirectory[str], Path]:
     return holder, dst
 
 
+def assert_case(label: str, mutate) -> bool:
+    holder, root = make_fixture()
+    try:
+        mutate(root)
+        if run(root) == 0:
+            print(f"{label} mutation was not detected")
+            return False
+        return True
+    finally:
+        holder.cleanup()
+
+
 def main() -> int:
     holder, root = make_fixture()
     try:
@@ -66,42 +78,45 @@ def main() -> int:
     finally:
         holder.cleanup()
 
-    holder, root = make_fixture()
-    try:
-        (root / "docs/handoffs/WORK-031.md").unlink()
-        if run(root) == 0:
-            print("missing-handoff mutation was not detected")
+    cases = [
+        ("missing-handoff", lambda root: (root / "docs/handoffs/WORK-031.md").unlink()),
+        (
+            "contract-dependency",
+            lambda root: (root / "spec/contracts/implementation-contracts.json").write_text(
+                (root / "spec/contracts/implementation-contracts.json")
+                .read_text(encoding="utf-8")
+                .replace(
+                    '"WORK-031": {"hard_dependencies": ["WORK-007", "WORK-011", "WORK-012", "WORK-013", "WORK-027"]',
+                    '"WORK-031": {"hard_dependencies": []',
+                    1,
+                ),
+                encoding="utf-8",
+            ),
+        ),
+        (
+            "W031-coverage",
+            lambda root: (root / "docs/handoffs/WORK-031.md").write_text(
+                (root / "docs/handoffs/WORK-031.md").read_text(encoding="utf-8").replace(
+                    "explicit seed/time", "controlled determinism", 1
+                ),
+                encoding="utf-8",
+            ),
+        ),
+        (
+            "open-question-registration",
+            lambda root: (root / "docs/specification/open-architectural-questions.md").write_text(
+                (root / "docs/specification/open-architectural-questions.md")
+                .read_text(encoding="utf-8")
+                .replace("OAQ-001", "OAQ-REMOVED", 1),
+                encoding="utf-8",
+            ),
+        ),
+    ]
+    for label, mutate in cases:
+        if not assert_case(label, mutate):
             return 1
-    finally:
-        holder.cleanup()
 
-    holder, root = make_fixture()
-    try:
-        j = root / "spec/contracts/implementation-contracts.json"
-        text = j.read_text(encoding="utf-8").replace(
-            '"WORK-031": {"hard_dependencies": ["WORK-007", "WORK-011", "WORK-012", "WORK-013", "WORK-027"]',
-            '"WORK-031": {"hard_dependencies": []',
-            1,
-        )
-        j.write_text(text, encoding="utf-8")
-        if run(root) == 0:
-            print("contract dependency mutation was not detected")
-            return 1
-    finally:
-        holder.cleanup()
-
-    holder, root = make_fixture()
-    try:
-        h = root / "docs/handoffs/WORK-031.md"
-        text = h.read_text(encoding="utf-8").replace("explicit seed/time", "controlled determinism", 1)
-        h.write_text(text, encoding="utf-8")
-        if run(root) == 0:
-            print("W031 coverage mutation was not detected")
-            return 1
-    finally:
-        holder.cleanup()
-
-    print("ADCOS derived specification integrity self-test: PASS (4/4)")
+    print("ADCOS derived specification integrity self-test: PASS (5/5)")
     return 0
 
 
