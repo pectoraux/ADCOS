@@ -1,13 +1,13 @@
 # ADCOS Current Work Item Execution Status
 
-**Baseline:** `main@62f5b9d3075871a9f06d9806f51b37658a6995cc`.
+**Baseline:** `main@62f5b9d3075871a9f06d9806f51b37658a6995cc` at migration freeze; this derived snapshot must be refreshed after W030 merges.
 
 This derived snapshot never overrides live GitHub/Architect state.
 
 | Work Item | Current state | DAG / semantic readiness | Execution readiness | Evidence class |
 |---|---|---|---|---|
-| W030 | Open PR #32; Architect re-review pending; **not accepted** on current `main` | Not satisfied for downstream execution until accepted | Active/reviewing; not complete | Automated + architecture; frozen W030 external rule only |
-| W031 | Next simulator target | DAG-ready: W007/W011/W012/W013/W027 accepted | Blocked while W030 is active and by one-WI execution governance | Automated/deterministic; no external evidence required |
+| W030 | Open PR #32; **Architect-accepted and cleared for merge at head `7cfe4fb`**; not yet merged | Five frozen dependencies accepted; downstream remains gated until merge | Accepted; cleared for merge | Automated + architecture; frozen W030 external rule only |
+| W031 | Next simulator target | DAG-ready: W007/W011/W012/W013/W027 accepted | **Blocked until W030 is actually merged**, then requires explicit execution designation | Automated/deterministic; no external evidence required |
 | W032 | Conformance target | Graph-satisfied by current graph, but OAQ-001 records a frozen backlog-vs-DAG dependency declaration inconsistency for W016 | Blocked while another WI is active; OAQ-001 must not be silently resolved | Automated/conformance |
 | W033 | Linux Agent | Blocked by W030/W032 and frozen DAG | Blocked | Automated/end-to-end Linux |
 | W034 | Raspberry Pi / low-power gateway | Blocked by W020/W021/W022/W023/W024/W033 | Blocked | Hardware integration / external evidence |
@@ -24,3 +24,4 @@ This derived snapshot never overrides live GitHub/Architect state.
 - **Execution-ready** additionally requires explicit Architect designation under the one-active-Work-Item rule.
 - **Accepted** requires explicit Architect acceptance plus the applicable architecture/verification/external-evidence record.
 - A merge, green CI run, or closed PR never substitutes for Architect acceptance.
+- W030 is architecturally accepted but remains operationally uncleared for downstream execution until PR #32 is actually merged, as required by the acceptance record.
