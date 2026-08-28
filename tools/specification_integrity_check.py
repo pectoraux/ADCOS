@@ -21,8 +21,10 @@ REQUIRED = [
 WI_RANGE = range(30, 41)
 KNOWN_NON_DAG_DECLARATIONS = {("WORK-016", "WORK-032")}
 
+
 def read(rel: str) -> str:
     return (ROOT / rel).read_text(encoding="utf-8")
+
 
 def parse_work_items() -> Dict[str, List[str]]:
     text = read("spec/work-items.md")
@@ -37,6 +39,7 @@ def parse_work_items() -> Dict[str, List[str]]:
         dep = re.search(r"^Dependencies:\s*(.+?)\s*$", block, re.M)
         out[wi] = [] if dep is None or dep.group(1).strip().lower() == "none" else re.findall(r"WORK-\d{3}", dep.group(1))
     return out
+
 
 def parse_dag() -> Set[Tuple[str, str]]:
     text = read("spec/dependency-graph.md")
@@ -56,13 +59,9 @@ def parse_dag() -> Set[Tuple[str, str]]:
         edges.update(zip(nodes, nodes[1:]))
     return edges
 
-def declared_hard_dependencies(text: str) -> Set[str]:
-    """Extract dependency IDs from the first Hard dependencies section/line.
 
-    Accepts Markdown heading + following line, or a prose/metadata line such as
-    '- Hard dependencies: W001, W002'. The semantic content, not formatting,
-    is what the checker enforces.
-    """
+def declared_hard_dependencies(text: str) -> Set[str]:
+    """Extract dependency IDs from the first Hard dependencies section/line."""
     lines = text.splitlines()
     for i, line in enumerate(lines):
         if re.search(r"\bHard dependencies\b", line, re.I):
@@ -71,6 +70,7 @@ def declared_hard_dependencies(text: str) -> Set[str]:
             if found:
                 return found
     return set()
+
 
 def check() -> List[str]:
     errors: List[str] = []
@@ -124,9 +124,19 @@ def check() -> List[str]:
         if term not in w031:
             errors.append(f"W031-COVERAGE: missing '{term}'")
     w030 = read("docs/handoffs/WORK-030.md")
-    if "PR #32" not in w030 or "not accepted" not in w030.lower():
-        errors.append("W030-STATUS: current non-acceptance not recorded")
+    accepted = w030.lower()
+    required_status = [
+        "architect-accepted",
+        "pr #32",
+        "cleared for merge",
+        "not yet merged",
+        "prr_kwdoub21ts8aa aablntu".replace(" ", ""),
+    ]
+    for marker in required_status:
+        if marker not in accepted:
+            errors.append(f"W030-STATUS: accepted-but-unmerged marker missing: {marker}")
     return errors
+
 
 def main() -> int:
     errors = check()
@@ -138,6 +148,7 @@ def main() -> int:
     print("ADCOS derived specification integrity: PASS")
     print("[PASS] canonical artifacts, handoff metadata/dependencies, backlog/DAG agreement, contract registry, OAQ-001, and W031 controls")
     return 0
+
 
 if __name__ == "__main__":
     raise SystemExit(main())
