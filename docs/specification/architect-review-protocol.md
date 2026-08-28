@@ -82,4 +82,6 @@ Acceptance is not implied by merge, CI, PR closure, or self-assessment.
 
 Stop and require an ACR when a frozen rule, frozen dependency, protocol/state meaning, authority ownership, or frozen evidence requirement must change.
 
+**OPEN ARCHITECTURAL QUESTION** is the controlled status for a genuine unresolved contradiction. Record the affected Work Item, exact conflicting repository authorities, why the ambiguity matters, and the resolution authority. An open question never authorizes an implementation guess.
+
 Do not repair an architecture conflict by editing only implementation or explanatory documentation.
