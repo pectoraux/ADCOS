@@ -21,6 +21,9 @@ Ethernet/Wi-Fi/cellular/RAN/backhaul/mesh functions enter through their accepted
 ## Resource/energy discipline
 Use W008 resource units/accounting and W027 energy/resilience controls. Low-power optimization is an implementation concern and must not redefine the survival ladder or invent new resource authority.
 
+## Security
+Hardware-specific code is not a trust boundary. Device/vendor identifiers and provider state remain untrusted until the owning W004/W016/W019-W023 contracts verify them. Privileged operations retain the existing W010/W030 authorization path; no hardware capability may grant policy/session/routing authority. Logs and diagnostics must not expose credentials or secret material.
+
 ## Failure / recovery
 Cover power loss, adapter restart, low-resource pressure, upstream loss, relay/gateway degradation, state restoration, and cleanup. Never claim hardware/provider cleanup succeeded unless proved. Restart must respect W027/W029 revalidation and W012 session recovery semantics.
 

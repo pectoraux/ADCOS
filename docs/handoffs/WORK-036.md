@@ -1,6 +1,6 @@
 # WORK-036 — Network-in-a-Box
 
-**Sources:** frozen WORK-036 and accepted W024/W025/W030/W033/W034 contracts.
+**Sources:** frozen WORK-036; accepted W024/W025/W030/W033/W034 contracts.
 
 ## Objective
 Package ADCOS as an autonomous local network appliance for community or emergency deployment.
@@ -20,6 +20,9 @@ Use W027/W025 accepted local-first semantics: local services and configured conn
 
 ## Multi-access composition
 Coexistence of adapters is achieved through W016 and accepted concrete adapter contracts. The package may select/combine configured components only through their owning contracts. Access identifiers remain DATA and never enter core identity.
+
+## Security
+Packaging and provisioning do not create trust. Operator identity/capability is validated through W030 and policy authorization through W010; service/session/resource/routing changes go through their owning authorities. Appliance-local configuration, logs, and persisted state cannot be treated as provenance merely because they are local. No vendor SDK becomes a core authority.
 
 ## Provisioning / failure
 Provisioning must be auditable and idempotent where the owning contract requires it. Partial provisioning, provider failures, cleanup failures, and loss of upstream must remain explicit. Restart recovers owner state and revalidates authority/version/expiry.

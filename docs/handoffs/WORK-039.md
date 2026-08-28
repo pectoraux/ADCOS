@@ -18,6 +18,9 @@ Semantic: federation, deterministic simulator, Linux Agent, Network-in-a-Box. Ex
 ## Scale model
 Each domain retains independent lifecycle, grants and authorization. Exchange is bounded by the accepted W015 contract. Failure in one domain or relationship must not silently mutate unrelated domains. Revocation propagation is measured according to the existing federation semantics; no invented global trust score is permitted.
 
+## Security
+Federation scale does not collapse domain trust boundaries. Every grant/relationship remains scoped to its W015 owner and is provenance-checked before local use. Remote claims remain claims until an explicit authorized promotion path applies. Partitioned or stale state cannot silently restore revoked authority, and a domain-local failure cannot grant authority in another domain.
+
 ## Simulation / integration
 Use W031 to reproduce large populations deterministically. Distinguish simulation evidence from integration evidence. W033/W036 are deployment composition boundaries, not new semantic owners.
 

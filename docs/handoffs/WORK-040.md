@@ -15,6 +15,9 @@ Semantic: resilience/security, Network-in-a-Box, real open-RAN/core interoperabi
 **MAY:** deploy and operate accepted components, compose real adapters, collect operational evidence, execute approved scenarios, and document results.
 **MUST NOT:** change core semantics in the field, bypass management/policy/security controls for demonstration, treat pilot configuration as protocol authority, or claim conformance from successful application behavior alone.
 
+## Security
+The pilot is an evidence environment, not a trust shortcut. Production authority remains with the accepted owner modules; operator actions use the accepted management/policy/security boundaries. Credentials, private keys, and sensitive telemetry never enter public evidence artifacts. Real deployment evidence must prove provenance of the system/configuration under test and must not turn local logs into independent authority.
+
 ## Pilot acceptance model
 The pilot is evidence of the already-frozen architecture; it is not a place to negotiate architecture. Every component must be traceable to an accepted Work Item/contract. Any observed requirement that contradicts frozen semantics becomes an ACR/open architectural question rather than an undocumented field patch.
 
