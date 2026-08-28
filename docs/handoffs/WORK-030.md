@@ -6,8 +6,9 @@
 - Work Item: WORK-030
 - Title: Management API
 - Phase: Phase 5 — Resilience, Security, Operations
-- Status: In review; PR #32 is not accepted on current `main`.
+- Status: **Architect-accepted; PR #32 cleared for merge at head `7cfe4fb`; not yet merged.**
 - Frozen source: `spec/work-items.md` WORK-030; `spec/architecture.md`; `spec/architecture-lock.md`.
+- Architect acceptance record: PR #32 review `PRR_kwDOUB21ts8AAAABLNtL-w`, explicitly closing blockers from review `5047201533`.
 
 ## 2. Objective
 Implement management, configuration, audit, and operational-control APIs as a management-plane boundary over existing authorities. Management requests operations; it does not become a replacement policy, routing, session, federation, telemetry, or resource authority.
@@ -17,7 +18,7 @@ WORK-010, WORK-011, WORK-012, WORK-015, WORK-026.
 
 ## 4. Dependency classes
 - DAG/semantic: the five frozen hard dependencies above.
-- Execution: one active Work Item at a time; W030 is the current active/review target until explicitly resolved.
+- Execution: one active Work Item at a time; W030 was the active/review target and is now architecturally accepted. Downstream execution remains blocked until PR #32 is merged and the next Work Item is explicitly designated.
 - Verification: API security + audit + RBAC tests, plus the complete repository battery.
 - External evidence: use only the frozen W030 requirement; do not invent a hardware/interoperability gate.
 
@@ -41,14 +42,14 @@ Require two independent authorization dimensions for privileged actions: managem
 ## 10. Failure / persistence / recovery
 Unexpected exceptions at the outer management operation boundary must still produce exactly one auditable outcome for the operation, without swallowing the exception into a false success. Partial external/domain effects must remain explicit; no rollback success may be claimed without proof. Restart must reload only authoritative persisted state and revalidate revocation/expiry/scope before reuse. Unproven cleanup remains pending/degraded.
 
-## 11. Current review blockers to preserve
-The current PR #32 Architect review identified two acceptance-critical issues: (1) the universal outer operation boundary did not guarantee exactly one audit record on unexpected exceptions; (2) constructor-injected RBAC initial events were not integrity-validated against `derive_role_event_id`. The current correction must close both. These are review facts, not new architecture.
+## 11. Architect acceptance / correction record
+Initial Architect review `5047201533` identified two blockers: (1) no universal guarantee of exactly one audit record on unexpected exceptions; (2) missing content-derived integrity validation for constructor-injected RBAC events. Correction cycle 1 at `7cfe4fb` added the universal `_invoke` boundary, per-invocation audit accounting, frozen `management.failed` handling, narrowed expected exception catches, constructor-side `derive_role_event_id` validation, and discriminating regressions case_38/case_39. Both regressions were verified to fail against the pre-correction implementation. The subsequent Architect review accepted W030 and cleared PR #32 for merge.
 
 ## 12. Verification
-Architecture conformance: authority ownership, least-authority calls, no direct domain mutation, no vendor leakage. Automated: positive/negative RBAC, policy denial, foreign-scope/caller injection, forged/tampered role events, unexpected exception audit exactly-once, replay/idempotency, restart and cleanup cases, determinism. External evidence: report the frozen W030 state only.
+Architecture conformance: authority ownership, least-authority calls, no direct domain mutation, no vendor leakage. Automated: positive/negative RBAC, policy denial, foreign-scope/caller injection, forged/tampered role events, unexpected exception audit exactly-once, replay/idempotency, restart and cleanup cases, determinism. Evidence recorded by the accepted review includes management battery 39/39, mypy clean for the management family, spec/policy/telemetry verification, and GitHub Actions run 33134964463 success (35/35 steps). External evidence: not required by the frozen W030 contract.
 
 ## 13. Acceptance gate
-Architect must inspect full diff, prove both authorization keys are real and scope-bound, prove audit exactly-once under success/rejection/exception, verify RBAC event integrity, run full battery, and explicitly record acceptance. Merge/CI alone is insufficient.
+**Accepted.** Architect explicitly recorded W030 acceptance and clearance for merge. Merge/CI alone is not sufficient in general; here explicit Architect acceptance exists. Downstream Work Items remain gated until PR #32 is actually merged.
 
 ## 14. Out of scope
 No replacement policy/routing/session/federation/telemetry/resource engines; no direct domain writers; no vendor SDKs; no UI-specific semantics that bypass the management contract; no W031+ behavior.
