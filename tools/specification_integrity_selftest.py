@@ -35,7 +35,13 @@ def copy_fixture(dst: Path) -> None:
 
 
 def run(dst: Path) -> int:
-    return subprocess.run(["python3", str(dst / "tools/specification_integrity_check.py")], cwd=dst, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False).returncode
+    return subprocess.run(
+        ["python3", str(dst / "tools/specification_integrity_check.py")],
+        cwd=dst,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        check=False,
+    ).returncode
 
 
 def fixture() -> tuple[tempfile.TemporaryDirectory[str], Path]:
@@ -88,15 +94,27 @@ def main() -> int:
         (
             "open-question-registration",
             lambda r: (r / "docs/specification/open-architectural-questions.md").write_text(
-                (r / "docs/specification/open-architectural-questions.md").read_text(encoding="utf-8").replace("OAQ-001", "OAQ-REMOVED", 1),
-                encoding="utf-8"
+                (r / "docs/specification/open-architectural-questions.md").read_text(encoding="utf-8").replace(
+                    "OAQ-001", "OAQ-REMOVED", 1
+                ), encoding="utf-8"
             ),
         ),
         (
             "handoff-metadata",
             lambda r: (r / "docs/handoffs/WORK-034.md").write_text(
-                (r / "docs/handoffs/WORK-034.md").read_text(encoding="utf-8").replace("- Phase: Phase 7 — Hardware/device profiles", "- Stage: hardware", 1),
-                encoding="utf-8"
+                (r / "docs/handoffs/WORK-034.md").read_text(encoding="utf-8").replace(
+                    "- Phase: Phase 7 — Hardware/device profiles", "- Stage: hardware", 1
+                ), encoding="utf-8"
+            ),
+        ),
+        (
+            "W030-acceptance-status",
+            lambda r: (r / "docs/handoffs/WORK-030.md").write_text(
+                (r / "docs/handoffs/WORK-030.md").read_text(encoding="utf-8").replace(
+                    "**Architect-accepted; PR #32 cleared for merge at head `7cfe4fb`; not yet merged.**",
+                    "In review; PR #32 is not accepted on current `main`.",
+                    1,
+                ), encoding="utf-8"
             ),
         ),
     ]
