@@ -19,6 +19,12 @@ jobs:
       - name: Run specification consistency checks
         run: python3 tools/spec_check.py
 
+      - name: Run derived specification integrity checks
+        run: python3 tools/specification_integrity_check.py
+
+      - name: Run derived specification integrity self-tests
+        run: python3 tools/specification_integrity_selftest.py
+
       - name: Run specification checker negative tests
         run: python3 tools/spec_check_selftest.py
 

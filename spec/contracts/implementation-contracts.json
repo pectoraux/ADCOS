@@ -1,0 +1,37 @@
+{
+  "schema_version": "1.0",
+  "architecture_version": "1.0",
+  "status": "DERIVED-NORMATIVE-INDEX",
+  "normative_sources": ["spec/architecture.md", "spec/architecture-lock.md", "spec/dependency-graph.md", "spec/work-items.md"],
+  "process_sources": ["spec/governance.md", "spec/change-control.md", "spec/workflow.md"],
+  "work_items": {
+    "WORK-030": {"hard_dependencies": ["WORK-010", "WORK-011", "WORK-012", "WORK-015", "WORK-026"], "handoff": "docs/handoffs/WORK-030.md", "evidence_class": ["architecture-conformance", "automated-verification"]},
+    "WORK-031": {"hard_dependencies": ["WORK-007", "WORK-011", "WORK-012", "WORK-013", "WORK-027"], "handoff": "docs/handoffs/WORK-031.md", "evidence_class": ["architecture-conformance", "automated-verification"]},
+    "WORK-032": {"hard_dependencies": ["WORK-003", "WORK-004", "WORK-005", "WORK-007", "WORK-011", "WORK-012", "WORK-015", "WORK-017", "WORK-016"], "handoff": "docs/handoffs/WORK-032.md", "evidence_class": ["architecture-conformance", "automated-verification"], "open_questions": ["OAQ-001"]},
+    "WORK-033": {"hard_dependencies": ["WORK-016", "WORK-017", "WORK-018", "WORK-026", "WORK-029", "WORK-030", "WORK-032"], "handoff": "docs/handoffs/WORK-033.md", "evidence_class": ["architecture-conformance", "automated-verification"]},
+    "WORK-034": {"hard_dependencies": ["WORK-020", "WORK-021", "WORK-022", "WORK-023", "WORK-024", "WORK-033"], "handoff": "docs/handoffs/WORK-034.md", "evidence_class": ["architecture-conformance", "automated-verification", "external-evidence"]},
+    "WORK-035": {"hard_dependencies": ["WORK-012", "WORK-013", "WORK-018", "WORK-033"], "handoff": "docs/handoffs/WORK-035.md", "evidence_class": ["architecture-conformance", "automated-verification", "external-evidence"]},
+    "WORK-036": {"hard_dependencies": ["WORK-024", "WORK-025", "WORK-030", "WORK-033", "WORK-034"], "handoff": "docs/handoffs/WORK-036.md", "evidence_class": ["architecture-conformance", "automated-verification", "external-evidence"]},
+    "WORK-037": {"hard_dependencies": ["WORK-019", "WORK-020", "WORK-021", "WORK-032", "WORK-033"], "handoff": "docs/handoffs/WORK-037.md", "evidence_class": ["architecture-conformance", "automated-verification", "external-evidence"]},
+    "WORK-038": {"hard_dependencies": ["WORK-016", "WORK-029", "WORK-032", "WORK-033"], "handoff": "docs/handoffs/WORK-038.md", "evidence_class": ["architecture-conformance", "automated-verification"]},
+    "WORK-039": {"hard_dependencies": ["WORK-015", "WORK-031", "WORK-033", "WORK-036"], "handoff": "docs/handoffs/WORK-039.md", "evidence_class": ["architecture-conformance", "automated-verification"]},
+    "WORK-040": {"hard_dependencies": ["WORK-027", "WORK-028", "WORK-036", "WORK-037", "WORK-039"], "handoff": "docs/handoffs/WORK-040.md", "evidence_class": ["architecture-conformance", "automated-verification", "external-evidence"]}
+  },
+  "derived_contracts": {
+    "authority_model": "docs/specification/authority-model.md",
+    "semantic_ownership": "docs/specification/semantic-ownership-matrix.md",
+    "state_ownership": "docs/specification/state-ownership-matrix.md",
+    "minting_registry": "docs/specification/minting-authority-registry.md",
+    "forbidden_dependencies": "docs/specification/forbidden-dependency-matrix.md",
+    "invariants": "docs/specification/invariant-catalog.md",
+    "contracts": "docs/specification/contract-registry.md",
+    "dependency_model": "docs/specification/dependency-model.md",
+    "recovery_failure": "docs/specification/recovery-failure-contract.md",
+    "acr_registry": "docs/specification/acr-registry.md",
+    "review_protocol": "docs/specification/architect-review-protocol.md",
+    "lessons": "docs/specification/lessons.md",
+    "open_questions": "docs/specification/open-architectural-questions.md",
+    "status": "docs/specification/work-item-status.md"
+  },
+  "required_invariant_ids": ["AUTH-001", "AUTH-002", "AUTH-003", "AUTH-004", "AUTH-005", "AUTH-006", "AUTH-007", "AUTH-008", "AUTH-009", "AUTH-010", "DET-001", "DET-002", "FUT-001"]
+}
