@@ -1,0 +1,9 @@
+{
+  "device_model": "TECNO KL4",
+  "android_version": "14",
+  "build_fingerprint": "TECNO/KL4-EEA/TECNO-KL4:14/UKQ1.231003.002/240523V547:user/release-keys",
+  "apk_package": "com.example.w035harness",
+  "apk_version": "1.0",
+  "validator": "ADCOS W035 Physical Validation Agent",
+  "timestamp": "2026-08-29T06:20:00Z"
+}

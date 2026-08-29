@@ -1,0 +1,13 @@
+{
+  "project": "ADCOS",
+  "work_item": "W035",
+  "evidence_type": "PHYSICAL_DEVICE_VALIDATION",
+  "files": [
+    "device_manifest.json",
+    "device_observations.jsonl",
+    "mobile_reactions.jsonl",
+    "test_matrix.md"
+  ],
+  "result": "PASS (WITH DEVICE LIMITATIONS)",
+  "timestamp": "2026-08-29T06:22:00Z"
+}
