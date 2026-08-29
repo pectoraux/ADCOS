@@ -1,0 +1,19 @@
+{
+  "artifacts": {
+    "calibration": {
+      "path": "/home/tetevi/adcos-work/adc-repo/evidence/w035-device/device_calibration.json",
+      "sha256": "4c895a0be73be7f40e3dd5e7d14980b6941f235f26b8f2b570aa32dd2bb3fbbc"
+    },
+    "mobile_reactions": {
+      "path": "/home/tetevi/adcos-work/adc-repo/evidence/w035-device/mobile_reactions.jsonl",
+      "sha256": "a40206820f3f6f4d9c5432056737fb9e6b18b8930e2e439f4418799573fe4330"
+    },
+    "physical_snapshots": {
+      "path": "/home/tetevi/adcos-work/adc-repo/evidence/w035-device/physical_snapshots.jsonl",
+      "sha256": "2ef24c7b93a4b19c23f325ae7b3205ae89d81ae6757bbf0b5c897ec07bbac161"
+    }
+  },
+  "generated_at": "2026-08-29T04:48:16.745473+00:00",
+  "serial": "12922554B5023086",
+  "validator_commit": "1769c52ba485c2aee1b9fc1dec783e3919100f44"
+}

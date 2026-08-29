@@ -56,10 +56,10 @@ Test matrix summary
 -------------------
 - Software/emulated lifecycle: PASS (45/45 via tools/mobile_selftest.py)
 - Physical-device installation & runtime: NOT TESTABLE (no APK/build to deploy)
-- Foreground/background lifecycle on real device: PARTIAL — power press produced a measurable screen/display-state transition, but the app foreground/background phase remained distinct from the display state; HOME did not produce a reliable app-phase transition on this device during runs
-- Background restriction: NOT TESTABLE (heuristics inconclusive on this device)
+- Foreground/background lifecycle on real device: PARTIAL — the calibrated run observed a real display/power transition, but the app foreground/background phase remains a separate signal from the screen state and is not yet a defensible W035 PASS on this handset.
+- Background restriction: NOT TESTABLE — no device-specific authoritative background-restriction signal was observed in the current run; the parser intentionally avoids inferring from generic device-idle text.
 - User consent/resource sharing on device: NOT TESTABLE
-- Network loss/recovery on device: PARTIAL — wifi enable/disable commands were issued but the validator did not observe a reliable connectivity-state transition on this device (assertion_passed=false); see evidence/mobile_reactions.jsonl and physical_snapshots.jsonl for raw dumpsys/ip outputs
+- Network loss/recovery on device: NOT TESTABLE on the current device — the latest calibrated evidence shows no supported Wi‑Fi baseline before toggle and no reliable Wi‑Fi recovery after re-enable; the conservative classification is not PASS, not PARTIAL, but not established on this handset.
 - Session continuity/handover on device: NOT TESTABLE
 - Process kill/restart/recovery on device: NOT TESTABLE
 - Local discovery on device: NOT TESTABLE
@@ -67,22 +67,21 @@ Test matrix summary
 Deliverables produced in this evidence branch
 ---------------------------------------------
 - docs/WORK-035-device-validation.md (this file)
+- evidence/w035-device/evidence_manifest.json (validator SHA and artifact lineage for the exact run)
 - evidence/w035-device/device_manifest.json
 - evidence/w035-device/device_calibration.json (per-device native-signal calibration mapping for network and lifecycle parsing)
 - evidence/w035-device/adb_commands.txt
 - evidence/w035-device/test_matrix.md
-- evidence/w035-device/physical_snapshots.jsonl (raw PlatformSnapshot captures)
-- evidence/w035-device/mobile_reactions.jsonl (MobileAgent reactions, run results, raw dumpsys captured per experiment)
+- evidence/w035-device/physical_snapshots.jsonl (fresh calibrated raw PlatformSnapshot captures)
+- evidence/w035-device/mobile_reactions.jsonl (fresh MobileAgent reactions, run results, raw dumpsys captured per experiment)
 - tools/mobile_selftest.log (deterministic battery stdout captured)
 
 Next steps required to complete a physical-device PASS
 -----------------------------------------------------
-1. Harden AdbPlatformSource heuristics and add a per-device calibration probe:
-   - Probe which native signals (dumpsys connectivity, dumpsys netstats, ip addr, LinkProperties) actually reflect wifi/cellular changes on this specific device. Record that mapping as a per-device calibration used by the validator.
-   - Where necessary, prefer kernel-level signals (ip addr / ip link / interface "inet" presence) as more authoritative than substring matches in dumpsys output.
-2. Retry network transition experiments using a conservative, calibrated signal set. If wifi still cannot be observed to change, mark the experiment NOT_TESTABLE for that device and record the raw evidence.
-3. If per-device signals are insufficient and the spec requires authoritative background/consent signals, obtain or build a small device-side helper (APK) that can query ConnectivityManager / PowerManager APIs directly and expose them to the validator (Architect prefers avoiding an APK; document if this becomes necessary).
-4. Once the validator observes the required transitions or the device is documented as NOT_TESTABLE, create a PR from work-035-device-evidence with the evidence artifacts for Architect review.
+1. Keep the signal-based, calibrated validator and the shared parser as the evidence contract. The validator SHA is stored in evidence_manifest.json for the exact run, and the calibration record identifies the signals used to infer lifecycle and connectivity.
+2. Re-run the network experiments only with a known, connected Wi‑Fi AP and a stable baseline before/after observation. If no real Wi‑Fi baseline exists, mark the experiment NOT TESTABLE instead of asserting a PASS.
+3. If per-device signals remain insufficient and the spec requires authoritative background/consent signals, obtain or build a small device-side helper (APK) that can query ConnectivityManager / PowerManager APIs directly and expose them to the validator.
+4. Once the device provides a defensible before/after signal for the supported experiments, re-run the validator and refresh the evidence so the report, calibration record, and artifact manifest all describe the same exact run.
 
 Security and privacy
 --------------------

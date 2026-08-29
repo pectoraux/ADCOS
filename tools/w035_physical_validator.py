@@ -27,6 +27,7 @@ from tools.w035_platform_calibration import (
     dump_calibration_file,
     parse_display_state,
     snapshot_from_native,
+    write_evidence_manifest,
 )
 
 
@@ -86,6 +87,7 @@ def main():
     calibration_file = evidence_dir / "device_calibration.json"
     calibration = dump_calibration_file(calibration_file, serial, collect_native_signals(serial))
     out_file = evidence_dir / "mobile_reactions.jsonl"
+    manifest_file = evidence_dir / "evidence_manifest.json"
 
     records = [{"ts": now_ts(), "action": "calibration", "calibration": calibration}]
 
@@ -279,7 +281,16 @@ def main():
         for r in records:
             f.write(json.dumps(r, default=str) + "\n")
 
+    manifest_file = evidence_dir / "evidence_manifest.json"
+    write_evidence_manifest(
+        manifest_file,
+        serial,
+        calibration_file,
+        evidence_dir / "physical_snapshots.jsonl",
+        out_file,
+    )
     print(f"Wrote {len(records)} runs to {out_file}")
+    print(f"Wrote evidence manifest to {manifest_file}")
 
 
 if __name__ == "__main__":

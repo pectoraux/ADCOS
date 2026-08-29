@@ -8,13 +8,24 @@ unrelated dumpsys output.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import shlex
 import subprocess
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Dict
 
 from mobile.model import MobilePhase, NetworkKind, PlatformSnapshot, PowerState
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+
+
+def repo_head_sha() -> str:
+    try:
+        return subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=str(REPO_ROOT), stderr=subprocess.STDOUT, text=True, errors="replace").strip()
+    except Exception:
+        return "unknown"
 
 
 def adb(cmd: str, serial: str | None = None) -> str:
@@ -129,6 +140,7 @@ def calibration_record(serial: str, native: Dict[str, str]) -> Dict[str, Any]:
     return {
         "serial": serial,
         "generated_at": datetime.now(timezone.utc).isoformat(),
+        "validator_commit": repo_head_sha(),
         "parser": {
             "display_state": {
                 "signal": ["dumpsys power", "dumpsys window policy"],
@@ -171,6 +183,34 @@ def snapshot_from_native(serial: str, native: Dict[str, str]) -> PlatformSnapsho
         metered=(network_kind == NetworkKind.CELLULAR),
         background_restricted=background_restricted,
     )
+
+
+def sha256_file(path: str | Path) -> str:
+    p = Path(path)
+    if not p.exists():
+        return "missing"
+    h = hashlib.sha256()
+    with open(p, "rb") as f:
+        for chunk in iter(lambda: f.read(65536), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def write_evidence_manifest(path: str | Path, serial: str, calibration_path: str | Path, snapshots_path: str | Path, reactions_path: str | Path) -> Dict[str, Any]:
+    manifest = {
+        "serial": serial,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "validator_commit": repo_head_sha(),
+        "artifacts": {
+            "calibration": {"path": str(calibration_path), "sha256": sha256_file(calibration_path)},
+            "physical_snapshots": {"path": str(snapshots_path), "sha256": sha256_file(snapshots_path)},
+            "mobile_reactions": {"path": str(reactions_path), "sha256": sha256_file(reactions_path)},
+        },
+    }
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(manifest, f, indent=2, sort_keys=True)
+        f.write("\n")
+    return manifest
 
 
 def dump_calibration_file(path, serial: str, native: Dict[str, str]) -> Dict[str, Any]:

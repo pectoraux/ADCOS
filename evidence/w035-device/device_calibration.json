@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-08-29T04:41:46.015603+00:00",
+  "generated_at": "2026-08-29T04:47:24.983072+00:00",
   "parser": {
     "app_phase": {
       "mapping": "lockscreen=true => foreground/background boundary is background; otherwise foreground",
@@ -38,5 +38,6 @@
     "ip_addr_present": true,
     "ip_link_present": true
   },
-  "serial": "12922554B5023086"
+  "serial": "12922554B5023086",
+  "validator_commit": "1769c52ba485c2aee1b9fc1dec783e3919100f44"
 }
