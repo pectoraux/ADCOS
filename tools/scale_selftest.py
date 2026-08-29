@@ -1805,12 +1805,18 @@ def case_37_pr_delta_shape(results: List[Result]) -> None:
         "tools/imt_selftest.py",
         "docs/WORK-039-handoff.md",
         "docs/WORK-039-evidence.md",
+        # DAG-sanctioned amendments (work-item order): the successor
+        # batteries' PR-delta shapes admit this branch's files.
+        "tools/pilot_selftest.py",
+        "docs/WORK-040-handoff.md",
+        "docs/WORK-040-evidence.md",
         # the Architect's own branch anchor (validated by _spec_delta_clean):
         _ARCHITECT_HANDOFF,
     }
     unexpected = [
         c for c in changed
-        if not c.startswith("scale/") and c not in allowed_exact
+        if not c.startswith("scale/") and not c.startswith("pilot/")
+        and c not in allowed_exact
         and not c.startswith(".github/")
     ]
     if unexpected:

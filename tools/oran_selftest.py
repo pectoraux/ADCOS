@@ -1702,6 +1702,11 @@ def case_35_pr_delta_shape(results: List[Result]) -> None:
         "tools/scale_selftest.py",
         "docs/WORK-039-handoff.md",
         "docs/WORK-039-evidence.md",
+        # DAG-sanctioned amendment (-> WORK-040): the pilot deployment
+        # battery extends this one (work-item order in CI).
+        "tools/pilot_selftest.py",
+        "docs/WORK-040-handoff.md",
+        "docs/WORK-040-evidence.md",
         # DAG-sanctioned allowlist amendment (W029 -> W038): the upgrade
         # battery's authority-boundary audit exempts the W038
         # future-IMT family as a DAG-sanctioned downstream consumer
@@ -1717,7 +1722,7 @@ def case_35_pr_delta_shape(results: List[Result]) -> None:
     unexpected = [
         c for c in changed
         if not c.startswith("interop/") and not c.startswith("imt/")
-        and not c.startswith("scale/")
+        and not c.startswith("scale/") and not c.startswith("pilot/")
         and c not in allowed_exact
         and not c.startswith(".github/")
     ]
