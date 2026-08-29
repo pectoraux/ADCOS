@@ -1804,8 +1804,17 @@ def case_33_pr_delta_shape(results: List[Result]) -> None:
         ["git", "diff", "origin/main", "--", ".github/"],
         capture_output=True, text=True, cwd=str(REPO_ROOT),
     )
-    if "imt_selftest.py" not in workflow_delta.stdout:
-        results.append(fail(name, ".github delta does not include the future-profile CI step"))
+    # Successor-step discipline (the agent case_40 / W039-era oran
+    # case_35 pattern): a later work item may append its own CI step
+    # further down the workflow WITHOUT the future-profile step
+    # appearing inside the diff context -- the wiring change must only
+    # never weaken or drop the future-profile step itself.
+    removed_imt_step = any(
+        line.startswith("-") and "imt_selftest.py" in line
+        for line in workflow_delta.stdout.splitlines()
+    )
+    if removed_imt_step or "python3 tools/imt_selftest.py" not in workflow:
+        results.append(fail(name, ".github delta weakens or drops the future-profile CI step"))
         return
     results.append(ok(
         name, "PR delta exactly: imt/ + imt battery + agent/edge/mobile/"
