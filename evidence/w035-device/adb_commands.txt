@@ -1,0 +1,14 @@
+# Exact adb commands used during validation
+
+adb version
+adb devices
+
+# Because adb initially showed multiple entries, targeted the physical device by serial:
+adb -s 12922554B5023086 get-state
+adb -s 12922554B5023086 shell getprop ro.build.version.release
+adb -s 12922554B5023086 shell getprop ro.build.version.sdk
+adb -s 12922554B5023086 shell getprop ro.product.manufacturer
+adb -s 12922554B5023086 shell getprop ro.product.model
+
+# Notes:
+# - Do not run additional ad-hoc commands that collect personal data without explicit instruction.

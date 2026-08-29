@@ -1,0 +1,10 @@
+{
+  "captured_at": "2026-08-29T03:24:42Z",
+  "adb_target_serial": "12922554B5023086",
+  "adb_connection_state": "device",
+  "android_release": "14",
+  "android_sdk": "34",
+  "manufacturer": "TECNO",
+  "model": "TECNO KL4",
+  "notes": "ADB initially listed an additional TLS entry; targeted the physical serial with adb -s. No mobile/ implementation present in repository."
+}
