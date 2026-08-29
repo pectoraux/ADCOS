@@ -129,44 +129,103 @@ def main():
 
     records = []
 
-    # baseline run to capture initial mobile_snapshot and events
+    # helper: poll platform snapshot for a condition
+    def poll_for_change(check_fn, timeout=10, interval=0.5):
+        start = time.time()
+        last = None
+        while time.time() - start < timeout:
+            snap = src.read()
+            if last is None:
+                last = snap
+            if check_fn(last, snap):
+                return last, snap
+            time.sleep(interval)
+        return last, snap
+
+    # structured experiments with assertions
+    def run_experiment(action_name, action_fn, assert_fn, pre_sleep=0.5, post_sleep=0.5):
+        print(f"Experiment: {action_name} — capturing precondition")
+        pre_snap = src.read()
+        raw_pre = {
+            "dumpsys_power": adb("shell dumpsys power", serial),
+            "dumpsys_window": adb("shell dumpsys window policy", serial),
+            "dumpsys_conn": adb("shell dumpsys connectivity", serial),
+            "dumpsys_batt": adb("shell dumpsys battery", serial),
+        }
+        time.sleep(pre_sleep)
+        print(f"Action: {action_name}")
+        action_fn()
+        # poll for asserted change
+        last, new = poll_for_change(assert_fn)
+        # allow MobileAgent to react
+        time.sleep(post_sleep)
+        result = mobile.run_mobile([])
+        record = {
+            "ts": now_ts(),
+            "action": action_name,
+            "raw_pre": raw_pre,
+            "pre_snapshot": {
+                "app_phase": pre_snap.app_phase,
+                "power_state": pre_snap.power_state,
+                "network_kind": pre_snap.network_kind,
+                "metered": pre_snap.metered,
+                "background_restricted": pre_snap.background_restricted,
+            },
+            "post_snapshot": {
+                "app_phase": new.app_phase,
+                "power_state": new.power_state,
+                "network_kind": new.network_kind,
+                "metered": new.metered,
+                "background_restricted": new.background_restricted,
+            },
+            "assertion_passed": assert_fn(pre_snap, new),
+            "run_result": result.to_dict(),
+            "events": [e.__dict__ for e in mobile.mobile_events],
+        }
+        records.append(record)
+        print(f"Recorded experiment {action_name}, assertion_passed={record['assertion_passed']}")
+
+    # Baseline
     print("Baseline run_mobile (platform refresh)")
+    baseline = src.read()
     result = mobile.run_mobile([])
-    records.append({"ts": now_ts(), "action": "baseline", "mobile_snapshot": mobile.mobile_snapshot(), "run_result": result.to_dict(), "events": [e.__dict__ for e in mobile.mobile_events]})
+    records.append({"ts": now_ts(), "action": "baseline", "pre_snapshot": {"app_phase": baseline.app_phase, "network_kind": baseline.network_kind}, "run_result": result.to_dict(), "events": [e.__dict__ for e in mobile.mobile_events]})
 
-    # HOME -> platform change
-    print("Sending HOME")
-    adb("shell input keyevent 3", serial)
-    time.sleep(2)
-    result = mobile.run_mobile([])
-    records.append({"ts": now_ts(), "action": "home", "mobile_snapshot": mobile.mobile_snapshot(), "run_result": result.to_dict(), "events": [e.__dict__ for e in mobile.mobile_events]})
+    # HOME -> expect app_phase change to BACKGROUND (or mark not observed)
+    def action_home():
+        adb("shell input keyevent 3", serial)
 
-    # POWER toggle (screen off)
-    print("Toggling POWER")
-    adb("shell input keyevent 26", serial)
-    time.sleep(2)
-    result = mobile.run_mobile([])
-    records.append({"ts": now_ts(), "action": "power_off", "mobile_snapshot": mobile.mobile_snapshot(), "run_result": result.to_dict(), "events": [e.__dict__ for e in mobile.mobile_events]})
+    def assert_home(pre, post):
+        return pre.app_phase != post.app_phase
 
-    # POWER toggle back
-    adb("shell input keyevent 26", serial)
-    time.sleep(2)
-    result = mobile.run_mobile([])
-    records.append({"ts": now_ts(), "action": "power_on", "mobile_snapshot": mobile.mobile_snapshot(), "run_result": result.to_dict(), "events": [e.__dict__ for e in mobile.mobile_events]})
+    run_experiment("home", action_home, assert_home)
 
-    # disable wifi
-    print("Disabling wifi")
-    adb("shell svc wifi disable", serial)
-    time.sleep(3)
-    result = mobile.run_mobile([])
-    records.append({"ts": now_ts(), "action": "wifi_disable", "mobile_snapshot": mobile.mobile_snapshot(), "run_result": result.to_dict(), "events": [e.__dict__ for e in mobile.mobile_events]})
+    # POWER toggle -> expect app_phase change
+    def action_power():
+        adb("shell input keyevent 26", serial)
 
-    # enable wifi
-    print("Enabling wifi")
-    adb("shell svc wifi enable", serial)
-    time.sleep(3)
-    result = mobile.run_mobile([])
-    records.append({"ts": now_ts(), "action": "wifi_enable", "mobile_snapshot": mobile.mobile_snapshot(), "run_result": result.to_dict(), "events": [e.__dict__ for e in mobile.mobile_events]})
+    def assert_power(pre, post):
+        return pre.app_phase != post.app_phase
+
+    run_experiment("power_toggle", action_power, assert_power)
+
+    # Wi-Fi disable -> expect network_kind change
+    def action_wifi_disable():
+        adb("shell svc wifi disable", serial)
+
+    def assert_wifi_disable(pre, post):
+        return pre.network_kind != post.network_kind
+
+    run_experiment("wifi_disable", action_wifi_disable, assert_wifi_disable)
+
+    # Wi-Fi enable -> expect network_kind recovery
+    def action_wifi_enable():
+        adb("shell svc wifi enable", serial)
+
+    def assert_wifi_enable(pre, post):
+        return pre.network_kind != post.network_kind
+
+    run_experiment("wifi_enable", action_wifi_enable, assert_wifi_enable)
 
     # write records
     with out_file.open("w", encoding="utf-8") as f:
