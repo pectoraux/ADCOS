@@ -1,17 +1,18 @@
-WORK-035 — Android Physical Device Validation Report (Authoritative)
+W035 Physical Device Evidence — Partial
 
 Date: 2026-08-29T03:42:00Z
 Validator: automated agent (Copilot CLI runtime in VS Code)
 
 Summary
 -------
-This is the authoritative device-validation run performed against the current main branch of the ADCOS repository. It supersedes and replaces any previously published partial report created on other branches which did not exercise the repository's canonical implementation surface.
+This is a calibrated, measurement-first evidence run performed against the current main branch of the ADCOS repository. It is intentionally conservative: it records real physical-device observations, but it does not claim authoritative device-level PASS outcomes beyond the supported evidence.
 
 Previous partial report note
 ----------------------------
-- A previous partial device-validation report was produced on branch `work-019-interop`. That report is invalid as authoritative W035 behavioral evidence and should be disregarded by the Architect. It was produced before syncing to `main` and before exercising the repository's canonical W035 implementation. The present artifact is the authoritative evidence produced against the `main` implementation and repository wiring.
+- A previous partial device-validation report was produced on branch `work-019-interop`. That report is invalid as authoritative W035 behavioral evidence and should be disregarded by the Architect. It was produced before syncing to `main` and before exercising the repository's canonical W035 implementation.
+- The present artifact is a calibrated evidence run against the `main` implementation and repository wiring. It is partial by design and is not a mainline-authoritative claim.
 
-Outcome: W035 DEVICE VALIDATION — PARTIAL
+Outcome: W035 PHYSICAL DEVICE EVIDENCE — PARTIAL
 
 Rationale
 ---------
@@ -55,7 +56,7 @@ Test matrix summary
 -------------------
 - Software/emulated lifecycle: PASS (45/45 via tools/mobile_selftest.py)
 - Physical-device installation & runtime: NOT TESTABLE (no APK/build to deploy)
-- Foreground/background lifecycle on real device: PARTIAL — power press observed to change app_phase; HOME (background) did not produce an observable phase change on this device during runs
+- Foreground/background lifecycle on real device: PARTIAL — power press produced a measurable screen/display-state transition, but the app foreground/background phase remained distinct from the display state; HOME did not produce a reliable app-phase transition on this device during runs
 - Background restriction: NOT TESTABLE (heuristics inconclusive on this device)
 - User consent/resource sharing on device: NOT TESTABLE
 - Network loss/recovery on device: PARTIAL — wifi enable/disable commands were issued but the validator did not observe a reliable connectivity-state transition on this device (assertion_passed=false); see evidence/mobile_reactions.jsonl and physical_snapshots.jsonl for raw dumpsys/ip outputs
@@ -67,6 +68,7 @@ Deliverables produced in this evidence branch
 ---------------------------------------------
 - docs/WORK-035-device-validation.md (this file)
 - evidence/w035-device/device_manifest.json
+- evidence/w035-device/device_calibration.json (per-device native-signal calibration mapping for network and lifecycle parsing)
 - evidence/w035-device/adb_commands.txt
 - evidence/w035-device/test_matrix.md
 - evidence/w035-device/physical_snapshots.jsonl (raw PlatformSnapshot captures)

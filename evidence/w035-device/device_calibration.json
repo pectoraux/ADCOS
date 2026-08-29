@@ -1,0 +1,42 @@
+{
+  "generated_at": "2026-08-29T04:41:46.015603+00:00",
+  "parser": {
+    "app_phase": {
+      "mapping": "lockscreen=true => foreground/background boundary is background; otherwise foreground",
+      "signal": [
+        "dumpsys window policy"
+      ]
+    },
+    "background_restricted": {
+      "mapping": "only report true when an explicit device-idle or battery-optimization signal is observed; otherwise keep false and record this as not testable on the device",
+      "signal": [
+        "dumpsys deviceidle",
+        "dumpsys battery"
+      ]
+    },
+    "display_state": {
+      "mapping": "screen_on = mHoldingDisplaySuspendBlocker=true or state=ON in power; lockscreen is distinguished separately from display state",
+      "signal": [
+        "dumpsys power",
+        "dumpsys window policy"
+      ]
+    },
+    "network_kind": {
+      "mapping": "require active-network evidence (TRANSPORT_WIFI or interface wlan + inet) before classifying wifi; require active transport evidence before classifying cellular",
+      "signal": [
+        "dumpsys connectivity",
+        "ip addr",
+        "ip link"
+      ]
+    }
+  },
+  "raw_signal_summary": {
+    "dumpsys_connectivity_present": true,
+    "dumpsys_deviceidle_present": true,
+    "dumpsys_power_present": true,
+    "dumpsys_window_present": true,
+    "ip_addr_present": true,
+    "ip_link_present": true
+  },
+  "serial": "12922554B5023086"
+}

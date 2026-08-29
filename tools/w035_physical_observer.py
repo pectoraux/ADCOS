@@ -18,19 +18,14 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
 
 from mobile.platform import MobilePlatformSource
-from mobile.model import PlatformSnapshot, PowerState, NetworkKind
+from mobile.model import PlatformSnapshot
+from tools.w035_platform_calibration import collect_native_signals, snapshot_from_native
 
 
 def adb(cmd: str, serial: str | None = None) -> str:
-    base = ["adb"]
-    if serial:
-        base += ["-s", serial]
-    base += shlex.split(cmd)
-    try:
-        out = subprocess.check_output(base, stderr=subprocess.STDOUT, timeout=10)
-        return out.decode("utf-8", errors="replace")
-    except subprocess.CalledProcessError as e:
-        return e.output.decode("utf-8", errors="replace")
+    # compatibility shim retained for the observer's external shell usage
+    from tools.w035_platform_calibration import adb as _adb
+    return _adb(cmd, serial)
 
 
 class AdbPlatformSource(MobilePlatformSource):
@@ -38,73 +33,8 @@ class AdbPlatformSource(MobilePlatformSource):
         self.serial = serial
 
     def read(self) -> PlatformSnapshot:
-        # screen on/off -> map to foreground/background heuristic
-        dumpsys_power = adb("shell dumpsys power", self.serial)
-        screen_on = "mHoldingDisplaySuspendBlocker=true" in dumpsys_power or (
-            "Display Power" in dumpsys_power and "state=ON" in dumpsys_power
-        )
-        # fallback: check input keyevent state via dumpsys window
-        dumpsys_window = adb("shell dumpsys window policy", self.serial)
-        if "mShowingLockscreen=true" in dumpsys_window or "mDreamingLockscreen=true" in dumpsys_window:
-            background = True
-        else:
-            background = not screen_on
-
-        # battery: charging vs on-battery
-        dumpsys_batt = adb("shell dumpsys battery", self.serial)
-        charging = (
-            "AC powered: true" in dumpsys_batt
-            or "USB powered: true" in dumpsys_batt
-            or "Wireless powered: true" in dumpsys_batt
-        )
-        power_state = PowerState.CHARGING if charging else PowerState.ON_BATTERY
-
-        # network: more robust check using dumpsys, netstats and ip addr as fallbacks
-        dumpsys_conn = adb("shell dumpsys connectivity", self.serial)
-        dumpsys_netstats = adb("shell dumpsys netstats", self.serial)
-        ip_addr = adb("shell ip addr", self.serial)
-
-        network_kind = NetworkKind.NONE
-        metered = False
-
-        # Prefer explicit transport tokens in dumpsys connectivity
-        if "TRANSPORT_WIFI" in dumpsys_conn or "WIFI" in dumpsys_conn:
-            network_kind = NetworkKind.WIFI
-            metered = False
-        elif "TRANSPORT_CELLULAR" in dumpsys_conn or "MOBILE" in dumpsys_conn or "CELLULAR" in dumpsys_conn:
-            network_kind = NetworkKind.CELLULAR
-            metered = True
-        else:
-            # Fallback to inspecting kernel interfaces for wifi/cellular hints
-            if "wlan" in ip_addr and ("state UP" in ip_addr or "inet " in ip_addr):
-                network_kind = NetworkKind.WIFI
-                metered = False
-            elif any(k in ip_addr for k in ("rmnet", "ccmni", "rmnet_data")):
-                network_kind = NetworkKind.CELLULAR
-                metered = True
-            else:
-                # final fallback: inspect netstats for recent rx/tx on wifi interfaces
-                if "WIFI" in dumpsys_netstats or "wlan" in dumpsys_netstats:
-                    network_kind = NetworkKind.WIFI
-                elif "MOBILE" in dumpsys_netstats or "cell" in dumpsys_netstats:
-                    network_kind = NetworkKind.CELLULAR
-                    metered = True
-
-        # background restriction: best-effort using app standby or battery saver
-        dumpsys_deviceidle = adb("shell dumpsys deviceidle", self.serial)
-        background_restricted = "mActiveIdle=true" in dumpsys_deviceidle or "isIgnoringBatteryOptimizations=true" not in dumpsys_batt
-
-        # app_phase heuristic:
-        from mobile import MobilePhase
-        app_phase = MobilePhase.FOREGROUND if not background else MobilePhase.BACKGROUND
-
-        return PlatformSnapshot(
-            app_phase=app_phase,
-            power_state=power_state,
-            network_kind=network_kind,
-            metered=metered,
-            background_restricted=background_restricted,
-        )
+        native = collect_native_signals(self.serial)
+        return snapshot_from_native(self.serial, native)
 
 
 def snapshot_record(source: AdbPlatformSource) -> dict:

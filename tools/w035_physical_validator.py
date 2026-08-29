@@ -21,18 +21,13 @@ sys.path.insert(0, str(REPO_ROOT))
 from mobile.platform import MobilePlatformSource
 from mobile.model import PlatformSnapshot
 from mobile.participation import MobileCommand, MobileCommandKind
-
-
-def adb(cmd: str, serial: str | None = None) -> str:
-    base = ["adb"]
-    if serial:
-        base += ["-s", serial]
-    base += shlex.split(cmd)
-    try:
-        out = subprocess.check_output(base, stderr=subprocess.STDOUT, timeout=10)
-        return out.decode("utf-8", errors="replace")
-    except subprocess.CalledProcessError as e:
-        return e.output.decode("utf-8", errors="replace")
+from tools.w035_platform_calibration import (
+    adb,
+    collect_native_signals,
+    dump_calibration_file,
+    parse_display_state,
+    snapshot_from_native,
+)
 
 
 class AdbPlatformSource(MobilePlatformSource):
@@ -40,67 +35,8 @@ class AdbPlatformSource(MobilePlatformSource):
         self.serial = serial
 
     def read(self) -> PlatformSnapshot:
-        # Use improved heuristics: combine dumpsys connectivity/netstats and ip addr
-        dumpsys_power = adb("shell dumpsys power", self.serial)
-        screen_on = "mHoldingDisplaySuspendBlocker=true" in dumpsys_power or (
-            "Display Power" in dumpsys_power and "state=ON" in dumpsys_power
-        )
-        dumpsys_window = adb("shell dumpsys window policy", self.serial)
-        if "mShowingLockscreen=true" in dumpsys_window or "mDreamingLockscreen=true" in dumpsys_window:
-            background = True
-        else:
-            background = not screen_on
-
-        dumpsys_batt = adb("shell dumpsys battery", self.serial)
-        charging = (
-            "AC powered: true" in dumpsys_batt
-            or "USB powered: true" in dumpsys_batt
-            or "Wireless powered: true" in dumpsys_batt
-        )
-        from mobile.model import PowerState, NetworkKind, MobilePhase
-        power_state = PowerState.CHARGING if charging else PowerState.ON_BATTERY
-
-        dumpsys_conn = adb("shell dumpsys connectivity", self.serial)
-        dumpsys_netstats = adb("shell dumpsys netstats", self.serial)
-        ip_addr = adb("shell ip addr", self.serial)
-
-        # determine network kind with multiple signals
-        network_kind = NetworkKind.NONE
-        metered = False
-        if "TRANSPORT_WIFI" in dumpsys_conn or "WIFI" in dumpsys_conn:
-            network_kind = NetworkKind.WIFI
-            metered = False
-        elif "TRANSPORT_CELLULAR" in dumpsys_conn or "MOBILE" in dumpsys_conn or "CELLULAR" in dumpsys_conn:
-            network_kind = NetworkKind.CELLULAR
-            metered = True
-        else:
-            # fallback: inspect kernel ip address output
-            if "wlan" in ip_addr and ("state UP" in ip_addr or "inet " in ip_addr):
-                network_kind = NetworkKind.WIFI
-                metered = False
-            elif any(k in ip_addr for k in ("rmnet", "ccmni", "rmnet_data")):
-                network_kind = NetworkKind.CELLULAR
-                metered = True
-            else:
-                # fallback to netstats/dumpsys_netstats
-                if "WIFI" in dumpsys_netstats or "wlan" in dumpsys_netstats:
-                    network_kind = NetworkKind.WIFI
-                elif "MOBILE" in dumpsys_netstats or "cell" in dumpsys_netstats:
-                    network_kind = NetworkKind.CELLULAR
-                    metered = True
-
-        dumpsys_deviceidle = adb("shell dumpsys deviceidle", self.serial)
-        background_restricted = "mActiveIdle=true" in dumpsys_deviceidle or "isIgnoringBatteryOptimizations=true" not in dumpsys_batt
-
-        app_phase = MobilePhase.FOREGROUND if not background else MobilePhase.BACKGROUND
-
-        return PlatformSnapshot(
-            app_phase=app_phase,
-            power_state=power_state,
-            network_kind=network_kind,
-            metered=metered,
-            background_restricted=background_restricted,
-        )
+        native = collect_native_signals(self.serial)
+        return snapshot_from_native(self.serial, native)
 
 
 def discover_device() -> str | None:
@@ -147,9 +83,11 @@ def main():
 
     evidence_dir = REPO_ROOT / "evidence" / "w035-device"
     evidence_dir.mkdir(parents=True, exist_ok=True)
+    calibration_file = evidence_dir / "device_calibration.json"
+    calibration = dump_calibration_file(calibration_file, serial, collect_native_signals(serial))
     out_file = evidence_dir / "mobile_reactions.jsonl"
 
-    records = []
+    records = [{"ts": now_ts(), "action": "calibration", "calibration": calibration}]
 
     # helper: poll platform snapshot for a condition
     def poll_for_change(check_fn, timeout=10, interval=0.5):
@@ -222,14 +160,61 @@ def main():
 
     run_experiment("home", action_home, assert_home)
 
-    # POWER toggle -> expect app_phase change
+    # POWER toggle -> expect the screen/display state to change, not necessarily app_phase
     def action_power():
         adb("shell input keyevent 26", serial)
 
     def assert_power(pre, post):
-        return pre.app_phase != post.app_phase
+        pre_display = parse_display_state(collect_native_signals(serial))
+        # re-read after action using the same raw signal parser
+        time.sleep(0.5)
+        post_display = parse_display_state(collect_native_signals(serial))
+        return pre_display != post_display
 
-    run_experiment("power_toggle", action_power, assert_power)
+    def run_power_experiment():
+        pre_native = collect_native_signals(serial)
+        pre_display = parse_display_state(pre_native)
+        raw_pre = {
+            "dumpsys_power": adb("shell dumpsys power", serial),
+            "dumpsys_window": adb("shell dumpsys window policy", serial),
+            "dumpsys_conn": adb("shell dumpsys connectivity", serial),
+            "dumpsys_batt": adb("shell dumpsys battery", serial),
+            "screen_on_before": pre_display,
+        }
+        time.sleep(0.5)
+        action_power()
+        time.sleep(1.0)
+        post_native = collect_native_signals(serial)
+        post_display = parse_display_state(post_native)
+        result = mobile.run_mobile([])
+        record = {
+            "ts": now_ts(),
+            "action": "power_toggle",
+            "raw_pre": raw_pre,
+            "display_before": pre_display,
+            "display_after": post_display,
+            "pre_snapshot": {
+                "app_phase": src.read().app_phase,
+                "power_state": src.read().power_state,
+                "network_kind": src.read().network_kind,
+                "metered": src.read().metered,
+                "background_restricted": src.read().background_restricted,
+            },
+            "post_snapshot": {
+                "app_phase": src.read().app_phase,
+                "power_state": src.read().power_state,
+                "network_kind": src.read().network_kind,
+                "metered": src.read().metered,
+                "background_restricted": src.read().background_restricted,
+            },
+            "assertion_passed": pre_display != post_display,
+            "run_result": result.to_dict(),
+            "events": [e.__dict__ for e in mobile.mobile_events],
+        }
+        records.append(record)
+        print(f"Recorded experiment power_toggle, assertion_passed={record['assertion_passed']}")
+
+    run_power_experiment()
 
     # Wi-Fi disable -> expect an observable wifi presence change (dumpsys/ip addr)
     def action_wifi_disable():
