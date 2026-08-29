@@ -40,7 +40,7 @@ class AdbPlatformSource(MobilePlatformSource):
         self.serial = serial
 
     def read(self) -> PlatformSnapshot:
-        # Use simple heuristics similar to prior observer
+        # Use improved heuristics: combine dumpsys connectivity/netstats and ip addr
         dumpsys_power = adb("shell dumpsys power", self.serial)
         screen_on = "mHoldingDisplaySuspendBlocker=true" in dumpsys_power or (
             "Display Power" in dumpsys_power and "state=ON" in dumpsys_power
@@ -52,20 +52,42 @@ class AdbPlatformSource(MobilePlatformSource):
             background = not screen_on
 
         dumpsys_batt = adb("shell dumpsys battery", self.serial)
-        charging = "AC powered: true" in dumpsys_batt or "USB powered: true" in dumpsys_batt or "Wireless powered: true" in dumpsys_batt
+        charging = (
+            "AC powered: true" in dumpsys_batt
+            or "USB powered: true" in dumpsys_batt
+            or "Wireless powered: true" in dumpsys_batt
+        )
         from mobile.model import PowerState, NetworkKind, MobilePhase
         power_state = PowerState.CHARGING if charging else PowerState.ON_BATTERY
 
         dumpsys_conn = adb("shell dumpsys connectivity", self.serial)
-        if "WIFI" in dumpsys_conn:
+        dumpsys_netstats = adb("shell dumpsys netstats", self.serial)
+        ip_addr = adb("shell ip addr", self.serial)
+
+        # determine network kind with multiple signals
+        network_kind = NetworkKind.NONE
+        metered = False
+        if "TRANSPORT_WIFI" in dumpsys_conn or "WIFI" in dumpsys_conn:
             network_kind = NetworkKind.WIFI
             metered = False
-        elif "MOBILE" in dumpsys_conn or "CELLULAR" in dumpsys_conn:
+        elif "TRANSPORT_CELLULAR" in dumpsys_conn or "MOBILE" in dumpsys_conn or "CELLULAR" in dumpsys_conn:
             network_kind = NetworkKind.CELLULAR
             metered = True
         else:
-            network_kind = NetworkKind.NONE
-            metered = False
+            # fallback: inspect kernel ip address output
+            if "wlan" in ip_addr and ("state UP" in ip_addr or "inet " in ip_addr):
+                network_kind = NetworkKind.WIFI
+                metered = False
+            elif any(k in ip_addr for k in ("rmnet", "ccmni", "rmnet_data")):
+                network_kind = NetworkKind.CELLULAR
+                metered = True
+            else:
+                # fallback to netstats/dumpsys_netstats
+                if "WIFI" in dumpsys_netstats or "wlan" in dumpsys_netstats:
+                    network_kind = NetworkKind.WIFI
+                elif "MOBILE" in dumpsys_netstats or "cell" in dumpsys_netstats:
+                    network_kind = NetworkKind.CELLULAR
+                    metered = True
 
         dumpsys_deviceidle = adb("shell dumpsys deviceidle", self.serial)
         background_restricted = "mActiveIdle=true" in dumpsys_deviceidle or "isIgnoringBatteryOptimizations=true" not in dumpsys_batt
@@ -209,21 +231,61 @@ def main():
 
     run_experiment("power_toggle", action_power, assert_power)
 
-    # Wi-Fi disable -> expect network_kind change
+    # Wi-Fi disable -> expect an observable wifi presence change (dumpsys/ip addr)
     def action_wifi_disable():
         adb("shell svc wifi disable", serial)
 
+    def wifi_present_in_raw():
+        d_conn = adb("shell dumpsys connectivity", serial)
+        ip_addr = adb("shell ip addr", serial)
+        # detect transport or NetworkAgentInfo mentioning WIFI, or wlan/inet presence
+        present = False
+        if "TRANSPORT_WIFI" in d_conn or " NetworkAgentInfo{" in d_conn and "WIFI" in d_conn:
+            present = True
+        if "wlan" in ip_addr and "inet " in ip_addr:
+            present = True
+        return present
+
     def assert_wifi_disable(pre, post):
-        return pre.network_kind != post.network_kind
+        # do a conservative check: compare explicit raw wifi presence before/after
+        pre_present = False
+        post_present = False
+        try:
+            d_conn_pre = adb("shell dumpsys connectivity", serial)
+            ip_pre = adb("shell ip addr", serial)
+            pre_present = ("TRANSPORT_WIFI" in d_conn_pre) or ("WIFI" in d_conn_pre) or ("wlan" in ip_pre and "inet " in ip_pre)
+        except Exception:
+            pre_present = False
+        try:
+            d_conn_post = adb("shell dumpsys connectivity", serial)
+            ip_post = adb("shell ip addr", serial)
+            post_present = ("TRANSPORT_WIFI" in d_conn_post) or ("WIFI" in d_conn_post) or ("wlan" in ip_post and "inet " in ip_post)
+        except Exception:
+            post_present = False
+        return pre_present and not post_present
 
     run_experiment("wifi_disable", action_wifi_disable, assert_wifi_disable)
 
-    # Wi-Fi enable -> expect network_kind recovery
+    # Wi-Fi enable -> expect wifi_presence to become true
     def action_wifi_enable():
         adb("shell svc wifi enable", serial)
 
     def assert_wifi_enable(pre, post):
-        return pre.network_kind != post.network_kind
+        pre_present = False
+        post_present = False
+        try:
+            d_conn_pre = adb("shell dumpsys connectivity", serial)
+            ip_pre = adb("shell ip addr", serial)
+            pre_present = ("TRANSPORT_WIFI" in d_conn_pre) or ("WIFI" in d_conn_pre) or ("wlan" in ip_pre and "inet " in ip_pre)
+        except Exception:
+            pre_present = False
+        try:
+            d_conn_post = adb("shell dumpsys connectivity", serial)
+            ip_post = adb("shell ip addr", serial)
+            post_present = ("TRANSPORT_WIFI" in d_conn_post) or ("WIFI" in d_conn_post) or ("wlan" in ip_post and "inet " in ip_post)
+        except Exception:
+            post_present = False
+        return (not pre_present) and post_present
 
     run_experiment("wifi_enable", action_wifi_enable, assert_wifi_enable)
 

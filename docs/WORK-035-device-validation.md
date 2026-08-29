@@ -55,10 +55,10 @@ Test matrix summary
 -------------------
 - Software/emulated lifecycle: PASS (45/45 via tools/mobile_selftest.py)
 - Physical-device installation & runtime: NOT TESTABLE (no APK/build to deploy)
-- Foreground/background lifecycle on real device: NOT TESTABLE
-- Background restriction: NOT TESTABLE
+- Foreground/background lifecycle on real device: PARTIAL — power press observed to change app_phase; HOME (background) did not produce an observable phase change on this device during runs
+- Background restriction: NOT TESTABLE (heuristics inconclusive on this device)
 - User consent/resource sharing on device: NOT TESTABLE
-- Network loss/recovery on device: PARTIAL (device supports network transitions; no runtime to exercise)
+- Network loss/recovery on device: PARTIAL — wifi enable/disable commands were issued but the validator did not observe a reliable connectivity-state transition on this device (assertion_passed=false); see evidence/mobile_reactions.jsonl and physical_snapshots.jsonl for raw dumpsys/ip outputs
 - Session continuity/handover on device: NOT TESTABLE
 - Process kill/restart/recovery on device: NOT TESTABLE
 - Local discovery on device: NOT TESTABLE
@@ -69,13 +69,18 @@ Deliverables produced in this evidence branch
 - evidence/w035-device/device_manifest.json
 - evidence/w035-device/adb_commands.txt
 - evidence/w035-device/test_matrix.md
+- evidence/w035-device/physical_snapshots.jsonl (raw PlatformSnapshot captures)
+- evidence/w035-device/mobile_reactions.jsonl (MobileAgent reactions, run results, raw dumpsys captured per experiment)
 - tools/mobile_selftest.log (deterministic battery stdout captured)
 
 Next steps required to complete a physical-device PASS
 -----------------------------------------------------
-1. Provide a deployable Android build (APK) or device-side artifact that implements MobilePlatformSource and wires the mobile layer to device lifecycle/connectivity/power callbacks.
-2. Provide installation instructions or an automated installer script that the validator may run via ADB (or give a device image with the app pre-installed).
-3. Re-run the validation with the device-side build installed. The validator will then exercise the device UI and lifecycle transitions described in spec/work-items.md and produce the final PASS/FAIL classification.
+1. Harden AdbPlatformSource heuristics and add a per-device calibration probe:
+   - Probe which native signals (dumpsys connectivity, dumpsys netstats, ip addr, LinkProperties) actually reflect wifi/cellular changes on this specific device. Record that mapping as a per-device calibration used by the validator.
+   - Where necessary, prefer kernel-level signals (ip addr / ip link / interface "inet" presence) as more authoritative than substring matches in dumpsys output.
+2. Retry network transition experiments using a conservative, calibrated signal set. If wifi still cannot be observed to change, mark the experiment NOT_TESTABLE for that device and record the raw evidence.
+3. If per-device signals are insufficient and the spec requires authoritative background/consent signals, obtain or build a small device-side helper (APK) that can query ConnectivityManager / PowerManager APIs directly and expose them to the validator (Architect prefers avoiding an APK; document if this becomes necessary).
+4. Once the validator observes the required transitions or the device is documented as NOT_TESTABLE, create a PR from work-035-device-evidence with the evidence artifacts for Architect review.
 
 Security and privacy
 --------------------

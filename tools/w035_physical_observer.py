@@ -40,7 +40,9 @@ class AdbPlatformSource(MobilePlatformSource):
     def read(self) -> PlatformSnapshot:
         # screen on/off -> map to foreground/background heuristic
         dumpsys_power = adb("shell dumpsys power", self.serial)
-        screen_on = "mHoldingDisplaySuspendBlocker=true" in dumpsys_power or "Display Power" in dumpsys_power and "state=ON" in dumpsys_power
+        screen_on = "mHoldingDisplaySuspendBlocker=true" in dumpsys_power or (
+            "Display Power" in dumpsys_power and "state=ON" in dumpsys_power
+        )
         # fallback: check input keyevent state via dumpsys window
         dumpsys_window = adb("shell dumpsys window policy", self.serial)
         if "mShowingLockscreen=true" in dumpsys_window or "mDreamingLockscreen=true" in dumpsys_window:
@@ -50,20 +52,43 @@ class AdbPlatformSource(MobilePlatformSource):
 
         # battery: charging vs on-battery
         dumpsys_batt = adb("shell dumpsys battery", self.serial)
-        charging = "AC powered: true" in dumpsys_batt or "USB powered: true" in dumpsys_batt or "Wireless powered: true" in dumpsys_batt
+        charging = (
+            "AC powered: true" in dumpsys_batt
+            or "USB powered: true" in dumpsys_batt
+            or "Wireless powered: true" in dumpsys_batt
+        )
         power_state = PowerState.CHARGING if charging else PowerState.ON_BATTERY
 
-        # network: crude check for WIFI or CELLULAR
+        # network: more robust check using dumpsys, netstats and ip addr as fallbacks
         dumpsys_conn = adb("shell dumpsys connectivity", self.serial)
-        if "NetworkAgentInfo" in dumpsys_conn and "WIFI" in dumpsys_conn:
+        dumpsys_netstats = adb("shell dumpsys netstats", self.serial)
+        ip_addr = adb("shell ip addr", self.serial)
+
+        network_kind = NetworkKind.NONE
+        metered = False
+
+        # Prefer explicit transport tokens in dumpsys connectivity
+        if "TRANSPORT_WIFI" in dumpsys_conn or "WIFI" in dumpsys_conn:
             network_kind = NetworkKind.WIFI
             metered = False
-        elif "NetworkAgentInfo" in dumpsys_conn and ("MOBILE" in dumpsys_conn or "CELLULAR" in dumpsys_conn):
+        elif "TRANSPORT_CELLULAR" in dumpsys_conn or "MOBILE" in dumpsys_conn or "CELLULAR" in dumpsys_conn:
             network_kind = NetworkKind.CELLULAR
             metered = True
         else:
-            network_kind = NetworkKind.NONE
-            metered = False
+            # Fallback to inspecting kernel interfaces for wifi/cellular hints
+            if "wlan" in ip_addr and ("state UP" in ip_addr or "inet " in ip_addr):
+                network_kind = NetworkKind.WIFI
+                metered = False
+            elif any(k in ip_addr for k in ("rmnet", "ccmni", "rmnet_data")):
+                network_kind = NetworkKind.CELLULAR
+                metered = True
+            else:
+                # final fallback: inspect netstats for recent rx/tx on wifi interfaces
+                if "WIFI" in dumpsys_netstats or "wlan" in dumpsys_netstats:
+                    network_kind = NetworkKind.WIFI
+                elif "MOBILE" in dumpsys_netstats or "cell" in dumpsys_netstats:
+                    network_kind = NetworkKind.CELLULAR
+                    metered = True
 
         # background restriction: best-effort using app standby or battery saver
         dumpsys_deviceidle = adb("shell dumpsys deviceidle", self.serial)
