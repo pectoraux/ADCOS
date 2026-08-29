@@ -79,7 +79,7 @@ appliance-1 ──(egress probe)──► upstream target (rehearsal: local list
   criterion outcomes, and the per-node result documents.
 
 **Determinism:** two independent rehearsals reproduce the run digest
-byte-identically (`sha256:ecb9dc1…`), including across `PYTHONHASHSEED`
+byte-identically (`sha256:079845b…`), including across `PYTHONHASHSEED`
 7/4242. Real but non-deterministic observations (ports, pids, timings, raw
 error strings) live in the operational metadata, which the run digest excludes
 by construction. The carriage protocol is strictly causal half-duplex

@@ -5,7 +5,7 @@ rehearsal deployment run by `tools/pilot_selftest.py` (case_08) and the
 determinism runs (cases 09–10), executed on the real deployment host.
 
 **Run digest (deterministic across independent runs and hash seeds):**
-`sha256:ecb9dc103d1305f5564257bd32c6f3756bd01c8831e18e8d37b078468d1d95c7`
+`sha256:079845bfe8c44dcaa7ea4c3678ea76547b0d4148b00b9ee3d86c44ef1dc4f551`
 
 **Deployment shape:** 4 real OS processes (appliance-1, relay-1, device-1,
 device-2); 3 real TCP carriage paths + 1 upstream egress probe; 109 journal

@@ -39,7 +39,6 @@ from agent import (
 from appliance import ApplianceCommand, ApplianceCommandKind, UpstreamMode
 from edge import HardwareInventory, StaticHardwareSource, board_for
 from identity import NodeIdentity, ProfileSet
-from management import ManagementCapability, RoleDefinition
 from policy import PolicyDomain, PolicyRule
 from topology import ClaimType, SourceClass, TopologyClaim, make_link_subject
 
@@ -63,7 +62,6 @@ __all__ = [
     "appliance_hardware_source",
     "device_topology_claims",
     "device_link_metrics",
-    "operator_roles",
     "validate_topology",
     "topology_document",
 ]
@@ -257,23 +255,6 @@ def node_ids() -> Dict[str, str]:
             for node in PILOT_NODES}
 
 
-def operator_roles(label: str) -> Tuple[RoleDefinition, ...]:
-    return (
-        RoleDefinition(
-            role_id="pilot-operator-%s" % (label,),
-            capabilities=(
-                ManagementCapability.SESSION_READ,
-                ManagementCapability.SESSION_CONTROL,
-                ManagementCapability.POLICY_READ,
-                ManagementCapability.TELEMETRY_READ,
-                ManagementCapability.AUDIT_READ,
-                ManagementCapability.ROLES_READ,
-            ),
-            description="pilot deployment operator role (%s)" % (label,),
-        ),
-    )
-
-
 def _allow_session_rules(label: str) -> Tuple[PolicyRule, ...]:
     return (
         PolicyRule(
@@ -412,7 +393,6 @@ def device_config(
     spec = PILOT_NODE_BY_LABEL[device_label]
     identity = node_identity_for(device_label)
     device_id = identity.node_id.text
-    roles = operator_roles(device_label)
     return AgentConfig(
         agent_label=device_label,
         identity=AgentIdentitySpec(
@@ -425,8 +405,6 @@ def device_config(
             device_label, device_id, relay_id, appliance_id
         ),
         link_metrics=device_link_metrics(device_id, relay_id, appliance_id),
-        rbac_roles=roles,
-        operator_role_ids=(roles[0].role_id,),
         offer_expiry_seconds=DEVICE_OFFER_EXPIRY_SECONDS,
     )
 

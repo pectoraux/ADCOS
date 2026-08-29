@@ -96,7 +96,6 @@ from .topology import (
     device_interface_source,
     node_identity_for,
     node_ids,
-    operator_roles,
     validate_topology,
 )
 from .wire import (
@@ -562,7 +561,6 @@ def _boot_appliance() -> NetworkAppliance:
             sequence=1,
         ),
     )
-    roles = operator_roles("appliance-1")
     config = AgentConfig(
         agent_label="appliance-1",
         identity=AgentIdentitySpec(
@@ -590,8 +588,6 @@ def _boot_appliance() -> NetworkAppliance:
                 freshness_until=PILOT_FRESH,
             ),
         ),
-        rbac_roles=roles,
-        operator_role_ids=(roles[0].role_id,),
         offer_expiry_seconds=43200,
     )
     appliance = NetworkAppliance(
