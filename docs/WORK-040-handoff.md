@@ -247,6 +247,14 @@ node's `--direct-host` at the host's LAN address (the harness's
 **Battery (25 cases):** the delivered 20 + the correction's 21–25 (the
 extension topology; the honest environment detection; the frozen evidence
 template; the anti-promotion negatives; the full-chain rehearsal).
+The correction also extends the delivery's DAG-sanctioned successor
+amendments: the six batteries whose PR-delta shapes admit this branch's
+files (appliance/edge/imt/mobile/oran/scale) now also admit
+`evidence/work-040/` (the same pattern, work-item order). The four
+`frozen_spec_intact` docs-allowlist cases that differ from a full clone at
+delivery (conformance case_45, management case_32, simulator case_38,
+upgrade case_36) are deliberately untouched — they pass in the CI PR
+context exactly as at delivery (verified: 46/46, 39/39, 44/44, 41/41).
 
 **Honest evidence position after the correction:**
 
