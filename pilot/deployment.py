@@ -116,9 +116,14 @@ __all__ = [
     "DEVICE_DATAGRAM_COUNT_PRIMARY",
     "DEVICE_DATAGRAM_COUNT_SECONDARY",
     "DEVICE_DATAGRAM_COUNT_LOCAL",
+    "HANDOVER_DATAGRAM_COUNT_PRIMARY",
+    "HANDOVER_DATAGRAM_COUNT_SECONDARY",
     "PILOT_ECHO_PAYLOADS_PRIMARY",
     "PILOT_ECHO_PAYLOADS_SECONDARY",
     "PILOT_ECHO_PAYLOADS_LOCAL",
+    "PILOT_ECHO_PAYLOADS_HANDOVER_PRIMARY",
+    "PILOT_ECHO_PAYLOADS_HANDOVER_TRANSITION",
+    "PILOT_ECHO_PAYLOADS_HANDOVER_SECONDARY",
     "PILOT_SERVICE_PAYLOAD",
     "NodeJournal",
     "run_appliance_node",
@@ -151,6 +156,18 @@ DEVICE_DATAGRAM_COUNT_SECONDARY = 3
 #: path plus one genuine local-service invocation.
 DEVICE_DATAGRAM_COUNT_LOCAL = 2
 
+#: The device-android HANDOVER phase plan (WORK-040 correction cycle
+#: 2): protected exchanges over the primary physical carriage, a
+#: bounded transition-attempt phase (the primary dies for REAL -- in
+#: the rehearsal through the appliance's declared failure plan, in
+#: the physical run through the operator disabling Wi-Fi on the
+#: handset), then the production re-bind onto the secondary
+#: (USB-tether relayed) carriage and the remaining exchange plus the
+#: service invocation THERE (the full production chain on the new
+#: path, same logical session).
+HANDOVER_DATAGRAM_COUNT_PRIMARY = 2
+HANDOVER_DATAGRAM_COUNT_SECONDARY = 1
+
 #: Deterministic datagram payloads (semantic journal DATA).
 PILOT_ECHO_PAYLOADS_PRIMARY = tuple(
     ("pilot-direct-datagram-%d" % (index,)).encode("utf-8")
@@ -166,12 +183,33 @@ PILOT_ECHO_PAYLOADS_LOCAL = tuple(
 )
 PILOT_SERVICE_PAYLOAD = b"pilot-service-invocation-payload"
 
+#: Deterministic handover datagram payloads (semantic journal DATA).
+#: The transition datagram is the one whose protected artifact hits
+#: the dying primary carriage and is RE-SENT verbatim on the secondary
+#: (same session, same protection, new carriage).
+PILOT_ECHO_PAYLOADS_HANDOVER_PRIMARY = tuple(
+    ("pilot-handover-primary-datagram-%d" % (index,)).encode("utf-8")
+    for index in range(1, HANDOVER_DATAGRAM_COUNT_PRIMARY + 1)
+)
+PILOT_ECHO_PAYLOADS_HANDOVER_TRANSITION = (
+    b"pilot-handover-transition-datagram"
+)
+PILOT_ECHO_PAYLOADS_HANDOVER_SECONDARY = tuple(
+    ("pilot-handover-secondary-datagram-%d" % (index,)).encode("utf-8")
+    for index in range(1, HANDOVER_DATAGRAM_COUNT_SECONDARY + 1)
+)
+
 #: The invocation-decision evaluation instant (deterministic).
 _INVOCATION_INSTANT = "2026-08-01T00:30:00Z"
 
 #: Operational-only timeouts.
 _SHUTDOWN_TIMEOUT_SECONDS = 30.0
 _NODE_EXIT_TIMEOUT_SECONDS = 180.0
+
+#: Operational-only: how long one transition-attempt echo read may
+#: block before the attempt is treated as a SUSPECTED path death
+#: (confirmed -- or refuted -- by the honest re-probe).
+_HANDOVER_ECHO_TIMEOUT_SECONDS = 10.0
 
 
 # ---------------------------------------------------------------------------
@@ -939,7 +977,15 @@ def run_relay_node(
     result_path: str,
     upstream_host: str,
     upstream_port: int,
+    bind_host: str = "127.0.0.1",
 ) -> int:
+    """The relay process (pure carriage, the WORK-039 discipline).
+
+    ``bind_host``: which host address the relay listener binds (the
+    default loopback keeps the delivered deployment byte-identical;
+    the physical handover scenario binds an externally reachable
+    address so the handset can enter the relay leg over the USB
+    tether)."""
     ids = node_ids()
     relay_id = ids["relay-1"]
     journal = NodeJournal(
@@ -948,7 +994,7 @@ def run_relay_node(
     journal.append(
         PilotEventKind.NODE_BOOTED, {"label": "relay-1", "node_id": relay_id}
     )
-    listener = open_listener("127.0.0.1", 0)
+    listener = open_listener(bind_host, 0)
     port = socket_endpoint(listener)[1]
     counters = {"frames": 0, "bytes": 0}
     lock = threading.Lock()
@@ -1083,14 +1129,36 @@ def run_device_node(
     relay_port: int,
     relayed_only: bool,
     physical: bool = False,
+    handover: bool = False,
+    handover_wait_seconds: float = 600.0,
+    handover_attempt_interval: float = 5.0,
 ) -> int:
+    """One device node's full demonstration.
+
+    ``handover`` (physical devices only, WORK-040 correction cycle 2):
+    the path-transition demonstration -- the production chain over
+    the primary physical carriage, a REAL path death (in the
+    rehearsal the appliance's declared failure plan; in the physical
+    run the operator disabling Wi-Fi on the handset), the production
+    re-bind onto the secondary (USB-tether relayed) carriage on the
+    SAME logical session, and the service invocation on the new
+    path.  ``handover_wait_seconds`` bounds the wait for the physical
+    trigger (an honest incomplete record on timeout);
+    ``handover_attempt_interval`` paces the transition attempts
+    while the primary carriage is still alive.
+    """
     ids = node_ids()
     appliance_id = ids["appliance-1"]
     relay_id = ids["relay-1"]
     spec = PARTICIPANT_NODE_BY_LABEL[label]
     interface_source = device_interface_source(label)
     runtime = AgentRuntime(
-        device_config(label, relay_id=relay_id, appliance_id=appliance_id),
+        device_config(
+            label,
+            relay_id=relay_id,
+            appliance_id=appliance_id,
+            handover=handover,
+        ),
         clock=StepClock(PILOT_T0, DEVICE_CLOCK_STEP_SECONDS),
         interface_source=interface_source,
     )
@@ -1197,7 +1265,217 @@ def run_device_node(
             )
         return _session_record_digest(session)
 
-    if physical:
+    if physical and handover:
+        # the physical participant's HANDOVER demonstration
+        # (WORK-040 correction cycle 2): the full production chain over
+        # the primary physical carriage, a REAL path death, the
+        # production re-bind onto the secondary (USB-tether relayed)
+        # carriage on the SAME logical session -- mirroring device-1's
+        # delivered failover pattern exactly (same journal kinds, same
+        # WORK-018 multipath authority, same re-send of the
+        # already-protected datagram) -- plus the physical
+        # participant's service invocation and interface re-observation
+        # ON THE SECONDARY.
+        multipath = MultipathStore(sessions)
+        add_primary = multipath.add_path(
+            session_id,
+            request.route_decision,
+            event_instant=journal.now(),
+            actor_reference="pilot:%s" % (label,),
+            reason_code="pilot.primary-path-admission",
+        )
+        if not add_primary.ok:
+            raise PilotError(
+                PilotReasonCode.NODE_FAILED,
+                "primary constituent admission failed: %s"
+                % (add_primary.detail,),
+            )
+        secondary_decision = _secondary_route_decision(
+            request,
+            device_id=runtime.node_id,
+            relay_id=relay_id,
+            appliance_id=appliance_id,
+        )
+        add_secondary = multipath.add_path(
+            session_id,
+            secondary_decision,
+            event_instant=journal.now(),
+            actor_reference="pilot:%s" % (label,),
+            reason_code="pilot.secondary-path-admission",
+        )
+        if not add_secondary.ok:
+            raise PilotError(
+                PilotReasonCode.NODE_FAILED,
+                "secondary constituent admission failed: %s"
+                % (add_secondary.detail,),
+            )
+        plan = multipath.get_plan(session_id)
+        if plan is None:
+            raise PilotError(
+                PilotReasonCode.NODE_FAILED, "no multipath plan after adds"
+            )
+        journal.append(
+            PilotEventKind.ROUTE_REEVALUATED,
+            {
+                "session_id": session_id,
+                "constituents": len(plan.path_ids()),
+                "primary": "physical-access",
+                "secondary": "physical-access-secondary",
+            },
+        )
+        digest_before_transition = _session_digest()
+
+        # the primary-phase exchanges (real protected echo exchanges
+        # over the primary physical carriage)
+        for payload_bytes in PILOT_ECHO_PAYLOADS_HANDOVER_PRIMARY:
+            _echo_exchange(
+                runtime, journal, primary_sock, session_id,
+                payload_bytes, "physical-access",
+            )
+
+        # the path-transition phase + the production re-bind onto the
+        # secondary (USB-tether relayed) carriage
+        transition, secondary_sock = _handover_transition(
+            runtime,
+            journal,
+            multipath,
+            session_id,
+            request.route_decision.decision_id,
+            primary_sock,
+            relay_host,
+            relay_port,
+            label,
+            direct_host,
+            direct_port,
+            PILOT_ECHO_PAYLOADS_HANDOVER_TRANSITION,
+            wait_seconds=handover_wait_seconds,
+            attempt_interval=handover_attempt_interval,
+        )
+        close_quietly(primary_sock)
+        service_outcome: Optional[Dict[str, Any]] = None
+        if secondary_sock is not None:
+            # the remaining exchange(s) + the genuine local service
+            # invocation ON THE SECONDARY (the full production chain on
+            # the new path, same logical session)
+            for payload_bytes in PILOT_ECHO_PAYLOADS_HANDOVER_SECONDARY:
+                _echo_exchange(
+                    runtime, journal, secondary_sock, session_id,
+                    payload_bytes, "physical-access-secondary",
+                )
+            service_outcome = _invoke_local_service(
+                runtime,
+                journal,
+                secondary_sock,
+                session_id,
+                service_ref=pilot_echo_service_ref(),
+                tenant_domain=PILOT_TENANT_DOMAIN,
+                payload=PILOT_SERVICE_PAYLOAD,
+            )
+        digest_after_transition = _session_digest()
+        session_record_stable = (
+            digest_before_transition == digest_after_transition
+        )
+        session = sessions.get(session_id)
+        final_plan = multipath.get_plan(session_id)
+        primary_failed = _plan_has_status(final_plan, "FAILED", 1)
+        secondary_active = _plan_has_status(final_plan, "ACTIVE", 1)
+        # the interface re-observation AFTER the transition (the
+        # participant's real post-transition interface view)
+        interface_names = [
+            snapshot.name for snapshot in interface_source.discover()
+        ]
+        checks.append(
+            PilotCheck(
+                "device-android-handover-observed-real-loss",
+                bool(
+                    transition["transition_confirmed"]
+                    and not transition["reprobe_reachable"]
+                ),
+                "the primary physical carriage died with a real socket "
+                "failure (class=%s, stage=%s); the dead access point "
+                "re-probed reachable=%s; transition attempts=%d%s"
+                % (
+                    transition["error_class"],
+                    transition["stage"],
+                    transition["reprobe_reachable"],
+                    transition["attempts"],
+                    ""
+                    if transition["transition_confirmed"]
+                    else "; TRANSITION NOT CONFIRMED: %s"
+                    % (transition["incomplete_reason"],),
+                ),
+            )
+        )
+        checks.append(
+            PilotCheck(
+                "device-android-session-continuity",
+                session_record_stable
+                and session is not None
+                and session.state == "ESTABLISHED"
+                and primary_failed
+                and secondary_active,
+                "session state %s; record digest %s before/after the "
+                "transition; constituent statuses [%s]"
+                % (
+                    session.state if session else "?",
+                    "stable" if session_record_stable else "CHANGED",
+                    _plan_statuses(final_plan),
+                ),
+            )
+        )
+        checks.append(
+            PilotCheck(
+                "device-android-handover-service-executed",
+                service_outcome is not None
+                and service_outcome.get("verdict") == "executed"
+                and service_outcome.get("response_matches") is True,
+                "local service invocation on the secondary carriage "
+                "verdict=%s response_matches=%s"
+                % (
+                    (service_outcome or {}).get("verdict", ""),
+                    (service_outcome or {}).get("response_matches", False),
+                ),
+            )
+        )
+        checks.append(
+            PilotCheck(
+                "device-android-real-interfaces-observed",
+                len(interface_names) > 0,
+                "the participant's runtime re-observed its REAL "
+                "interfaces after the transition through the production "
+                "source: %s" % (", ".join(interface_names) or "none",),
+            )
+        )
+        observations["session"] = {
+            "session_id": session_id,
+            "state": session.state if session else "?",
+            "record_digest": digest_after_transition,
+            "record_digest_before_transition": digest_before_transition,
+        }
+        transition["session_record_stable"] = session_record_stable
+        observations["handover"] = transition
+        if service_outcome is not None:
+            observations["service"] = _public_record(service_outcome)
+        observations["interfaces_observed"] = interface_names
+        observations["carriage"] = {
+            "kind": "physical-access-handover",
+            "primary": "physical-access",
+            "secondary": "physical-access-secondary",
+            "note": (
+                "primary: direct connection to the appliance access "
+                "point over the physical carriage (the handset's Wi-Fi "
+                "in the physical run; loopback in rehearsal); "
+                "secondary: the delivered relay leg entered via the USB "
+                "tether (adb reverse on a handset; loopback in "
+                "rehearsal)"
+            ),
+        }
+        if transition["transition_confirmed"]:
+            journal.append(
+                PilotEventKind.DEMONSTRATION_COMPLETED,
+                {"device": label, "demonstration": "physical-handover"},
+            )
+    elif physical:
         # the physical participant (device-android): the participation
         # demonstration over its real carriage -- protected datagram
         # exchanges + a genuine local service invocation, plus the
@@ -1948,6 +2226,290 @@ def _failover_to_secondary(
         "failed_path_id": primary_path_id,
         "active_path_id": secondary_path_id,
     }
+
+
+def _handover_transition(
+    runtime: AgentRuntime,
+    journal: NodeJournal,
+    multipath: MultipathStore,
+    session_id: str,
+    primary_route_decision_id: str,
+    dead_sock: socket.socket,
+    relay_host: str,
+    relay_port: int,
+    device_label: str,
+    direct_host: str,
+    direct_port: int,
+    transition_payload: bytes,
+    *,
+    wait_seconds: float,
+    attempt_interval: float,
+) -> Tuple[Dict[str, Any], Optional[socket.socket]]:
+    """The handover path-transition phase (WORK-040 correction cycle 2).
+
+    Attempt the transition datagram on the primary physical carriage
+    until it REALLY dies -- in the rehearsal the appliance's declared
+    failure plan kills the direct path on its own budget; in the
+    physical run the operator disabling Wi-Fi on the handset does
+    (``wait_seconds`` bounds the wait honestly; ``attempt_interval``
+    paces the attempts while the carriage is still alive).  A hard
+    socket failure is an OBSERVED death; a response timeout is only a
+    SUSPECTED death and is confirmed -- or refuted -- by the honest
+    re-probe (``probe_tcp_path``).  On a confirmed death the primary
+    constituent is failed through the REAL WORK-018 multipath
+    authority and the carriage re-binds onto the secondary
+    (USB-tether relayed) leg -- mirroring device-1's delivered
+    ``_failover_to_secondary`` exactly, including the RE-SEND of the
+    already-protected transition datagram on the SAME logical session.
+
+    Returns ``(record, secondary_sock)``; ``secondary_sock`` is None
+    whenever the transition was NOT confirmed (the record then carries
+    the honest ``incomplete_reason``).
+    """
+    plan = multipath.get_plan(session_id)
+    if plan is None:
+        raise PilotError(
+            PilotReasonCode.NODE_FAILED, "the multipath plan vanished"
+        )
+    primary_path_id = ""
+    secondary_path_id = ""
+    for path_id in plan.path_ids():
+        entry = plan.get(path_id)
+        if entry is None:
+            continue
+        if entry.route_decision_id == primary_route_decision_id:
+            primary_path_id = path_id
+        else:
+            secondary_path_id = path_id
+    if not primary_path_id or not secondary_path_id:
+        raise PilotError(
+            PilotReasonCode.NODE_FAILED,
+            "could not identify the primary/secondary constituents "
+            "(primary=%r secondary=%r)"
+            % (primary_path_id[:24], secondary_path_id[:24]),
+        )
+
+    record: Dict[str, Any] = {
+        "observed_real_loss": False,
+        "suspected_loss": False,
+        "transition_timed_out": False,
+        "transition_confirmed": False,
+        "incomplete_reason": "",
+        "error_class": "",
+        "raw_error": "",
+        "stage": "",
+        "attempts": 0,
+        "reprobe_reachable": None,
+        "failed_path_id": primary_path_id,
+        "active_path_id": secondary_path_id,
+        "transition_payload_digest": sha256_hex_of_bytes(transition_payload),
+    }
+    deadline = time.monotonic() + max(0.0, float(wait_seconds))
+    artifact = None
+    while True:
+        record["attempts"] += 1
+        try:
+            record["stage"] = "carriage-send"
+            artifact = runtime.send_datagram(session_id, transition_payload)
+            _send_pilot_envelope(
+                dead_sock,
+                "pilot.datagram",
+                marshal.datagram_to_mapping(artifact),
+                sender=runtime.node_id,
+            )
+            journal.append(
+                PilotEventKind.DATAGRAM_SENT,
+                {
+                    "session_id": session_id,
+                    "carriage": "physical-access",
+                    "bytes": len(transition_payload),
+                },
+            )
+            record["stage"] = "carriage-echo"
+            message_type, response_payload = _recv_pilot_envelope(
+                dead_sock, timeout=_HANDOVER_ECHO_TIMEOUT_SECONDS
+            )
+            if message_type != "pilot.datagram.echo":
+                raise PilotError(
+                    PilotReasonCode.WIRE_INVALID,
+                    "expected datagram echo on the primary carriage, "
+                    "got %r" % (message_type,),
+                )
+            echo_artifact = marshal.datagram_from_mapping(response_payload)
+            echoed = runtime.receive_datagram(echo_artifact)
+            if echoed != transition_payload:
+                raise PilotError(
+                    PilotReasonCode.NODE_FAILED,
+                    "primary-carriage echo mismatch",
+                )
+            record["stage"] = ""
+            journal.append(
+                PilotEventKind.DATAGRAM_RECEIVED,
+                {
+                    "session_id": session_id,
+                    "carriage": "physical-access",
+                    "bytes": len(echoed),
+                },
+            )
+            # the primary carriage is STILL ALIVE: wait within the
+            # bounded window for the real physical trigger (in the
+            # rehearsal the declared failure plan fires on its own
+            # budget; in the physical run the operator disables Wi-Fi
+            # on the handset at the marked runbook step)
+            if time.monotonic() >= deadline:
+                record["transition_timed_out"] = True
+                record["incomplete_reason"] = (
+                    "the bounded handover wait (%ss) expired with the "
+                    "primary physical carriage still alive; the "
+                    "physical trigger did not occur (honest incomplete "
+                    "record)" % (wait_seconds,)
+                )
+                return record, None
+            time.sleep(max(0.0, float(attempt_interval)))
+        except PilotError as error:
+            if error.reason == PilotReasonCode.WIRE_CLOSED:
+                # a REAL socket death on the primary carriage
+                record["observed_real_loss"] = True
+            else:
+                # a response timeout / exchange anomaly is only a
+                # SUSPECTED death: the honest re-probe below decides
+                record["suspected_loss"] = True
+            record["raw_error"] = "%s: %s" % (type(error).__name__, error)
+            record["error_class"] = type(error).__name__
+            break
+        except OSError as error:
+            record["observed_real_loss"] = True
+            record["raw_error"] = "%s: %s" % (type(error).__name__, error)
+            record["error_class"] = type(error).__name__
+            break
+
+    journal.append(
+        PilotEventKind.LINK_LOSS_OBSERVED,
+        {
+            "path": "physical-access",
+            "error_class": record["error_class"],
+            "stage": record["stage"],
+        },
+    )
+
+    # the honest re-probe of the (suspected) dead access point (a real
+    # TCP probe -- the same production probe device-1's failover uses)
+    from .platform import probe_tcp_path
+
+    reachable, _detail, _elapsed = probe_tcp_path(
+        direct_host, direct_port, timeout=3.0
+    )
+    record["reprobe_reachable"] = reachable
+    journal.append(
+        PilotEventKind.PROBE_REPORTED,
+        {"target": "direct-access-point", "reachable": reachable},
+    )
+
+    confirmed = record["observed_real_loss"] or (
+        record["suspected_loss"] and not reachable
+    )
+    if not confirmed:
+        record["incomplete_reason"] = (
+            "the primary exchange failed (stage %s) but the honest "
+            "re-probe found the direct access point STILL REACHABLE -- "
+            "the path death is not confirmed; the handover is honestly "
+            "incomplete" % (record["stage"],)
+        )
+        return record, None
+    record["transition_confirmed"] = True
+
+    failed = multipath.change_path_status(
+        session_id,
+        primary_path_id,
+        PathStatus.FAILED,
+        event_instant=journal.now(),
+        actor_reference="pilot:%s" % (device_label,),
+        reason_code="pilot.primary-path-loss",
+    )
+    if not failed.ok:
+        raise PilotError(
+            PilotReasonCode.NODE_FAILED,
+            "primary constituent failure transition rejected: %s"
+            % (failed.detail,),
+        )
+    journal.append(
+        PilotEventKind.PATH_STATUS_CHANGED,
+        {
+            "session_id": session_id,
+            "path": primary_path_id,
+            "from": "ACTIVE",
+            "to": "FAILED",
+        },
+    )
+    journal.append(
+        PilotEventKind.SESSION_RECONNECTING,
+        {"session_id": session_id, "via": "physical-access-secondary"},
+    )
+
+    secondary_sock = connect_to(relay_host, relay_port)
+    _exchange_announce(
+        secondary_sock,
+        self_label=device_label,
+        self_node_id=runtime.node_id,
+        self_credential_mapping=_active_credential_mapping(runtime),
+        journal=journal,
+        initiate=True,
+    )
+    journal.append(
+        PilotEventKind.SESSION_REBOUND,
+        {"session_id": session_id, "carriage": "physical-access-secondary"},
+    )
+
+    # the SAME logical session continues over the secondary carriage:
+    # re-send the ALREADY-PROTECTED transition datagram that hit the
+    # dead path (same session, same protection, new carriage)
+    if artifact is not None:
+        _send_pilot_envelope(
+            secondary_sock,
+            "pilot.datagram",
+            marshal.datagram_to_mapping(artifact),
+            sender=runtime.node_id,
+        )
+        journal.append(
+            PilotEventKind.DATAGRAM_SENT,
+            {
+                "session_id": session_id,
+                "carriage": "physical-access-secondary",
+                "bytes": len(transition_payload),
+            },
+        )
+        message_type, response_payload = _recv_pilot_envelope(secondary_sock)
+        if message_type != "pilot.datagram.echo":
+            raise PilotError(
+                PilotReasonCode.WIRE_INVALID,
+                "expected datagram echo over the secondary carriage, "
+                "got %r" % (message_type,),
+            )
+        echo_artifact = marshal.datagram_from_mapping(response_payload)
+        echoed = runtime.receive_datagram(echo_artifact)
+        if echoed != transition_payload:
+            raise PilotError(
+                PilotReasonCode.NODE_FAILED,
+                "secondary-carriage echo mismatch",
+            )
+        journal.append(
+            PilotEventKind.DATAGRAM_RECEIVED,
+            {
+                "session_id": session_id,
+                "carriage": "physical-access-secondary",
+                "bytes": len(echoed),
+            },
+        )
+
+    journal.append(
+        PilotEventKind.FAILOVER_COMPLETED,
+        {
+            "session_id": session_id,
+            "failed_path": primary_path_id,
+            "active_path": secondary_path_id,
+        },
+    )
+    return record, secondary_sock
 
 
 def _session_record_digest(session: Any) -> str:

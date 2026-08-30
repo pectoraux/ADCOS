@@ -27,7 +27,7 @@ Honesty notes baked into the data:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 from agent import (
     AgentConfig,
@@ -216,8 +216,12 @@ PHYSICAL_EXTENSION_NODES: Tuple[PilotNodeSpec, ...] = (
     PilotNodeSpec(PHYSICAL_DEVICE_LABEL, PilotNodeRole.DEVICE),
 )
 
-#: The physical extension carriage path (real USB via adb reverse, or
+#: The physical extension carriage paths (real USB via adb reverse, or
 #: the handset's Wi-Fi to the host LAN -- recorded per run).
+#:
+#: WORK-040 correction cycle 2 adds the SECOND path: the handover
+#: scenario's secondary carriage (the USB-tether relayed leg the
+#: device re-binds onto when the primary Wi-Fi carriage dies).
 PHYSICAL_EXTENSION_PATHS: Tuple[PilotPathSpec, ...] = (
     PilotPathSpec(
         "physical-access",
@@ -225,6 +229,14 @@ PHYSICAL_EXTENSION_PATHS: Tuple[PilotPathSpec, ...] = (
         "(USB adb-reverse or device Wi-Fi to the host LAN; the handset "
         "runs the production device node)",
         (PHYSICAL_DEVICE_LABEL, "appliance-1"),
+        "physical",
+    ),
+    PilotPathSpec(
+        "physical-access-secondary",
+        "device-android -> relay-1 -> appliance-1 over the secondary "
+        "physical carriage (USB tether to the host; the relay leg is "
+        "the delivered relay path entered via the tether interface)",
+        (PHYSICAL_DEVICE_LABEL, "relay-1", "appliance-1"),
         "physical",
     ),
 )
@@ -441,13 +453,24 @@ def device_link_metrics(
 
 
 def physical_device_topology_claims(
-    device_id: str, appliance_id: str
+    device_id: str,
+    appliance_id: str,
+    *,
+    relay_id: Optional[str] = None,
+    handover: bool = False,
 ) -> Tuple[TopologyClaim, ...]:
     """The physical participant's topology view: ONLY what it
     genuinely observes -- the direct physical adjacency to the
     appliance and the appliance's reachability (no relay claims: the
-    physical pilot's carriage really is direct)."""
-    return (
+    plain physical pilot's carriage really is direct).
+
+    ``handover=True`` (the handover scenario ONLY) additionally
+    declares the relay-leg view the participant genuinely uses as its
+    SECONDARY carriage after the transition -- the same
+    device-1-style pattern (the relay transit leg honestly declared,
+    never presented as a direct link to the appliance).
+    """
+    claims = [
         TopologyClaim(
             subject=make_link_subject(device_id, appliance_id),
             reporter=device_id,
@@ -468,20 +491,94 @@ def physical_device_topology_claims(
             freshness_until=PILOT_FRESH,
             sequence=1,
         ),
-    )
+    ]
+    if handover:
+        if relay_id is None:
+            raise PilotError(
+                PilotReasonCode.NODE_INVALID,
+                "the handover topology view requires the relay identity",
+            )
+        # the relay-leg view (mirrors the delivered device-1 pattern:
+        # the device-relay leg is a DIRECT observation -- the device
+        # really connects to the relay over its secondary carriage --
+        # while the relay-appliance transit leg is the relay's own
+        # advertisement, honestly labeled as such)
+        claims.append(
+            TopologyClaim(
+                subject=make_link_subject(device_id, relay_id),
+                reporter=device_id,
+                claim_type=ClaimType.LINK_STATE,
+                value="up",
+                source_class=SourceClass.DIRECT_OBSERVATION,
+                issued_at=PILOT_T0,
+                freshness_until=PILOT_FRESH,
+                sequence=1,
+            )
+        )
+        claims.append(
+            TopologyClaim(
+                subject=relay_id,
+                reporter=device_id,
+                claim_type=ClaimType.REACHABLE,
+                value="true",
+                source_class=SourceClass.DIRECT_OBSERVATION,
+                issued_at=PILOT_T0,
+                freshness_until=PILOT_FRESH,
+                sequence=1,
+            )
+        )
+        claims.append(
+            TopologyClaim(
+                subject=make_link_subject(relay_id, appliance_id),
+                reporter=device_id,
+                claim_type=ClaimType.LINK_STATE,
+                value="up",
+                source_class=SourceClass.SELF_ADVERTISEMENT,
+                issued_at=PILOT_T0,
+                freshness_until=PILOT_FRESH,
+                sequence=1,
+            )
+        )
+    return tuple(claims)
 
 
-def physical_device_link_metrics(appliance_id: str) -> Tuple[LinkMetricSpec, ...]:
-    """The physical participant's declared link metric (USB/Wi-Fi
-    class latency toward the appliance access point)."""
-    return (
+def physical_device_link_metrics(
+    appliance_id: str,
+    *,
+    relay_id: Optional[str] = None,
+    handover: bool = False,
+) -> Tuple[LinkMetricSpec, ...]:
+    """The physical participant's declared link metrics (USB/Wi-Fi
+    class latency toward the appliance access point).
+
+    ``handover=True`` additionally declares the relay-leg metric (the
+    USB-tether secondary carriage), mirroring the delivered device-1
+    pattern: the direct adjacency stays the preferred (primary) path
+    while it lives.
+    """
+    metrics = [
         LinkMetricSpec(
             peer_node_id=appliance_id,
             latency_ms=15,
             observed_at=PILOT_T0,
             freshness_until=PILOT_FRESH,
         ),
-    )
+    ]
+    if handover:
+        if relay_id is None:
+            raise PilotError(
+                PilotReasonCode.NODE_INVALID,
+                "the handover link metrics require the relay identity",
+            )
+        metrics.append(
+            LinkMetricSpec(
+                peer_node_id=relay_id,
+                latency_ms=25,
+                observed_at=PILOT_T0,
+                freshness_until=PILOT_FRESH,
+            )
+        )
+    return tuple(metrics)
 
 
 def device_config(
@@ -489,14 +586,26 @@ def device_config(
     *,
     relay_id: str,
     appliance_id: str,
+    handover: bool = False,
 ) -> AgentConfig:
-    """The device's REAL WORK-033 agent config (the battery recipe)."""
+    """The device's REAL WORK-033 agent config (the battery recipe).
+
+    The physical participant keeps its DIRECT view (no relay claims)
+    for the plain physical pilot; ``handover=True`` (the handover
+    scenario ONLY) additionally declares the relay-leg view it
+    genuinely uses as its secondary carriage.
+    """
     spec = PARTICIPANT_NODE_BY_LABEL[device_label]
     identity = node_identity_for(device_label)
     device_id = identity.node_id.text
     if device_label == PHYSICAL_DEVICE_LABEL:
-        claims = physical_device_topology_claims(device_id, appliance_id)
-        metrics = physical_device_link_metrics(appliance_id)
+        claims = physical_device_topology_claims(
+            device_id, appliance_id,
+            relay_id=relay_id, handover=handover,
+        )
+        metrics = physical_device_link_metrics(
+            appliance_id, relay_id=relay_id, handover=handover,
+        )
     else:
         claims = device_topology_claims(
             device_label, device_id, relay_id, appliance_id

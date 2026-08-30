@@ -15,6 +15,22 @@ The correction cycle (WORK-040-CORRECTION-001) adds:
 - ``--bind-host`` / ``--no-failure-plan`` (appliance role): let the
   physical pilot expose an externally reachable access point and
   disarm device-1's failover plan for the participation scenario.
+
+The correction's second cycle adds the physical HANDOVER mode:
+
+- ``--handover`` (device role, with ``--physical``): the
+  path-transition demonstration -- the production chain over the
+  primary physical carriage, a REAL path death (the appliance's
+  declared failure plan in the rehearsal; the operator disabling
+  Wi-Fi on the handset in the physical run), the production re-bind
+  onto the secondary (USB-tether relayed) carriage on the SAME
+  logical session, and the service invocation on the new path;
+  ``--handover-wait-seconds`` bounds the wait for the physical
+  trigger (honest incomplete record on timeout) and
+  ``--handover-attempt-interval`` paces the transition attempts;
+- ``--bind-host`` (relay role): bind an externally reachable relay
+  listener for the physical handover's secondary carriage (the
+  default loopback keeps the delivered deployment byte-identical).
 """
 
 from __future__ import annotations
@@ -44,6 +60,22 @@ def main(argv: List[str]) -> int:
     parser.add_argument("--physical", action="store_true",
                         help="the physical-participation demonstration "
                              "(device-android)")
+    parser.add_argument("--handover", action="store_true",
+                        help="the physical path-transition demonstration "
+                             "(device-android, with --physical): the "
+                             "production re-bind onto the secondary "
+                             "(USB-tether relayed) carriage on the SAME "
+                             "logical session")
+    parser.add_argument("--handover-wait-seconds", type=float,
+                        default=600.0,
+                        help="the bounded wait for the physical trigger "
+                             "(the operator disabling Wi-Fi on the "
+                             "handset); honest incomplete record on "
+                             "timeout")
+    parser.add_argument("--handover-attempt-interval", type=float,
+                        default=5.0,
+                        help="the pause between transition attempts "
+                             "while the primary carriage is still alive")
     parser.add_argument("--bind-host", default="127.0.0.1",
                         help="the address the appliance access points "
                              "bind (default: loopback, the delivered "
@@ -71,6 +103,7 @@ def main(argv: List[str]) -> int:
             result_path=args.result_file,
             upstream_host=args.upstream_host,
             upstream_port=args.upstream_port,
+            bind_host=args.bind_host,
         )
     if not args.label:
         parser.error("the device role requires --label")
@@ -83,6 +116,9 @@ def main(argv: List[str]) -> int:
         relay_port=args.relay_port,
         relayed_only=args.relayed_only,
         physical=args.physical,
+        handover=args.handover,
+        handover_wait_seconds=args.handover_wait_seconds,
+        handover_attempt_interval=args.handover_attempt_interval,
     )
     # unreachable
 

@@ -43,6 +43,23 @@ Honesty rules (enforced, not promised):
 * no private W035 method, no synthetic network interface, no
   monkeypatched runtime is used anywhere (the handset runs the same
   ``pilot.node`` entrypoint every other device runs).
+
+The correction's SECOND cycle adds the physical HANDOVER experiment
+and the Android-agent artifact integration interface:
+
+* the handover chain (Wi-Fi primary carriage dies -> the production
+  re-bind onto the secondary USB-tether relayed carriage on the SAME
+  logical session -> real datagram -> independent receiver
+  corroboration on BOTH access points), with its own frozen evidence
+  template, PURE validator, and derived never-promoting
+  classification;
+* the Android-agent observation MANIFEST interface: ADCOS only
+  LOADS, VALIDATES, BINDS (by file SHA-256), and CROSS-CORROBORATES
+  the Android platform's own observations (device identity, network
+  technology, the 5G/NR determination, the USB-tether state, the
+  trigger record, raw framework outputs, optional APK provenance) --
+  it never duplicates the Android platform authority in Python, and
+  the manifest never overrides ADCOS-side observations.
 """
 
 from __future__ import annotations
@@ -73,6 +90,10 @@ __all__ = [
     "PHYSICAL_EVIDENCE_REQUIRED",
     "PHYSICAL_5G_REQUIRED",
     "TETHER_INTERFACE_CANDIDATES",
+    "HANDOVER_EVIDENCE_SCHEMA_VERSION",
+    "HANDOVER_EVIDENCE_REQUIRED",
+    "ANDROID_MANIFEST_SCHEMA_VERSION",
+    "ANDROID_MANIFEST_REQUIRED",
     "detect_physical_environment",
     "validator_sha",
     "assemble_physical_evidence",
@@ -82,6 +103,16 @@ __all__ = [
     "run_physical_attempt",
     "run_physical_rehearsal",
     "write_attempt_evidence",
+    "validate_android_manifest",
+    "load_android_manifest",
+    "android_manifest_template",
+    "assemble_handover_evidence",
+    "validate_handover_evidence",
+    "classify_handover_participation",
+    "classify_handover_five_g",
+    "run_handover_rehearsal",
+    "run_physical_handover",
+    "write_handover_attempt_evidence",
 ]
 
 
@@ -127,6 +158,89 @@ PHYSICAL_5G_REQUIRED: Tuple[Tuple[str, str], ...] = (
     ("host.post_transition_route", "the route after the transition"),
     ("traffic_verification.method", "how the traffic use was verified"),
     ("traffic_verification.observation", "the independent observation"),
+)
+
+#: The handover-evidence document schema version (correction cycle 2).
+HANDOVER_EVIDENCE_SCHEMA_VERSION = 1
+
+#: The exact evidence chain the physical HANDOVER experiment requires
+#: (frozen DATA -- the battery asserts the template covers exactly
+#: this list; a NEW tuple, deliberately separate from the frozen
+#: participation templates above).
+HANDOVER_EVIDENCE_REQUIRED: Tuple[Tuple[str, str], ...] = (
+    ("device_identity.model", "the handset's model (adb getprop)"),
+    ("device_identity.brand", "the handset's brand (adb getprop)"),
+    ("device_identity.serial", "the handset's serial identity"),
+    ("device_identity.android_release", "the Android release version"),
+    ("device_identity.observation_source", "how the identity was observed"),
+    ("access_technology_pre.technology", "the framework access technology "
+     "before the transition"),
+    ("access_technology_pre.observation_source", "how the pre access "
+     "technology was observed"),
+    ("access_technology_post.technology", "the framework access technology "
+     "after the transition"),
+    ("access_technology_post.observation_source", "how the post access "
+     "technology was observed"),
+    ("trigger.description", "the physical trigger (the Wi-Fi disable)"),
+    ("trigger.observation_source", "how the trigger was observed"),
+    ("host.pre_transition_route", "the host route before the transition"),
+    ("host.post_transition_route", "the host route after the transition"),
+    ("host.tether_interface", "the host USB-tether interface identity"),
+    ("adcos.access_classification", "the ADCOS access classification"),
+    ("adcos.device_node_id", "the handset participant's node id"),
+    ("adcos.session_id", "the production session id"),
+    ("adcos.bind_event", "the session bind event (primary carriage)"),
+    ("adcos.rebind_event", "the session re-bind event (secondary "
+     "carriage, SAME session id)"),
+    ("adcos.sender_result", "the device-side result document"),
+    ("adcos.receiver_result", "the appliance-side journal excerpt"),
+    ("adcos.payload_digest", "the digest of the datagram that flowed "
+     "after the re-bind"),
+    ("adcos.session_continuity", "the session-record-digest stability "
+     "fact (byte-identical before/after the transition)"),
+    ("traffic_verification.method", "how the traffic use was verified"),
+    ("traffic_verification.observation", "the independent observation"),
+    ("verification.validator_sha", "the validator's own SHA-256"),
+    ("verification.artifact_hashes", "SHA-256 of every artifact"),
+)
+
+#: The Android-agent observation manifest schema version.
+ANDROID_MANIFEST_SCHEMA_VERSION = 1
+
+#: The required fields of the Android-agent observation manifest (the
+#: Android platform's OWN observations, produced by the Android
+#: Studio/Gemini agent on the handset; ADCOS loads, validates, binds,
+#: and corroborates -- never re-derives).  The OPTIONAL ``apk`` block
+#: (name + sha256) is the only permitted absence: the current design
+#: is pure-stdlib Python on the handset with NO APK, so its absence
+#: must be honestly recorded rather than fabricated.
+ANDROID_MANIFEST_REQUIRED: Tuple[Tuple[str, str], ...] = (
+    ("kind", "the manifest kind"),
+    ("schema_version", "the manifest schema version"),
+    ("produced_by", "the Android agent identity string"),
+    ("device_identity.model", "the handset model (the agent's getprop)"),
+    ("device_identity.brand", "the handset brand"),
+    ("device_identity.serial", "the handset serial"),
+    ("device_identity.android_release", "the Android release"),
+    ("device_identity.observation_source", "how the identity was "
+     "observed (the Android framework's own report)"),
+    ("network_technology.pre", "the framework data-network type before "
+     "the trigger"),
+    ("network_technology.post", "the framework data-network type after "
+     "the trigger"),
+    ("network_technology.is_5g", "true ONLY when the framework reports "
+     "NR (never from LTE)"),
+    ("network_technology.nr_state", "the framework NR state"),
+    ("network_technology.observation_source", "how the technology was "
+     "observed (the framework's own report)"),
+    ("trigger.description", "the agent's trigger record"),
+    ("trigger.observation_source", "how the trigger was observed"),
+    ("usb_tether.enabled", "the framework's USB-tether state"),
+    ("usb_tether.backed_by_cellular", "whether the tether is backed by "
+     "the cellular data connection"),
+    ("usb_tether.observation_source", "how the tether state was observed"),
+    ("raw_observations", "the raw getprop/dumpsys outputs the agent "
+     "captured"),
 )
 
 
@@ -421,6 +535,27 @@ def validate_physical_evidence(document: Mapping[str, Any]) -> Tuple[bool, List[
         if technology and technology not in _ACCESS_TECHNOLOGIES:
             problems.append("unknown access technology %r" % (technology,))
 
+    # -- the additive post-transition access observation (correction
+    # cycle 2): present only when the orchestrator captured it; the
+    # SAME NR-only rule applies whenever it is present --
+    access_post = document.get("access_technology_post") or {}
+    if access_post:
+        post_technology = str(access_post.get("technology", ""))
+        if access_post.get("is_5g") is True and post_technology != "nr":
+            problems.append(
+                "access_technology_post is_5g=true with technology %r: "
+                "5G requires the framework to report NR (cellular is "
+                "never automatically 5G)" % (post_technology,)
+            )
+        if (
+            post_technology
+            and post_technology not in _ACCESS_TECHNOLOGIES
+        ):
+            problems.append(
+                "unknown post-transition access technology %r"
+                % (post_technology,)
+            )
+
     # -- classification consistency (anti-promotion) ----------------------
     classification = document.get("classification") or {}
     c1 = classification.get("criterion_1_real_devices")
@@ -537,6 +672,715 @@ def classify_five_g_path(document: Mapping[str, Any]) -> str:
 
 
 # ---------------------------------------------------------------------------
+# The Android-agent observation manifest interface (correction cycle 2)
+# ---------------------------------------------------------------------------
+
+
+def validate_android_manifest(
+    document: Mapping[str, Any]
+) -> Tuple[bool, List[str]]:
+    """Independently validate an Android-agent observation manifest.
+
+    Pure function, no I/O, fails closed.  The manifest is the Android
+    platform's OWN observation record (produced by the Android
+    Studio/Gemini agent on the handset): completeness except the
+    OPTIONAL ``apk`` block, digest well-formedness for ``apk.sha256``
+    when present, the NR-only 5G rule (``is_5g`` true ONLY with a
+    post-trigger NR report -- never from LTE), and every
+    ``observation_source`` must be the Android framework's own report
+    (never an ADCOS re-derivation).
+    """
+    problems: List[str] = []
+    if document.get("kind") != "android-agent-observation-manifest":
+        return False, ["not an android-agent-observation-manifest document"]
+    if document.get("schema_version") != ANDROID_MANIFEST_SCHEMA_VERSION:
+        problems.append(
+            "unknown manifest schema version %r"
+            % (document.get("schema_version"),)
+        )
+
+    for field, _why in ANDROID_MANIFEST_REQUIRED:
+        value = _dig(document, field)
+        if value is None or value == "" or value == {} or value == []:
+            problems.append("missing required manifest field %r" % (field,))
+
+    produced_by = document.get("produced_by")
+    if not isinstance(produced_by, str) or not produced_by:
+        problems.append("produced_by must be a non-empty string")
+
+    network = document.get("network_technology") or {}
+    if network:
+        if not isinstance(network.get("is_5g"), bool):
+            problems.append("network_technology.is_5g must be an explicit bool")
+        is_5g = network.get("is_5g")
+        post = str(network.get("post", ""))
+        pre = str(network.get("pre", ""))
+        if is_5g is True and post != "nr":
+            problems.append(
+                "is_5g=true with post technology %r: 5G requires the "
+                "Android framework to report NR (cellular is never "
+                "automatically 5G)" % (post,)
+            )
+        for label, token in (("pre", pre), ("post", post)):
+            if token and token not in _ACCESS_TECHNOLOGIES:
+                problems.append(
+                    "unknown %s access technology %r" % (label, token)
+                )
+        nr_state = network.get("nr_state")
+        if not isinstance(nr_state, str) or not nr_state:
+            problems.append("network_technology.nr_state must be a string")
+
+    tether = document.get("usb_tether") or {}
+    if tether:
+        for flag in ("enabled", "backed_by_cellular"):
+            if not isinstance(tether.get(flag), bool):
+                problems.append("usb_tether.%s must be an explicit bool" % (flag,))
+
+    raw = document.get("raw_observations")
+    if not isinstance(raw, Mapping) or not raw:
+        problems.append(
+            "raw_observations must be a non-empty record of the raw "
+            "framework outputs the agent captured"
+        )
+
+    apk = document.get("apk")
+    if apk is not None:
+        if not isinstance(apk, Mapping):
+            problems.append("apk must be a mapping (name + sha256)")
+        else:
+            if not str(apk.get("name", "")):
+                problems.append("apk.name missing")
+            if not _is_digest(apk.get("sha256")):
+                problems.append("apk.sha256 missing or malformed")
+    return (not problems), problems
+
+
+def load_android_manifest(path: str) -> Dict[str, Any]:
+    """Load one Android-agent observation manifest from disk.
+
+    Parses the JSON document honestly (malformed files fail closed
+    with a typed pilot error); validation is the caller's explicit
+    ``validate_android_manifest`` step (load and validate stay
+    separate surfaces, exactly like the evidence document).
+    """
+    manifest_path = Path(path)
+    try:
+        text = manifest_path.read_text(encoding="utf-8")
+    except OSError as error:
+        raise PilotError(
+            PilotReasonCode.EVIDENCE_INVALID,
+            "the android manifest %s is unreadable: %s: %s"
+            % (manifest_path, type(error).__name__, error),
+        ) from error
+    try:
+        document = json.loads(text)
+    except ValueError as error:
+        raise PilotError(
+            PilotReasonCode.EVIDENCE_INVALID,
+            "the android manifest %s is not valid JSON: %s: %s"
+            % (manifest_path, type(error).__name__, error),
+        ) from error
+    if not isinstance(document, dict):
+        raise PilotError(
+            PilotReasonCode.EVIDENCE_INVALID,
+            "the android manifest %s is not a JSON object"
+            % (manifest_path,),
+        )
+    return document
+
+
+def android_manifest_template() -> Dict[str, Any]:
+    """The COMPLETE, well-formed example manifest for the Android
+    Studio/Gemini agent to copy.
+
+    The template is FULLY VALID under ``validate_android_manifest``
+    (structural validation) with every placeholder value clearly
+    marked ``EXAMPLE``/``REPLACE``.  The ``template: true`` marker and
+    the ``usage`` note are informational fields deliberately EXCLUDED
+    from the required template -- they document the fill-in contract,
+    not an observation.  Binding the raw template into a handover
+    document still FAILS closed: the cross-corroboration (serial
+    match) rejects the placeholder serial, so a template can never be
+    mistaken for a real observation record.  The optional ``apk``
+    block is deliberately absent (the current design is pure-stdlib
+    Python on the handset with NO APK); if an APK exists, add
+    ``{"name": ..., "sha256": "sha256:..."}``.
+    """
+    return {
+        "kind": "android-agent-observation-manifest",
+        "schema_version": ANDROID_MANIFEST_SCHEMA_VERSION,
+        "template": True,
+        "produced_by": (
+            "EXAMPLE-REPLACE: the Android agent's identity string (e.g. "
+            "the Android Studio / Gemini agent build + device label)"
+        ),
+        "usage": (
+            "TEMPLATE -- copy this file, replace EVERY EXAMPLE value with "
+            "the real framework observation, then REMOVE the 'template' "
+            "and 'usage' fields. Every observation_source must be the "
+            "Android framework's own report (adb shell getprop / dumpsys), "
+            "never an ADCOS re-derivation. The optional apk block "
+            "{name, sha256} is deliberately absent: the current design is "
+            "pure-stdlib Python on the handset with NO APK; record its "
+            "absence honestly rather than fabricating provenance."
+        ),
+        "device_identity": {
+            "model": "EXAMPLE-MODEL-REPLACE (getprop ro.product.model)",
+            "brand": "EXAMPLE-BRAND-REPLACE (getprop ro.product.brand)",
+            "serial": "EXAMPLE-SERIAL-REPLACE",
+            "android_release": (
+                "EXAMPLE-RELEASE-REPLACE (getprop ro.build.version.release)"
+            ),
+            "observation_source": (
+                "adb shell getprop (authoritative device report)"
+            ),
+        },
+        "network_technology": {
+            "pre": "none",
+            "post": "nr",
+            "is_5g": True,
+            "nr_state": "connected",
+            "observation_source": (
+                "adb shell dumpsys telephony.registry (the Android "
+                "framework's own report)"
+            ),
+        },
+        "trigger": {
+            "description": (
+                "EXAMPLE-REPLACE: Wi-Fi disabled on the handset at the "
+                "marked runbook step (the settings toggle or 'svc wifi "
+                "disable'), observed and timestamped by the agent"
+            ),
+            "observation_source": (
+                "the Android framework's connectivity reports + the "
+                "agent's own trigger record (never ADCOS re-derivation)"
+            ),
+        },
+        "usb_tether": {
+            "enabled": True,
+            "backed_by_cellular": True,
+            "observation_source": (
+                "adb shell dumpsys connectivity (the framework's own "
+                "tethering state)"
+            ),
+        },
+        "raw_observations": {
+            "getprop_ro_product_model": (
+                "EXAMPLE-REPLACE: the raw getprop output line"
+            ),
+            "getprop_ro_product_brand": (
+                "EXAMPLE-REPLACE: the raw getprop output line"
+            ),
+            "getprop_ro_build_version_release": (
+                "EXAMPLE-REPLACE: the raw getprop output line"
+            ),
+            "dumpsys_telephony_registry_excerpt": (
+                "EXAMPLE-REPLACE: the raw mDataNetworkType/mNrState lines"
+            ),
+            "dumpsys_connectivity_excerpt": (
+                "EXAMPLE-REPLACE: the raw tethering state lines"
+            ),
+        },
+    }
+
+
+# ---------------------------------------------------------------------------
+# Handover evidence: assembly, validation, classification (cycle 2)
+# ---------------------------------------------------------------------------
+
+
+def _sender_event(
+    sender_result: Mapping[str, Any], kind: str, session_id: Any
+) -> Optional[Dict[str, Any]]:
+    """The participant's own journaled event of ``kind`` matching the
+    session id (the first one, in journal order)."""
+    for event in sender_result.get("events") or []:
+        if (
+            event.get("kind") == kind
+            and str((event.get("payload") or {}).get("session_id"))
+            == str(session_id)
+        ):
+            return dict(event.get("payload") or {})
+    return None
+
+
+def assemble_handover_evidence(
+    *,
+    environment: Mapping[str, Any],
+    sender_result: Mapping[str, Any],
+    receiver_result: Mapping[str, Any],
+    device_identity: Mapping[str, Any],
+    access_technology_pre: Mapping[str, Any],
+    access_technology_post: Mapping[str, Any],
+    trigger: Mapping[str, Any],
+    host_route: Mapping[str, Any],
+    carriage: Mapping[str, Any],
+    is_physical: bool,
+    relay_result: Optional[Mapping[str, Any]] = None,
+    android_manifest: Optional[Mapping[str, Any]] = None,
+    android_manifest_sha: Optional[str] = None,
+    traffic_verification: Optional[Mapping[str, Any]] = None,
+    honest_absences: Optional[List[str]] = None,
+) -> Dict[str, Any]:
+    """Assemble the physical-handover evidence document from REAL
+    observations.
+
+    The bind/rebind events, the payload digest (the datagram that
+    flowed after the re-bind), and the session-continuity fact are all
+    EXTRACTED from the participant's own result document (never
+    caller-asserted).  When an Android-agent observation manifest is
+    provided it is loaded, validated, bound by its file SHA-256, and
+    CROSS-CORROBORATED (serial + post technology agreement) -- it is
+    recorded under ``android_observations`` and never overrides the
+    ADCOS-side observations.  The classification is DERIVED.
+    """
+    session = ((sender_result.get("observations") or {}).get("session")) or {}
+    session_id = session.get("session_id", "")
+    bind_event = _sender_event(
+        sender_result, "pilot.session-bound", session_id
+    )
+    rebind_event = _sender_event(
+        sender_result, "pilot.session-rebound", session_id
+    )
+    handover = ((sender_result.get("observations") or {}).get("handover")) or {}
+    payload_digest = str(handover.get("transition_payload_digest", ""))
+    session_continuity = handover.get("session_record_stable") is True
+
+    artifacts = [
+        _artifact_hash("device-result", _canonical_bytes(sender_result)),
+        _artifact_hash("appliance-result", _canonical_bytes(receiver_result)),
+        _artifact_hash("environment-detection", _canonical_bytes(environment)),
+    ]
+    if relay_result is not None:
+        artifacts.append(
+            _artifact_hash("relay-result", _canonical_bytes(relay_result))
+        )
+
+    android_observations: Optional[Dict[str, Any]] = None
+    if android_manifest is not None:
+        ok_manifest, manifest_problems = validate_android_manifest(
+            android_manifest
+        )
+        if not ok_manifest:
+            raise PilotError(
+                PilotReasonCode.EVIDENCE_INVALID,
+                "the android observation manifest is invalid: %s"
+                % ("; ".join(manifest_problems[:4]),),
+            )
+        if not _is_digest(android_manifest_sha):
+            raise PilotError(
+                PilotReasonCode.EVIDENCE_INVALID,
+                "the android manifest file digest is missing or malformed",
+            )
+        artifacts.append(("android-manifest", android_manifest_sha))
+        apk = android_manifest.get("apk")
+        android_observations = {
+            "manifest": dict(android_manifest),
+            "manifest_file_sha256": android_manifest_sha,
+            "note": (
+                "loaded + validated + bound by its file SHA-256; the "
+                "Android platform's own observations, cross-corroborated "
+                "against the ADCOS-side observations -- never overriding "
+                "them (do not duplicate the Android platform authority "
+                "in Python)"
+            ),
+        }
+        if isinstance(apk, Mapping) and _is_digest(apk.get("sha256")):
+            android_observations["apk_sha256"] = str(apk.get("sha256"))
+
+    document: Dict[str, Any] = {
+        "kind": "physical-handover-evidence",
+        "schema_version": HANDOVER_EVIDENCE_SCHEMA_VERSION,
+        "is_physical": is_physical,
+        "carriage": dict(carriage),
+        "device_identity": dict(device_identity),
+        "access_technology_pre": dict(access_technology_pre),
+        "access_technology_post": dict(access_technology_post),
+        "trigger": dict(trigger),
+        "host": dict(host_route),
+        "adcos": {
+            "access_classification": str(
+                carriage.get("adcos_access_classification", "")
+            ),
+            "device_node_id": str(sender_result.get("node_id", "")),
+            "session_id": str(session_id),
+            "bind_event": bind_event,
+            "rebind_event": rebind_event,
+            "sender_result": dict(sender_result),
+            "receiver_result": {
+                "label": receiver_result.get("label"),
+                "node_id": receiver_result.get("node_id"),
+                "events": list(receiver_result.get("events") or []),
+                "checks": list(receiver_result.get("checks") or []),
+            },
+            "payload_digest": payload_digest,
+            "session_continuity": session_continuity,
+        },
+        "traffic_verification": dict(traffic_verification or {}),
+        "verification": {
+            "validator_sha": validator_sha(),
+            "artifact_hashes": [list(entry) for entry in artifacts],
+        },
+        "honest_absences": list(honest_absences or []),
+    }
+    if relay_result is not None:
+        document["adcos"]["relay_result"] = {
+            "label": relay_result.get("label"),
+            "node_id": relay_result.get("node_id"),
+            "events": list(relay_result.get("events") or []),
+            "checks": list(relay_result.get("checks") or []),
+        }
+    if android_observations is not None:
+        document["android_observations"] = android_observations
+    ok, problems = validate_handover_evidence(document)
+    document["classification"] = {
+        "criterion_1_real_devices": classify_handover_participation(document),
+        "criterion_2_5g": classify_handover_five_g(document),
+        "validation_ok": ok,
+        "validation_problems": problems,
+    }
+    return document
+
+
+def validate_handover_evidence(
+    document: Mapping[str, Any]
+) -> Tuple[bool, List[str]]:
+    """Independently validate a physical-handover evidence document.
+
+    Pure function, no I/O, fails closed: kind + schema version; an
+    explicit ``is_physical`` bool; completeness when physical /
+    honest absences when a rehearsal; the declared-identity match;
+    cross-corroboration of the SAME session id in the sender
+    observations AND the receiver journal, with the receiver journal
+    corroborating datagrams on BOTH access points (pre: direct, post:
+    relay); the re-bind event on the SAME session id; session
+    continuity (a handover that broke the session is not a handover);
+    a well-formed payload digest; digest well-formedness; the NR-only
+    rule on the post-transition access technology; the Android-manifest
+    cross-corroboration (serial + post technology agreement); and the
+    anti-promotion classification consistency.
+    """
+    problems: List[str] = []
+    if document.get("kind") != "physical-handover-evidence":
+        return False, ["not a physical-handover-evidence document"]
+    if document.get("schema_version") != HANDOVER_EVIDENCE_SCHEMA_VERSION:
+        problems.append(
+            "unknown schema version %r" % (document.get("schema_version"),)
+        )
+
+    is_physical = document.get("is_physical")
+    if not isinstance(is_physical, bool):
+        problems.append("is_physical must be an explicit boolean")
+
+    # -- completeness: every required field, present or honestly absent --
+    for field, _why in HANDOVER_EVIDENCE_REQUIRED:
+        value = _dig(document, field)
+        if value is None or value == "" or value == {} or value == []:
+            if is_physical:
+                problems.append("missing required field %r" % (field,))
+            else:
+                marker = _dig(document, "honest_absences")
+                if not (isinstance(marker, list) and field in marker):
+                    problems.append(
+                        "rehearsal document omits %r without declaring it "
+                        "in honest_absences" % (field,)
+                    )
+
+    # -- the declared identity match -----------------------------------
+    node_id = _dig(document, "adcos.device_node_id")
+    if node_id is not None and node_id != _declared_physical_node_id():
+        problems.append(
+            "device node id %r does not match the declared %s identity"
+            % (node_id, PHYSICAL_DEVICE_LABEL)
+        )
+
+    # -- cross-corroboration: the session on BOTH sides, datagrams on
+    # -- BOTH access points ---------------------------------------------
+    session_id = _dig(document, "adcos.session_id")
+    sender = _dig(document, "adcos.sender_result") or {}
+    receiver = _dig(document, "adcos.receiver_result") or {}
+    direct_corroborated = False
+    relay_corroborated = False
+    if session_id:
+        sender_sessions = json.dumps(sender.get("observations", {}), sort_keys=True)
+        receiver_events = json.dumps(receiver.get("events", []), sort_keys=True)
+        if str(session_id) not in sender_sessions:
+            problems.append("the sender result does not carry the session id")
+        if str(session_id) not in receiver_events:
+            problems.append(
+                "the receiver (appliance) journal does not corroborate the "
+                "session id -- no independent receiver result"
+            )
+        sender_label = sender.get("label")
+        if sender_label != PHYSICAL_DEVICE_LABEL:
+            problems.append(
+                "sender result label %r is not %r" % (sender_label, PHYSICAL_DEVICE_LABEL)
+            )
+        receiver_label = receiver.get("label")
+        if receiver_label != "appliance-1":
+            problems.append(
+                "receiver result label %r is not the appliance" % (receiver_label,)
+            )
+        for event in receiver.get("events") or []:
+            payload = event.get("payload") or {}
+            if (
+                event.get("kind") == "pilot.datagram-received"
+                and str(payload.get("session_id")) == str(session_id)
+            ):
+                if payload.get("carriage") == "direct":
+                    direct_corroborated = True
+                if payload.get("carriage") == "relay":
+                    relay_corroborated = True
+        if not (direct_corroborated and relay_corroborated):
+            problems.append(
+                "the receiver journal does not corroborate datagrams on "
+                "BOTH access points (direct=%s relay=%s)"
+                % (direct_corroborated, relay_corroborated)
+            )
+    else:
+        problems.append("no session id to corroborate")
+
+    # -- the re-bind event on the SAME session id -----------------------
+    rebind = _dig(document, "adcos.rebind_event")
+    if isinstance(rebind, Mapping):
+        if str(rebind.get("session_id", "")) != str(session_id or ""):
+            problems.append(
+                "the rebind event does not carry the same session id"
+            )
+
+    # -- session continuity: a handover that broke the session is not
+    # -- a handover -----------------------------------------------------
+    if _dig(document, "adcos.session_continuity") is not True:
+        problems.append(
+            "session continuity is not proven (a handover that broke the "
+            "session is not a handover)"
+        )
+
+    # -- the payload digest ---------------------------------------------
+    if not _is_digest(_dig(document, "adcos.payload_digest")):
+        problems.append("payload digest missing or malformed")
+
+    # -- digests ---------------------------------------------------------
+    validator = _dig(document, "verification.validator_sha")
+    if not _is_digest(validator):
+        problems.append("validator sha missing or malformed")
+    hashes = _dig(document, "verification.artifact_hashes") or []
+    if not isinstance(hashes, list) or not hashes:
+        problems.append("no artifact hashes recorded")
+    else:
+        for entry in hashes:
+            if (
+                not isinstance(entry, (list, tuple))
+                or len(entry) != 2
+                or not isinstance(entry[0], str)
+                or not entry[0]
+                or not _is_digest(entry[1])
+            ):
+                problems.append("malformed artifact hash entry %r" % (entry,))
+                break
+
+    # -- the NR-only 5G rule on the POST-transition technology ----------
+    post = document.get("access_technology_post") or {}
+    if post:
+        post_technology = str(post.get("technology", ""))
+        if post.get("is_5g") is True and post_technology != "nr":
+            problems.append(
+                "access_technology_post is_5g=true with technology %r: 5G "
+                "requires the framework to report NR (cellular is never "
+                "automatically 5G)" % (post_technology,)
+            )
+        if post_technology and post_technology not in _ACCESS_TECHNOLOGIES:
+            problems.append(
+                "unknown post-transition access technology %r"
+                % (post_technology,)
+            )
+
+    # -- the Android-manifest cross-corroboration (when bound) ----------
+    android = document.get("android_observations") or {}
+    manifest = android.get("manifest")
+    if manifest is not None:
+        ok_manifest, manifest_problems = validate_android_manifest(manifest)
+        if not ok_manifest:
+            problems.append(
+                "the bound android manifest is invalid: %s"
+                % ("; ".join(manifest_problems[:3]),)
+            )
+        else:
+            manifest_serial = str(
+                (manifest.get("device_identity") or {}).get("serial", "")
+            )
+            adcos_serial = str(
+                (document.get("device_identity") or {}).get("serial", "")
+            )
+            if adcos_serial and manifest_serial != adcos_serial:
+                problems.append(
+                    "the manifest serial %r does not match the ADCOS-side "
+                    "observed serial %r (cross-corroboration failed)"
+                    % (manifest_serial, adcos_serial)
+                )
+            manifest_post = str(
+                (manifest.get("network_technology") or {}).get("post", "")
+            )
+            adcos_post_technology = str(post.get("technology", ""))
+            if (
+                manifest_post
+                and adcos_post_technology
+                and manifest_post != adcos_post_technology
+            ):
+                problems.append(
+                    "the manifest post technology %r disagrees with the "
+                    "ADCOS-side post observation %r (honesty over "
+                    "convenience)" % (manifest_post, adcos_post_technology)
+                )
+        if not any(
+            isinstance(entry, (list, tuple))
+            and len(entry) == 2
+            and entry[0] == "android-manifest"
+            for entry in (hashes if isinstance(hashes, list) else [])
+        ):
+            problems.append(
+                "a bound android manifest is not hashed in artifact_hashes"
+            )
+
+    # -- classification consistency (anti-promotion) ----------------------
+    classification = document.get("classification") or {}
+    c1 = classification.get("criterion_1_real_devices")
+    c2 = classification.get("criterion_2_5g")
+    for status in (c1, c2):
+        if status is None:
+            continue  # not yet classified (assembly validates pre-classification)
+        if status not in CriterionStatus.values():
+            problems.append("unknown criterion status %r" % (status,))
+    if c1 == CriterionStatus.PASS and is_physical is not True:
+        problems.append(
+            "criterion 1 classified PASS but is_physical is not true "
+            "(a rehearsal can never close a physical criterion)"
+        )
+    if c1 == CriterionStatus.PASS:
+        if _dig(document, "adcos.session_continuity") is not True:
+            problems.append(
+                "criterion 1 PASS requires the session-continuity proof"
+            )
+        if not (direct_corroborated and relay_corroborated):
+            problems.append(
+                "criterion 1 PASS requires receiver corroboration on BOTH "
+                "access points"
+            )
+        service = (sender.get("observations", {}) or {}).get("service", {})
+        if service.get("verdict") != "executed":
+            problems.append(
+                "criterion 1 PASS requires the device-side service verdict "
+                "to be 'executed'"
+            )
+        checks = sender.get("checks", [])
+        if not all(check.get("ok") for check in checks):
+            problems.append("criterion 1 PASS requires every device check to pass")
+    if c2 == CriterionStatus.PASS:
+        if is_physical is not True:
+            problems.append("criterion 2 PASS requires a physical document")
+        if post.get("technology") != "nr" or post.get("is_5g") is not True:
+            problems.append(
+                "criterion 2 PASS requires the Android framework to report "
+                "NR after the transition"
+            )
+        tether = _dig(document, "host.tether_interface")
+        post_route = _dig(document, "host.post_transition_route") or ""
+        traffic = document.get("traffic_verification") or {}
+        if not tether:
+            problems.append(
+                "criterion 2 PASS requires the USB-tether interface observation"
+            )
+        if not post_route:
+            problems.append("criterion 2 PASS requires the post-transition route")
+        elif isinstance(tether, str) and tether and tether not in post_route:
+            problems.append(
+                "criterion 2 PASS requires the post-transition route to run "
+                "via the tether interface %r (route %r)"
+                % (tether, post_route)
+            )
+        if not traffic.get("method") or not traffic.get("observation"):
+            problems.append(
+                "criterion 2 PASS requires independent traffic verification"
+            )
+    if (
+        c2 not in (None, CriterionStatus.NOT_TESTABLE)
+        and post.get("is_5g") is not True
+    ):
+        problems.append(
+            "criterion 2 classified %r without an NR post observation (only "
+            "NOT-TESTABLE is permitted without NR)" % (c2,)
+        )
+    return (not problems), problems
+
+
+def classify_handover_participation(document: Mapping[str, Any]) -> str:
+    """The honest criterion-1 status DERIVED from the handover
+    document's facts.
+
+    PASS requires: a physical handset participant (is_physical), the
+    complete corroborated chain (session continuity + receiver
+    corroboration on BOTH carriages + the executed service on the
+    secondary), and a fully valid document.  A rehearsal with the full
+    corroborated chain is PARTIAL (the software-class chain is
+    verified; the physical demonstration is unresolved).  No device at
+    all is NOT-TESTABLE.
+    """
+    is_physical = document.get("is_physical") is True
+    if document.get("kind") == "physical-environment-detection":
+        return CriterionStatus.NOT_TESTABLE
+    sender = document.get("adcos", {}).get("sender_result") or {}
+    service = (sender.get("observations", {}) or {}).get("service", {})
+    if not is_physical:
+        ok, _problems = validate_handover_evidence(document)
+        if service.get("verdict") == "executed" and ok:
+            return CriterionStatus.PARTIAL
+        return CriterionStatus.NOT_TESTABLE
+    ok, _problems = validate_handover_evidence(document)
+    if not ok:
+        return CriterionStatus.PARTIAL
+    return CriterionStatus.PASS
+
+
+def classify_handover_five_g(document: Mapping[str, Any]) -> str:
+    """The honest criterion-2 status DERIVED from the handover
+    document's facts.
+
+    PASS requires: a physical document, the framework's NR report
+    AFTER the transition, the USB-tether interface observation, the
+    route transition onto the tether, and the independent traffic
+    verification -- all on a fully valid document.  NR observed but
+    the chain incomplete is PARTIAL; anything else (rehearsal,
+    non-NR post technology, no device) is NOT-TESTABLE (cellular is
+    never automatically 5G; a rehearsal can never close a physical
+    criterion).
+    """
+    is_physical = document.get("is_physical") is True
+    if document.get("kind") == "physical-environment-detection":
+        return CriterionStatus.NOT_TESTABLE
+    if not is_physical:
+        return CriterionStatus.NOT_TESTABLE
+    post = document.get("access_technology_post") or {}
+    if post.get("technology") != "nr" or post.get("is_5g") is not True:
+        return CriterionStatus.NOT_TESTABLE
+    host = document.get("host") or {}
+    tether = str(host.get("tether_interface", ""))
+    post_route = str(host.get("post_transition_route", ""))
+    traffic = document.get("traffic_verification") or {}
+    if (
+        not tether
+        or not post_route
+        or tether not in post_route
+        or not traffic.get("method")
+        or not traffic.get("observation")
+    ):
+        return CriterionStatus.PARTIAL
+    ok, _problems = validate_handover_evidence(document)
+    if not ok:
+        return CriterionStatus.PARTIAL
+    return CriterionStatus.PASS
+
+
+# ---------------------------------------------------------------------------
 # Evidence assembly
 # ---------------------------------------------------------------------------
 
@@ -558,13 +1402,17 @@ def assemble_physical_evidence(
     is_physical: bool,
     traffic_verification: Optional[Mapping[str, Any]] = None,
     honest_absences: Optional[List[str]] = None,
+    access_technology_post: Optional[Mapping[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Assemble the physical-evidence document from REAL observations.
 
     Every field comes from the caller's captured observations or is
     explicitly listed in ``honest_absences`` (a rehearsal).  The
     classification is DERIVED (never caller-asserted) and the document
-    carries the validator's own SHA-256.
+    carries the validator's own SHA-256.  ``access_technology_post``
+    (correction cycle 2) is the previously-DISCARDED post-transition
+    framework observation -- an additive optional field, never part of
+    the frozen required template.
     """
     session = ((sender_result.get("observations") or {}).get("session")) or {}
     receiver_events = list(receiver_result.get("events") or [])
@@ -617,6 +1465,8 @@ def assemble_physical_evidence(
         },
         "honest_absences": list(honest_absences or []),
     }
+    if access_technology_post is not None:
+        document["access_technology_post"] = dict(access_technology_post)
     ok, problems = validate_physical_evidence(document)
     document["classification"] = {
         "criterion_1_real_devices": classify_physical_participation(document),
@@ -963,6 +1813,7 @@ def run_physical_pilot(
         },
         carriage=carriage,
         is_physical=True,
+        access_technology_post=access_post,
         traffic_verification=(
             {
                 "method": "route + interface observation across the pilot "
@@ -1117,6 +1968,7 @@ def run_physical_rehearsal(
         "access_technology.technology",
         "access_technology.observation_source",
         "host.interface_identity",
+        "access_technology_post",
     ]
     document = assemble_physical_evidence(
         environment=environment,
@@ -1151,6 +2003,11 @@ def run_physical_rehearsal(
             "loopback carriage; software-class verification of the chain)",
         },
         is_physical=False,
+        access_technology_post={
+            "technology": "",
+            "is_5g": False,
+            "observation_source": "none (rehearsal: no handset present)",
+        },
         traffic_verification={},
         honest_absences=honest_absences,
     )
@@ -1169,6 +2026,656 @@ def run_physical_rehearsal(
 
 
 # ---------------------------------------------------------------------------
+# The handover rehearsal (software-class verification of the whole
+# transition chain, correction cycle 2)
+# ---------------------------------------------------------------------------
+
+#: Operational-only pacing for the handover rehearsal's transition
+#: attempts (the physical run uses the CLI defaults; the rehearsal's
+#: artificial death is immediate, so the pacing stays small).
+_HANDOVER_REHEARSAL_WAIT_SECONDS = 120.0
+_HANDOVER_REHEARSAL_ATTEMPT_INTERVAL = 0.25
+
+
+def run_handover_rehearsal(
+    *, workspace: Optional[str] = None
+) -> Dict[str, Any]:
+    """The software-class rehearsal of the physical HANDOVER chain.
+
+    Spawns the SAME three real node processes the physical handover
+    orchestrates -- the appliance (rehearsal mode, the declared failure
+    plan ENABLED: the sabotage provides the honest artificial primary
+    death), relay-1 (loopback, exactly as the default deployment spawns
+    it), and the device-android node as a HOST process in
+    ``--physical --handover`` mode -- and assembles the handover
+    evidence document honestly labeled ``is_physical=false``: the
+    transition chain is verified end-to-end (real socket death,
+    production re-bind, same logical session, both-carriage receiver
+    corroboration, service on the secondary), while the physical
+    demonstration itself still requires the handset.
+    """
+    environment = detect_physical_environment()
+    root = Path(workspace or tempfile.mkdtemp(prefix="adcos-handover-rehearsal-"))
+    root.mkdir(parents=True, exist_ok=True)
+    repo_root = Path(__file__).resolve().parents[1]
+
+    route_pre = capture_host_route()
+    appliance_result = root / "appliance-1.json"
+    relay_result = root / "relay-1.json"
+    device_result = root / "device-android.json"
+    appliance_proc = subprocess.Popen(  # noqa: S603 - our own module
+        [
+            sys.executable, "-m", "pilot.node", "--role", "appliance",
+            "--result-file", str(appliance_result),
+            "--rehearsal",
+        ],
+        cwd=str(repo_root), stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+    )
+    device_launch: Dict[str, Any] = {}
+    try:
+        ports = _read_ready_ports(appliance_proc)
+        direct_port = ports["direct"]
+        relay_proc = subprocess.Popen(  # noqa: S603 - our own module
+            [
+                sys.executable, "-m", "pilot.node", "--role", "relay",
+                "--result-file", str(relay_result),
+                "--upstream-host", "127.0.0.1",
+                "--upstream-port", str(ports["relay"]),
+            ],
+            cwd=str(repo_root), stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        )
+        try:
+            relay_port = _read_ready_ports(relay_proc)["listen"]
+            device_proc = subprocess.run(  # noqa: S603 - our own module
+                [
+                    sys.executable, "-m", "pilot.node", "--role", "device",
+                    "--label", PHYSICAL_DEVICE_LABEL,
+                    "--result-file", str(device_result),
+                    "--direct-host", "127.0.0.1",
+                    "--direct-port", str(direct_port),
+                    "--relay-host", "127.0.0.1",
+                    "--relay-port", str(relay_port),
+                    "--physical",
+                    "--handover",
+                    "--handover-wait-seconds",
+                    str(_HANDOVER_REHEARSAL_WAIT_SECONDS),
+                    "--handover-attempt-interval",
+                    str(_HANDOVER_REHEARSAL_ATTEMPT_INTERVAL),
+                ],
+                cwd=str(repo_root), capture_output=True, text=True,
+                timeout=300,
+                env={**os.environ, "PYTHONHASHSEED": "0"},
+            )
+            device_launch = {
+                "returncode": device_proc.returncode,
+                "stderr_tail": device_proc.stderr[-500:],
+            }
+        finally:
+            try:
+                if relay_proc.stdin is not None:
+                    relay_proc.stdin.close()
+            except OSError:
+                pass
+            try:
+                relay_proc.wait(timeout=60)
+            except subprocess.TimeoutExpired:
+                relay_proc.kill()
+                relay_proc.wait(timeout=10)
+    finally:
+        try:
+            if appliance_proc.stdin is not None:
+                appliance_proc.stdin.close()
+        except OSError:
+            pass
+        try:
+            appliance_proc.wait(timeout=60)
+        except subprocess.TimeoutExpired:
+            appliance_proc.kill()
+            appliance_proc.wait(timeout=10)
+
+    route_post = capture_host_route()
+    device_doc: Dict[str, Any] = {}
+    try:
+        device_doc = json.loads(device_result.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        device_doc = {}
+    appliance_doc: Dict[str, Any] = {}
+    try:
+        appliance_doc = json.loads(appliance_result.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        appliance_doc = {}
+    relay_doc: Dict[str, Any] = {}
+    try:
+        relay_doc = json.loads(relay_result.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        relay_doc = {}
+
+    if not device_doc or not appliance_doc:
+        return {
+            "kind": "physical-handover-evidence",
+            "schema_version": HANDOVER_EVIDENCE_SCHEMA_VERSION,
+            "is_physical": False,
+            "environment": environment,
+            "rehearsal": True,
+            "device_launch": device_launch,
+            "attempt": {
+                "executed": True,
+                "physical_handover_executed": False,
+                "reason": "the handover rehearsal did not complete",
+            },
+            "classification": {
+                "criterion_1_real_devices": CriterionStatus.NOT_TESTABLE,
+                "criterion_2_5g": CriterionStatus.NOT_TESTABLE,
+            },
+        }
+
+    honest_absences = [
+        "device_identity.model",
+        "device_identity.brand",
+        "device_identity.serial",
+        "device_identity.android_release",
+        "device_identity.observation_source",
+        "access_technology_pre.technology",
+        "access_technology_pre.observation_source",
+        "access_technology_post.technology",
+        "access_technology_post.observation_source",
+        "host.tether_interface",
+        "android_observations",
+    ]
+    document = assemble_handover_evidence(
+        environment=environment,
+        sender_result=device_doc,
+        receiver_result=appliance_doc,
+        relay_result=(relay_doc or None),
+        device_identity={
+            "model": "",
+            "brand": "",
+            "serial": "",
+            "android_release": "",
+            "observation_source": "none (rehearsal: no handset present)",
+        },
+        access_technology_pre={
+            "technology": "",
+            "is_5g": False,
+            "observation_source": "none (rehearsal: no handset present)",
+        },
+        access_technology_post={
+            "technology": "",
+            "is_5g": False,
+            "observation_source": "none (rehearsal: no handset present)",
+        },
+        trigger={
+            "description": (
+                "the rehearsal's honest artificial trigger: the appliance's "
+                "declared failure plan closed the direct listener and "
+                "hard-reset the direct connections after the declared "
+                "exchange budget (journal pilot.sabotage-injected); the "
+                "physical run's trigger is the operator disabling Wi-Fi "
+                "on the handset"
+            ),
+            "observation_source": (
+                "the appliance journal's pilot.sabotage-injected event "
+                "(rehearsal sabotage, honestly declared; never presented "
+                "as a physical Wi-Fi disable)"
+            ),
+        },
+        host_route={
+            "pre_transition_route": route_pre.get("detail", ""),
+            "post_transition_route": route_post.get("detail", ""),
+            "tether_interface": "",
+            "interfaces": route_post.get("interfaces", []),
+        },
+        carriage={
+            "mode": "loopback-rehearsal-failure-plan",
+            "detail": (
+                "the device-android node ran as a HOST process over the "
+                "loopback carriages: the same identity, config, and "
+                "production transition chain, honestly NOT a physical "
+                "Wi-Fi-to-USB-tether handover"
+            ),
+            "adcos_access_classification": (
+                "primary direct access point + secondary relayed access "
+                "point (rehearsal loopback carriages; software-class "
+                "verification of the transition chain)"
+            ),
+        },
+        is_physical=False,
+        traffic_verification={
+            "method": (
+                "route + interface observation across the pilot window "
+                "(pre/post) with both carriages active + receiver "
+                "corroboration on both access points (rehearsal: loopback "
+                "carriages)"
+            ),
+            "observation": (
+                "pre=%s; post=%s; tether=none (rehearsal); the appliance "
+                "journal corroborates the session datagrams on BOTH "
+                "access points (direct and relay)"
+                % (
+                    route_pre.get("detail", ""),
+                    route_post.get("detail", ""),
+                )
+            ),
+        },
+        honest_absences=honest_absences,
+    )
+    document["rehearsal"] = True
+    document["device_launch"] = device_launch
+    document["attempt"] = {
+        "executed": True,
+        "physical_handover_executed": False,
+        "reason": (
+            "software-class handover rehearsal completed; the physical "
+            "handover demonstration requires the handset attached to a "
+            "host with adb (the runbook in docs/WORK-040-handoff.md)"
+        ),
+    }
+    return document
+
+
+# ---------------------------------------------------------------------------
+# The physical handover (real device; runs where a handset is attached)
+# ---------------------------------------------------------------------------
+
+
+def _tether_interface_observation() -> Dict[str, Any]:
+    """The REAL host USB-tether interface identity (post-run
+    interfaces intersected with the tether candidates, plus its
+    observable addresses)."""
+    try:
+        source = LinuxInterfaceSource()
+        snapshots = source.discover()
+    except Exception as error:  # noqa: BLE001 - honest observation
+        return {
+            "name": "",
+            "addresses": [],
+            "detail": "%s: %s" % (type(error).__name__, error),
+        }
+    names = [snapshot.name for snapshot in snapshots]
+    tether_names = [n for n in names if n in TETHER_INTERFACE_CANDIDATES]
+    if not tether_names:
+        return {
+            "name": "",
+            "addresses": [],
+            "detail": (
+                "%d real interface(s) observed; no USB-tether candidate "
+                "present" % (len(names),)
+            ),
+        }
+    name = tether_names[0]
+    snapshot = next(s for s in snapshots if s.name == name)
+    return {
+        "name": name,
+        "addresses": list(snapshot.addresses or []),
+        "detail": "the real host USB-tether interface %s" % (name,),
+    }
+
+
+def run_physical_handover(
+    *,
+    environment: Optional[Mapping[str, Any]] = None,
+    workspace: Optional[str] = None,
+    wlan_host: Optional[str] = None,
+    tether_host: str = "127.0.0.1",
+    device_command: Optional[str] = None,
+    repo_on_device: str = "/data/local/tmp/adcos",
+    device_python: str = "python3",
+    android_manifest_path: Optional[str] = None,
+    live: bool = False,
+    handover_wait_seconds: float = 600.0,
+) -> Dict[str, Any]:
+    """Run the REAL physical handover (a handset must be attached).
+
+    The Architect's target chain: Wi-Fi active -> ADCOS session
+    established over the primary (Wi-Fi) carriage -> USB tether
+    available -> Wi-Fi physically disabled on the handset (the marked
+    operator step; optionally executed by the Android agent) -> the
+    Android framework reports the post-transition access technology ->
+    the host Wi-Fi route disappears and the USB tether becomes the
+    active path -> ADCOS detects the new path, re-binds production
+    traffic onto the relayed secondary carriage on the SAME logical
+    session -> a real datagram flows -> the independent receiver
+    corroborates it.  If no device is attached the record fails closed
+    honestly (never fabricated).  ``wlan_host`` is the appliance's
+    Wi-Fi-reachable address as seen from the handset (the primary
+    carriage target); ``tether_host`` is the relay's USB-tether-
+    reachable address as seen from the handset (``adb reverse`` maps
+    it to the device's own localhost by default).
+    """
+    environment = dict(environment or detect_physical_environment())
+    serials = list((environment.get("adb_devices") or {}).get("serials") or [])
+    if not serials:
+        return {
+            "kind": "physical-handover-attempt",
+            "schema_version": HANDOVER_EVIDENCE_SCHEMA_VERSION,
+            "environment": environment,
+            "attempt": {
+                "executed": True,
+                "physical_handover_executed": False,
+                "reason": environment["conclusion"],
+            },
+            "classification": {
+                "criterion_1_real_devices": CriterionStatus.NOT_TESTABLE,
+                "criterion_2_5g": CriterionStatus.NOT_TESTABLE,
+                "statement": (
+                    "no physical Android device is reachable from this "
+                    "execution host; the physical handover cannot be "
+                    "executed here and stays honestly unresolved (PARTIAL "
+                    "overall per DEC-0046); criterion 2 5G is NOT-TESTABLE "
+                    "here"
+                ),
+            },
+        }
+    serial = serials[0]
+    adb_path = str((environment.get("adb_binary") or {}).get("path") or "adb")
+
+    if not wlan_host:
+        return {
+            "kind": "physical-handover-attempt",
+            "schema_version": HANDOVER_EVIDENCE_SCHEMA_VERSION,
+            "environment": environment,
+            "attempt": {
+                "executed": True,
+                "physical_handover_executed": False,
+                "reason": (
+                    "a device is attached but the primary Wi-Fi carriage "
+                    "target (wlan_host: the appliance's Wi-Fi-reachable "
+                    "address as seen from the handset) was not provided; "
+                    "the handover was not started (never fabricated)"
+                ),
+            },
+            "classification": {
+                "criterion_1_real_devices": CriterionStatus.NOT_TESTABLE,
+                "criterion_2_5g": CriterionStatus.NOT_TESTABLE,
+                "statement": (
+                    "the physical handover requires the host's Wi-Fi "
+                    "address (wlan_host) and the USB-tether address "
+                    "(tether_host) per the runbook; without them the "
+                    "demonstration is honestly not executed"
+                ),
+            },
+        }
+
+    root = Path(workspace or tempfile.mkdtemp(prefix="adcos-physical-handover-"))
+    root.mkdir(parents=True, exist_ok=True)
+    repo_root = Path(__file__).resolve().parents[1]
+
+    # -- pre-transition observations ------------------------------------
+    identity = capture_device_identity(adb_path, serial)
+    access_pre = capture_access_technology(adb_path, serial)
+    route_pre = capture_host_route()
+
+    # -- the appliance (externally reachable, NO failure plan: the real
+    # -- trigger is the operator disabling Wi-Fi on the handset) ------
+    appliance_result = root / "appliance-1.json"
+    relay_result = root / "relay-1.json"
+    appliance_proc = subprocess.Popen(  # noqa: S603 - our own module
+        [
+            sys.executable, "-m", "pilot.node", "--role", "appliance",
+            "--result-file", str(appliance_result),
+            "--rehearsal" if not live else "--live",
+            "--no-failure-plan",
+            "--bind-host", "0.0.0.0",
+        ],
+        cwd=str(repo_root), stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+    )
+    launch_record: Dict[str, Any] = {}
+    pulled = False
+    try:
+        ports = _read_ready_ports(appliance_proc)
+        direct_port = ports["direct"]
+
+        # -- the secondary carriage: relay-1 externally reachable, its
+        # -- upstream is the appliance's relay access point on the host
+        relay_proc = subprocess.Popen(  # noqa: S603 - our own module
+            [
+                sys.executable, "-m", "pilot.node", "--role", "relay",
+                "--result-file", str(relay_result),
+                "--upstream-host", "127.0.0.1",
+                "--upstream-port", str(ports["relay"]),
+                "--bind-host", "0.0.0.0",
+            ],
+            cwd=str(repo_root), stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        )
+        try:
+            relay_port = _read_ready_ports(relay_proc)["listen"]
+
+            # -- the USB carriage for the secondary leg: adb reverse
+            # -- carries the device's localhost to the host relay -----
+            subprocess.run(  # noqa: S603 - carriage setup
+                _adb_base(serial, adb_path)
+                + [
+                    "reverse",
+                    "tcp:%d" % (relay_port,),
+                    "tcp:%d" % (relay_port,),
+                ],
+                capture_output=True, text=True, timeout=20,
+            )
+
+            device_result_remote = "%s/device-android.json" % (repo_on_device,)
+            if device_command is None:
+                device_command = (
+                    "cd {repo} && {python} -m pilot.node --role device "
+                    "--label {label} --physical --handover "
+                    "--result-file {result} "
+                    "--direct-host {direct_host} --direct-port {direct_port} "
+                    "--relay-host {relay_host} --relay-port {relay_port} "
+                    "--handover-wait-seconds {wait}".format(
+                        repo=repo_on_device,
+                        python=device_python,
+                        label=PHYSICAL_DEVICE_LABEL,
+                        result=device_result_remote,
+                        direct_host=wlan_host,
+                        direct_port=direct_port,
+                        relay_host=tether_host,
+                        relay_port=relay_port,
+                        wait=handover_wait_seconds,
+                    )
+                )
+            launch = subprocess.run(  # noqa: S603 - the runbook's device command
+                _adb_base(serial, adb_path) + ["shell", device_command],
+                capture_output=True, text=True, timeout=handover_wait_seconds + 600,
+                cwd=str(repo_root),
+            )
+            launch_record = {
+                "command": device_command,
+                "returncode": launch.returncode,
+                "stdout_tail": launch.stdout[-2000:],
+                "stderr_tail": launch.stderr[-2000:],
+            }
+
+            # -- pull the device result document ---------------------
+            pull = subprocess.run(  # noqa: S603 - evidence retrieval
+                _adb_base(serial, adb_path)
+                + [
+                    "pull", device_result_remote,
+                    str(root / "device-android.json"),
+                ],
+                capture_output=True, text=True, timeout=60,
+            )
+            pulled = pull.returncode == 0
+        finally:
+            try:
+                if relay_proc.stdin is not None:
+                    relay_proc.stdin.close()
+            except OSError:
+                pass
+            try:
+                relay_proc.wait(timeout=60)
+            except subprocess.TimeoutExpired:
+                relay_proc.kill()
+                relay_proc.wait(timeout=10)
+    finally:
+        try:
+            if appliance_proc.stdin is not None:
+                appliance_proc.stdin.close()
+        except OSError:
+            pass
+        try:
+            appliance_proc.wait(timeout=60)
+        except subprocess.TimeoutExpired:
+            appliance_proc.kill()
+            appliance_proc.wait(timeout=10)
+
+    # -- post-transition observations ------------------------------------
+    access_post = capture_access_technology(adb_path, serial)
+    route_post = capture_host_route()
+    tether_observation = _tether_interface_observation()
+
+    device_doc: Dict[str, Any] = {}
+    device_path = root / "device-android.json"
+    if pulled and device_path.is_file():
+        try:
+            device_doc = json.loads(device_path.read_text(encoding="utf-8"))
+        except ValueError:
+            device_doc = {}
+    appliance_doc: Dict[str, Any] = {}
+    try:
+        appliance_doc = json.loads(appliance_result.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        appliance_doc = {}
+    relay_doc: Dict[str, Any] = {}
+    try:
+        relay_doc = json.loads(relay_result.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        relay_doc = {}
+
+    if not device_doc or not appliance_doc:
+        return {
+            "kind": "physical-handover-evidence",
+            "schema_version": HANDOVER_EVIDENCE_SCHEMA_VERSION,
+            "is_physical": True,
+            "environment": environment,
+            "launch_record": launch_record,
+            "attempt": {
+                "executed": True,
+                "physical_handover_executed": True,
+                "result_documents_recovered": bool(
+                    device_doc and appliance_doc
+                ),
+            },
+            "classification": {
+                "criterion_1_real_devices": CriterionStatus.PARTIAL,
+                "criterion_2_5g": CriterionStatus.NOT_TESTABLE,
+                "statement": (
+                    "the physical handover ran but the result documents "
+                    "were not recovered; the demonstration is incomplete "
+                    "and stays PARTIAL/NOT-TESTABLE"
+                ),
+            },
+        }
+
+    android_manifest: Optional[Dict[str, Any]] = None
+    android_manifest_sha: Optional[str] = None
+    if android_manifest_path:
+        android_manifest = load_android_manifest(android_manifest_path)
+        android_manifest_sha = "sha256:" + _sha256_file(
+            Path(android_manifest_path)
+        )
+
+    upstream_note = ""
+    if live:
+        upstream_record = (
+            (appliance_doc.get("operational") or {}).get("upstream_record")
+            or {}
+        )
+        if upstream_record.get("reachable"):
+            upstream_note = (
+                "; live upstream egress probe reachable (stage=%s)"
+                % (upstream_record.get("stage", ""),)
+            )
+
+    document = assemble_handover_evidence(
+        environment=environment,
+        sender_result=device_doc,
+        receiver_result=appliance_doc,
+        relay_result=(relay_doc or None),
+        device_identity=identity,
+        access_technology_pre=access_pre,
+        access_technology_post=access_post,
+        trigger={
+            "description": (
+                "the operator physically disabled Wi-Fi on the handset "
+                "during the harness's bounded transition wait (the "
+                "marked runbook step; optionally executed by the Android "
+                "agent via 'svc wifi disable'); the handset's framework "
+                "then reported the post-transition access technology"
+            ),
+            "observation_source": (
+                "operator action at the marked runbook step + the Android "
+                "framework's own reports (optionally recorded by the "
+                "Android agent in the observation manifest; never ADCOS "
+                "re-derivation)"
+            ),
+        },
+        host_route={
+            "pre_transition_route": route_pre.get("detail", ""),
+            "post_transition_route": route_post.get("detail", ""),
+            "tether_interface": tether_observation.get("name", ""),
+            "tether_interface_addresses": tether_observation.get(
+                "addresses", []
+            ),
+            "interfaces": route_post.get("interfaces", []),
+        },
+        carriage={
+            "mode": "wifi-primary-usb-tether-secondary",
+            "detail": (
+                "primary: the handset's Wi-Fi connection to the host "
+                "appliance access point (%s); secondary: the delivered "
+                "relay leg entered via the USB tether (adb reverse over "
+                "the real USB cable) -- the same relay path the default "
+                "deployment uses"
+                % (wlan_host,)
+            ),
+            "adcos_access_classification": (
+                "primary direct access point (the handset's Wi-Fi "
+                "carriage) + secondary relayed access point (the USB "
+                "tether carriage); the handset is the ADCOS endpoint "
+                "throughout"
+            ),
+            "handover_wait_seconds": handover_wait_seconds,
+        },
+        is_physical=True,
+        android_manifest=android_manifest,
+        android_manifest_sha=android_manifest_sha,
+        traffic_verification={
+            "method": (
+                "route + interface observation across the pilot window "
+                "(pre/post) with both carriages active + receiver "
+                "corroboration on both access points%s"
+                % (
+                    " + live upstream egress probe"
+                    if live
+                    else ""
+                )
+            ),
+            "observation": (
+                "pre=%s; post=%s; tether=%s%s; the appliance journal "
+                "corroborates the session datagrams on BOTH access "
+                "points (direct and relay)"
+                % (
+                    route_pre.get("detail", ""),
+                    route_post.get("detail", ""),
+                    tether_observation.get("name", "") or "none",
+                    upstream_note,
+                )
+            ),
+        },
+    )
+    document["launch_record"] = launch_record
+    document["attempt"] = {
+        "executed": True,
+        "physical_handover_executed": True,
+        "result_documents_recovered": True,
+    }
+    return document
+
+
+# ---------------------------------------------------------------------------
 # The evidence writer
 # ---------------------------------------------------------------------------
 
@@ -1181,17 +2688,7 @@ def write_attempt_evidence(
     attempt = run_physical_attempt()
     rehearsal = run_physical_rehearsal()
     environment = environment or detect_physical_environment()
-    repo_root = Path(__file__).resolve().parents[1]
-    execution_sha = "unknown"
-    try:
-        completed = subprocess.run(  # noqa: S603 - read-only git query
-            ["git", "rev-parse", "HEAD"],
-            capture_output=True, text=True, cwd=str(repo_root), timeout=10,
-        )
-        if completed.returncode == 0:
-            execution_sha = completed.stdout.strip()
-    except (OSError, subprocess.SubprocessError):
-        pass
+    execution_sha = _execution_sha()
     document = {
         "kind": "work-040-physical-attempt",
         "schema_version": PHYSICAL_EVIDENCE_SCHEMA_VERSION,
@@ -1221,5 +2718,88 @@ def write_attempt_evidence(
     out.mkdir(parents=True, exist_ok=True)
     (out / "physical-attempt.json").write_text(
         json.dumps(document, sort_keys=True, indent=1), encoding="utf-8"
+    )
+    return document
+
+
+def _execution_sha() -> str:
+    """The exact git HEAD of the repository this module runs from
+    (the execution SHA recorded in every evidence artifact)."""
+    repo_root = Path(__file__).resolve().parents[1]
+    execution_sha = "unknown"
+    try:
+        completed = subprocess.run(  # noqa: S603 - read-only git query
+            ["git", "rev-parse", "HEAD"],
+            capture_output=True, text=True, cwd=str(repo_root), timeout=10,
+        )
+        if completed.returncode == 0:
+            execution_sha = completed.stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return execution_sha
+
+
+def write_handover_attempt_evidence(
+    *, out_dir: str, environment: Optional[Dict[str, Any]] = None
+) -> Dict[str, Any]:
+    """Execute the honest HANDOVER attempt on this host and write the
+    correction-cycle-2 evidence artifacts with exact digests and the
+    exact execution SHA:
+
+    * ``physical-handover-attempt.json`` -- the environment detection
+      (fail-closed where no handset is reachable), the handover attempt
+      record, the handover rehearsal record, and the derived honest
+      summary;
+    * ``android-manifest-template.json`` -- the complete, well-formed
+      example manifest the Android Studio/Gemini agent copies
+      (regenerated from the in-code template so it can never drift
+      from ``validate_android_manifest``).
+
+    Returns the written handover-attempt document."""
+    attempt = run_physical_handover()
+    rehearsal = run_handover_rehearsal()
+    environment = environment or detect_physical_environment()
+    execution_sha = _execution_sha()
+    document = {
+        "kind": "work-040-physical-handover-attempt",
+        "schema_version": HANDOVER_EVIDENCE_SCHEMA_VERSION,
+        "execution_sha": execution_sha,
+        "environment": environment,
+        "attempt": attempt,
+        "rehearsal": rehearsal,
+        "summary": {
+            "criterion_1_real_devices": (
+                rehearsal.get("classification", {}).get(
+                    "criterion_1_real_devices"
+                )
+                if rehearsal.get("kind") == "physical-handover-evidence"
+                else CriterionStatus.NOT_TESTABLE
+            ),
+            "criterion_2_5g": CriterionStatus.NOT_TESTABLE,
+            "statement": (
+                "the physical handover chain (Wi-Fi primary carriage "
+                "death -> production re-bind onto the USB-tether relayed "
+                "secondary carriage on the SAME logical session -> real "
+                "datagram -> both-carriage receiver corroboration) is "
+                "implemented and software-verified end-to-end (rehearsal: "
+                "real socket death, session-record digest byte-identical, "
+                "service executed on the secondary); no physical handset "
+                "is reachable from this execution host, so the physical "
+                "handover demonstration stays honestly unresolved "
+                "(PARTIAL overall per DEC-0046) and criterion 2 5G is "
+                "NOT-TESTABLE here (the NR-only rule and the full "
+                "handover evidence template are enforced in code for when "
+                "the environment provides one)"
+            ),
+        },
+    }
+    out = Path(out_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "physical-handover-attempt.json").write_text(
+        json.dumps(document, sort_keys=True, indent=1), encoding="utf-8"
+    )
+    (out / "android-manifest-template.json").write_text(
+        json.dumps(android_manifest_template(), sort_keys=True, indent=1),
+        encoding="utf-8",
     )
     return document

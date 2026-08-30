@@ -16,6 +16,19 @@ The battery proves the pilot family's own discipline:
 - the structural anti-promotion rules (the 5G criterion can never be
   closed by software/operational evidence, in the model AND at the
   evidence surface);
+- the WORK-040 correction cycle's physical participation path
+  (cases 21-25) and its second cycle's physical HANDOVER experiment
+  + the Android-agent manifest interface (cases 26-28): the handover
+  rehearsal runs THREE real processes (appliance with the declared
+  failure plan, relay-1, the device-android node in --physical
+  --handover mode) and proves the full transition chain honestly
+  (real socket death, production re-bind, SAME logical session,
+  both-carriage receiver corroboration); the frozen handover evidence
+  template is asserted exactly; the anti-promotion negatives never
+  promote a rehearsal or LTE to a physical PASS; the Android-agent
+  observation manifest loads, validates, binds by file SHA-256, and
+  cross-corroborates (serial + post-technology agreement) -- never
+  duplicating the Android platform authority in Python;
 - no second authority, no secrets in evidence, frozen API, frozen
   spec, the sanctioned PR-delta shape, and the CI wiring.
 """
@@ -1444,13 +1457,36 @@ def case_21_physical_topology_extension(results: List[Result]) -> None:
         problems.append("the physical extension is not declared exactly")
     if ext_nodes and ext_nodes[0].get("role") != "device":
         problems.append("the physical extension is not a device-class node")
+    # correction cycle 2: the TWO-path physical extension (the original
+    # physical-access path byte-stable + the handover scenario's
+    # secondary USB-tether relayed path)
     ext_paths = extension.get("paths") or []
-    if len(ext_paths) != 1 or ext_paths[0].get("kind") != "physical":
-        problems.append("the physical-access path is not declared")
+    if len(ext_paths) != 2:
+        problems.append(
+            "the physical extension paths are not exactly two: %s"
+            % ([p.get("path_label") for p in ext_paths],)
+        )
+    if ext_paths and ext_paths[0].get("path_label") != "physical-access":
+        problems.append("the original physical-access path is not first")
     if ext_paths and list(ext_paths[0].get("hops") or []) != [
         "device-android", "appliance-1"
     ]:
         problems.append("the physical path hops are wrong")
+    if len(ext_paths) < 2:
+        problems.append("the secondary physical path is not declared")
+    else:
+        second = ext_paths[1]
+        if second.get("path_label") != "physical-access-secondary":
+            problems.append(
+                "the secondary path label is %r"
+                % (second.get("path_label"),)
+            )
+        if second.get("kind") != "physical":
+            problems.append("the secondary path is not kind 'physical'")
+        if list(second.get("hops") or []) != [
+            "device-android", "relay-1", "appliance-1"
+        ]:
+            problems.append("the secondary path hops are wrong")
     all_ids = pilot_topology.participant_ids()
     if len(all_ids) != 5 or len(set(all_ids.values())) != 5:
         problems.append("participant identities are not 5 distinct ids")
@@ -1458,7 +1494,8 @@ def case_21_physical_topology_extension(results: List[Result]) -> None:
         problems.append("the physical participant has no identity")
     # the physical participant's config: the DIRECT physical view (no
     # relay claims) and the REAL interface source (never the declared
-    # static view of the rehearsal devices)
+    # static view of the rehearsal devices); handover=True ADDS the
+    # relay-leg view the handover scenario genuinely uses
     config = pilot_topology.device_config(
         "device-android",
         relay_id=all_ids["relay-1"],
@@ -1469,6 +1506,21 @@ def case_21_physical_topology_extension(results: List[Result]) -> None:
     ]
     if any(all_ids["relay-1"] in s for s in subjects):
         problems.append("the physical view claims relay links it does not use")
+    handover_config = pilot_topology.device_config(
+        "device-android",
+        relay_id=all_ids["relay-1"],
+        appliance_id=all_ids["appliance-1"],
+        handover=True,
+    )
+    handover_subjects = [
+        str(claim.subject) for claim in handover_config.topology_claims
+    ]
+    if not any(all_ids["relay-1"] in s for s in handover_subjects):
+        problems.append(
+            "the handover view omits the relay leg it genuinely uses"
+        )
+    if len(handover_config.link_metrics) != 2:
+        problems.append("the handover view omits the relay-leg metric")
     source = pilot_topology.device_interface_source("device-android")
     from agent import LinuxInterfaceSource
 
@@ -1485,9 +1537,12 @@ def case_21_physical_topology_extension(results: List[Result]) -> None:
         results.append(fail(name, "; ".join(problems)))
         return
     results.append(ok(
-        name, "physical extension declared (device-android, physical-access "
-              "path); core topology byte-stable; the participant reads its "
-              "REAL interfaces through the production source",
+        name, "physical extension declared (device-android, the two-path "
+              "physical-access/physical-access-secondary extension); core "
+              "topology byte-stable; the plain view claims NO relay links "
+              "while the handover view declares the relay leg it genuinely "
+              "uses; the participant reads its REAL interfaces through the "
+              "production source",
     ))
 
 
@@ -1832,6 +1887,544 @@ def case_25_physical_harness_rehearsal(results: List[Result]) -> None:
 
 
 # ---------------------------------------------------------------------------
+# 26-28: the WORK-040 correction cycle's second round (the physical
+# handover experiment + the Android-agent manifest interface)
+# ---------------------------------------------------------------------------
+
+
+def case_26_handover_rehearsal(results: List[Result]) -> None:
+    name = "case_26_handover_rehearsal"
+    problems: List[str] = []
+    document = pilot_physical.run_handover_rehearsal()
+    if document.get("kind") != "physical-handover-evidence":
+        problems.append(
+            "the handover rehearsal produced no evidence document (%r)"
+            % (document.get("kind"),)
+        )
+        results.append(fail(name, "; ".join(problems)))
+        return
+    if document.get("is_physical") is not False:
+        problems.append("the handover rehearsal is not honestly labeled")
+    session_id = document.get("adcos", {}).get("session_id")
+    if not session_id:
+        problems.append("no session id in the handover evidence")
+    sender = document.get("adcos", {}).get("sender_result") or {}
+    events = sender.get("events") or []
+
+    def _has(kind: str, predicate=None) -> bool:
+        return any(
+            event.get("kind") == kind
+            and (predicate is None or predicate(event.get("payload") or {}))
+            for event in events
+        )
+
+    if not _has(
+        "pilot.session-bound",
+        lambda p: p.get("session_id") == session_id
+        and p.get("carriage") == "physical-access",
+    ):
+        problems.append("the primary bind event (physical-access) is missing")
+    for kind in (
+        "pilot.link-loss-observed",
+        "pilot.probe-reported",
+        "pilot.path-status-changed",
+        "pilot.session-reconnecting",
+        "pilot.failover-completed",
+    ):
+        if not _has(kind):
+            problems.append("the sender journal omits %s" % (kind,))
+    if not _has(
+        "pilot.session-rebound",
+        lambda p: p.get("session_id") == session_id
+        and p.get("carriage") == "physical-access-secondary",
+    ):
+        problems.append(
+            "the rebind event does not carry the SAME session id over the "
+            "physical-access-secondary carriage"
+        )
+    checks = {check.get("label"): check.get("ok") for check in sender.get("checks") or []}
+    if not checks.get("device-android-handover-observed-real-loss"):
+        problems.append("the real primary-path loss was not observed")
+    if not checks.get("device-android-session-continuity"):
+        problems.append("the session continuity check failed")
+    if not checks.get("device-android-handover-service-executed"):
+        problems.append("the service was not executed on the secondary")
+    if not checks.get("device-android-real-interfaces-observed"):
+        problems.append("the real interfaces were not re-observed")
+    receiver = document.get("adcos", {}).get("receiver_result") or {}
+    receiver_events = receiver.get("events") or []
+    announced = {
+        (event.get("payload") or {}).get("access_point")
+        for event in receiver_events
+        if event.get("kind") == "pilot.discovery-received"
+        and (event.get("payload") or {}).get("peer_label") == "device-android"
+    }
+    if announced != {"direct", "relay"}:
+        problems.append(
+            "the appliance did not accept the participant announce on BOTH "
+            "access points (got %s)" % (sorted(announced),)
+        )
+    carriages = {
+        (event.get("payload") or {}).get("carriage")
+        for event in receiver_events
+        if event.get("kind") == "pilot.datagram-received"
+        and (event.get("payload") or {}).get("session_id") == session_id
+    }
+    if carriages != {"direct", "relay"}:
+        problems.append(
+            "the receiver journal does not corroborate datagrams on BOTH "
+            "access points (got %s)" % (sorted(carriages),)
+        )
+    if not any(
+        event.get("kind") == "pilot.sabotage-injected"
+        for event in receiver_events
+    ):
+        problems.append(
+            "the rehearsal's honest artificial trigger (the declared "
+            "failure plan) is not journaled by the receiver"
+        )
+    cls = document.get("classification") or {}
+    if cls.get("validation_ok") is not True:
+        problems.append(
+            "the handover rehearsal evidence does not validate: %s"
+            % (cls.get("validation_problems"),)
+        )
+    if cls.get("criterion_1_real_devices") != CriterionStatus.PARTIAL:
+        problems.append("the handover rehearsal is not honestly PARTIAL")
+    if cls.get("criterion_2_5g") != CriterionStatus.NOT_TESTABLE:
+        problems.append("the handover rehearsal 5G status is not NOT-TESTABLE")
+    if not document.get("honest_absences"):
+        problems.append("the rehearsal records no honest absences")
+    if document.get("adcos", {}).get("session_continuity") is not True:
+        problems.append("the session-record continuity fact is missing")
+    if not str(document.get("adcos", {}).get("payload_digest", "")).startswith(
+        "sha256:"
+    ):
+        problems.append("the post-rebind payload digest is missing")
+    if problems:
+        results.append(fail(name, "; ".join(problems)))
+        return
+    results.append(ok(
+        name, "the handover chain works end-to-end over three real processes "
+              "(real socket death on the primary, production re-bind onto "
+              "the secondary relayed carriage, SAME session id, "
+              "session-record digest stable, service executed on the "
+              "secondary, receiver corroboration on BOTH access points) and "
+              "is honestly classified PARTIAL/NOT-TESTABLE (is_physical=false)",
+    ))
+
+
+def _synthetic_handover_document() -> dict:
+    """A complete, well-formed SYNTHETIC physical handover document (the
+    template's structural checks; every field explicitly present)."""
+    session_id = "sha256:" + "c" * 64
+    payload_digest = "sha256:" + "e" * 64
+    node_id = pilot_topology.node_identity_for("device-android").node_id.text
+    sender_result = {
+        "label": "device-android",
+        "node_id": node_id,
+        "events": [
+            {"kind": "pilot.session-bound",
+             "payload": {"session_id": session_id,
+                         "carriage": "physical-access"}},
+            {"kind": "pilot.session-rebound",
+             "payload": {"session_id": session_id,
+                         "carriage": "physical-access-secondary"}},
+        ],
+        "checks": [
+            {"label": "device-android-session-continuity", "ok": True},
+        ],
+        "observations": {
+            "session": {
+                "session_id": session_id,
+                "state": "ESTABLISHED",
+                "record_digest": "sha256:" + "d" * 64,
+                "record_digest_before_transition": "sha256:" + "d" * 64,
+            },
+            "handover": {
+                "transition_payload_digest": payload_digest,
+                "session_record_stable": True,
+            },
+            "service": {"verdict": "executed", "response_matches": True},
+        },
+    }
+    receiver_result = {
+        "label": "appliance-1",
+        "node_id": pilot_topology.node_identity_for(
+            "appliance-1"
+        ).node_id.text,
+        "events": [
+            {"kind": "pilot.discovery-received",
+             "payload": {"peer_label": "device-android",
+                         "access_point": "direct"}},
+            {"kind": "pilot.datagram-received",
+             "payload": {"session_id": session_id, "carriage": "direct"}},
+            {"kind": "pilot.datagram-received",
+             "payload": {"session_id": session_id, "carriage": "relay"}},
+        ],
+        "checks": [],
+    }
+    return {
+        "kind": "physical-handover-evidence",
+        "schema_version": pilot_physical.HANDOVER_EVIDENCE_SCHEMA_VERSION,
+        "is_physical": True,
+        "device_identity": {
+            "model": "m", "brand": "b", "serial": "s",
+            "android_release": "15", "observation_source": "adb getprop",
+        },
+        "access_technology_pre": {
+            "technology": "lte", "is_5g": False,
+            "observation_source": "dumpsys telephony.registry",
+        },
+        "access_technology_post": {
+            "technology": "nr", "is_5g": True,
+            "observation_source": "dumpsys telephony.registry",
+        },
+        "trigger": {
+            "description": "Wi-Fi disabled on the handset at the marked step",
+            "observation_source": "operator action + the agent's record",
+        },
+        "host": {
+            "pre_transition_route": "default via 1.2.3.4 dev wlan0",
+            "post_transition_route": "default via 5.6.7.8 dev usb0",
+            "tether_interface": "usb0",
+        },
+        "adcos": {
+            "access_classification": "primary direct + secondary relayed",
+            "device_node_id": node_id,
+            "session_id": session_id,
+            "bind_event": {"session_id": session_id,
+                           "carriage": "physical-access"},
+            "rebind_event": {"session_id": session_id,
+                             "carriage": "physical-access-secondary"},
+            "sender_result": sender_result,
+            "receiver_result": receiver_result,
+            "payload_digest": payload_digest,
+            "session_continuity": True,
+        },
+        "traffic_verification": {
+            "method": "route + interface observation across the pilot window",
+            "observation": "pre=wlan0; post=usb0; both carriages corroborated",
+        },
+        "verification": {
+            "validator_sha": pilot_physical.validator_sha(),
+            "artifact_hashes": [["a", "sha256:" + "0" * 64]],
+        },
+        "classification": {},
+    }
+
+
+def case_27_handover_evidence_template(results: List[Result]) -> None:
+    name = "case_27_handover_evidence_template"
+    problems: List[str] = []
+    required = tuple(
+        field for field, _why in pilot_physical.HANDOVER_EVIDENCE_REQUIRED
+    )
+    expected_fields = (
+        "device_identity.model",
+        "device_identity.brand",
+        "device_identity.serial",
+        "device_identity.android_release",
+        "device_identity.observation_source",
+        "access_technology_pre.technology",
+        "access_technology_pre.observation_source",
+        "access_technology_post.technology",
+        "access_technology_post.observation_source",
+        "trigger.description",
+        "trigger.observation_source",
+        "host.pre_transition_route",
+        "host.post_transition_route",
+        "host.tether_interface",
+        "adcos.access_classification",
+        "adcos.device_node_id",
+        "adcos.session_id",
+        "adcos.bind_event",
+        "adcos.rebind_event",
+        "adcos.sender_result",
+        "adcos.receiver_result",
+        "adcos.payload_digest",
+        "adcos.session_continuity",
+        "traffic_verification.method",
+        "traffic_verification.observation",
+        "verification.validator_sha",
+        "verification.artifact_hashes",
+    )
+    if required != expected_fields:
+        problems.append("the required template drifted from the frozen list")
+    base = _synthetic_handover_document()
+    ok_base, base_problems = pilot_physical.validate_handover_evidence(base)
+    if not ok_base:
+        problems.append(
+            "a complete well-formed document fails validation: %s"
+            % (base_problems[:3],)
+        )
+    elif pilot_physical.classify_handover_participation(base) != CriterionStatus.PASS:
+        problems.append("the derived classifier does not PASS a complete document")
+    elif pilot_physical.classify_handover_five_g(base) != CriterionStatus.PASS:
+        problems.append("the derived classifier does not PASS a complete NR chain")
+    for field in expected_fields:
+        mutated = json.loads(json.dumps(base))
+        node = mutated
+        parts = field.split(".")
+        for part in parts[:-1]:
+            node = node[part]
+        node[parts[-1]] = None
+        ok_mutated, _ = pilot_physical.validate_handover_evidence(mutated)
+        if ok_mutated:
+            problems.append("missing %r still validates" % (field,))
+            break
+
+    def _rejected(mutated: dict, why: str) -> None:
+        ok_mutated, _ = pilot_physical.validate_handover_evidence(mutated)
+        if ok_mutated:
+            problems.append(why)
+
+    # (a) a rehearsal relabeled as a criterion-1 PASS
+    promoted = json.loads(json.dumps(base))
+    promoted["is_physical"] = False
+    promoted["classification"]["criterion_1_real_devices"] = (
+        CriterionStatus.PASS
+    )
+    _rejected(promoted, "a rehearsal criterion-1 PASS is not rejected")
+
+    # (b) is_physical=false + NR + full route/traffic evidence relabeled
+    #     as a criterion-2 PASS
+    nr_promoted = json.loads(json.dumps(base))
+    nr_promoted["is_physical"] = False
+    nr_promoted["classification"]["criterion_2_5g"] = CriterionStatus.PASS
+    _rejected(nr_promoted, "a non-physical criterion-2 PASS is not rejected")
+
+    # (c) LTE relabeled as 5G
+    lte = json.loads(json.dumps(base))
+    lte["access_technology_post"] = {
+        "technology": "lte", "is_5g": True,
+        "observation_source": "dumpsys telephony.registry",
+    }
+    _rejected(lte, "LTE relabeled is_5g=true is not rejected")
+
+    # (d) session continuity broken while criterion 1 is PASS
+    broken = json.loads(json.dumps(base))
+    broken["adcos"]["session_continuity"] = False
+    broken["classification"]["criterion_1_real_devices"] = (
+        CriterionStatus.PASS
+    )
+    _rejected(broken, "a broken session with a criterion-1 PASS is not rejected")
+
+    # (e) a malformed payload digest
+    no_digest = json.loads(json.dumps(base))
+    no_digest["adcos"]["payload_digest"] = "not-a-digest"
+    _rejected(no_digest, "a malformed payload digest is not rejected")
+
+    # (f) no independent receiver corroboration
+    one_sided = json.loads(json.dumps(base))
+    one_sided["adcos"]["receiver_result"]["events"] = []
+    _rejected(one_sided, "missing receiver corroboration is not rejected")
+
+    # (g) the derived classifiers never promote a rehearsal
+    rehearsal = pilot_physical.run_handover_rehearsal()
+    if pilot_physical.classify_handover_participation(rehearsal) not in (
+        CriterionStatus.PARTIAL, CriterionStatus.NOT_TESTABLE
+    ):
+        problems.append("the derived classifier promotes a handover rehearsal")
+    if pilot_physical.classify_handover_five_g(rehearsal) != (
+        CriterionStatus.NOT_TESTABLE
+    ):
+        problems.append("the derived classifier promotes 5G from a rehearsal")
+    if problems:
+        results.append(fail(name, "; ".join(problems)))
+        return
+    results.append(ok(
+        name, "the frozen handover template covers every required field "
+              "(%d); removing ANY field fails validation; rehearsal PASS, "
+              "non-physical 5G PASS, LTE->5G, broken continuity, malformed "
+              "digests, and one-sided evidence all fail closed"
+              % (len(required),),
+    ))
+
+
+def case_28_android_manifest(results: List[Result]) -> None:
+    name = "case_28_android_manifest"
+    problems: List[str] = []
+    template = pilot_physical.android_manifest_template()
+    ok_template, template_problems = pilot_physical.validate_android_manifest(
+        template
+    )
+    if not ok_template:
+        problems.append(
+            "the template manifest does not validate: %s"
+            % (template_problems[:3],)
+        )
+
+    # the file round trip: write, load, validate
+    import hashlib
+    import tempfile as _tempfile
+
+    with _tempfile.NamedTemporaryFile(
+        "w", suffix=".json", delete=False
+    ) as handle:
+        json.dump(template, handle)
+        template_path = handle.name
+    try:
+        loaded = pilot_physical.load_android_manifest(template_path)
+        ok_loaded, _loaded_problems = (
+            pilot_physical.validate_android_manifest(loaded)
+        )
+        if not ok_loaded:
+            problems.append("the loaded template manifest does not validate")
+        file_sha = "sha256:" + hashlib.sha256(
+            open(template_path, "rb").read()
+        ).hexdigest()
+    finally:
+        os.unlink(template_path)
+
+    # a real-observation manifest built on the template, bound into a
+    # handover document by its file SHA-256
+    manifest = json.loads(json.dumps(template))
+    manifest.pop("template", None)
+    manifest.pop("usage", None)
+    manifest["device_identity"]["serial"] = "s"
+    manifest["apk"] = {
+        "name": "android-agent.apk",
+        "sha256": "sha256:" + "9" * 64,
+    }
+    with _tempfile.NamedTemporaryFile(
+        "w", suffix=".json", delete=False
+    ) as handle:
+        json.dump(manifest, handle)
+        manifest_path = handle.name
+    try:
+        bound_manifest = pilot_physical.load_android_manifest(manifest_path)
+        bound_sha = "sha256:" + hashlib.sha256(
+            open(manifest_path, "rb").read()
+        ).hexdigest()
+    finally:
+        os.unlink(manifest_path)
+
+    base = _synthetic_handover_document()
+    bound = pilot_physical.assemble_handover_evidence(
+        environment={"kind": "physical-environment-detection"},
+        sender_result=base["adcos"]["sender_result"],
+        receiver_result=base["adcos"]["receiver_result"],
+        device_identity=base["device_identity"],
+        access_technology_pre=base["access_technology_pre"],
+        access_technology_post=base["access_technology_post"],
+        trigger=base["trigger"],
+        host_route=base["host"],
+        carriage={
+            "mode": "wifi-primary-usb-tether-secondary",
+            "adcos_access_classification": "primary + secondary",
+        },
+        is_physical=True,
+        android_manifest=bound_manifest,
+        android_manifest_sha=bound_sha,
+        traffic_verification=base["traffic_verification"],
+    )
+    hashes = [tuple(entry) for entry in bound["verification"]["artifact_hashes"]]
+    if ("android-manifest", bound_sha) not in hashes:
+        problems.append("the manifest file sha is not bound in artifact_hashes")
+    android_obs = bound.get("android_observations") or {}
+    if android_obs.get("manifest_file_sha256") != bound_sha:
+        problems.append("the bound manifest sha is not recorded")
+    if android_obs.get("apk_sha256") != "sha256:" + "9" * 64:
+        problems.append("the apk sha256 is not recorded when present")
+    ok_bound, bound_problems = pilot_physical.validate_handover_evidence(bound)
+    if not ok_bound:
+        problems.append(
+            "a document with a properly bound manifest fails validation: %s"
+            % (bound_problems[:3],)
+        )
+
+    # negatives: each FAILS closed
+    # (a) a missing required field
+    missing = json.loads(json.dumps(manifest))
+    del missing["usb_tether"]
+    if pilot_physical.validate_android_manifest(missing)[0]:
+        problems.append("a manifest missing usb_tether validates")
+
+    # (b) is_5g=true with post technology lte
+    lte = json.loads(json.dumps(manifest))
+    lte["network_technology"]["post"] = "lte"
+    if pilot_physical.validate_android_manifest(lte)[0]:
+        problems.append("a manifest with LTE relabeled is_5g=true validates")
+
+    # (c) the serial mismatch vs the ADCOS-side observed serial
+    mismatch = json.loads(json.dumps(manifest))
+    mismatch["device_identity"]["serial"] = "a-different-serial"
+    with _tempfile.NamedTemporaryFile(
+        "w", suffix=".json", delete=False
+    ) as handle:
+        json.dump(mismatch, handle)
+        mismatch_path = handle.name
+    try:
+        mismatch_manifest = pilot_physical.load_android_manifest(mismatch_path)
+        mismatch_sha = "sha256:" + hashlib.sha256(
+            open(mismatch_path, "rb").read()
+        ).hexdigest()
+    finally:
+        os.unlink(mismatch_path)
+    mismatched = pilot_physical.assemble_handover_evidence(
+        environment={"kind": "physical-environment-detection"},
+        sender_result=base["adcos"]["sender_result"],
+        receiver_result=base["adcos"]["receiver_result"],
+        device_identity=base["device_identity"],
+        access_technology_pre=base["access_technology_pre"],
+        access_technology_post=base["access_technology_post"],
+        trigger=base["trigger"],
+        host_route=base["host"],
+        carriage={
+            "mode": "wifi-primary-usb-tether-secondary",
+            "adcos_access_classification": "primary + secondary",
+        },
+        is_physical=True,
+        android_manifest=mismatch_manifest,
+        android_manifest_sha=mismatch_sha,
+        traffic_verification=base["traffic_verification"],
+    )
+    ok_mismatch, mismatch_problems = (
+        pilot_physical.validate_handover_evidence(mismatched)
+    )
+    if ok_mismatch or not any(
+        "serial" in p for p in mismatch_problems
+    ):
+        problems.append("a serial mismatch against the ADCOS side is not rejected")
+
+    # (d) a malformed apk sha256
+    bad_apk = json.loads(json.dumps(manifest))
+    bad_apk["apk"]["sha256"] = "not-a-digest"
+    if pilot_physical.validate_android_manifest(bad_apk)[0]:
+        problems.append("a manifest with a malformed apk sha256 validates")
+
+    # (e) the raw template's placeholder serial can never bind (the
+    #     cross-corroboration rejects it)
+    template_bound = json.loads(json.dumps(base))
+    template_bound["android_observations"] = {
+        "manifest": template,
+        "manifest_file_sha256": file_sha,
+    }
+    template_bound["verification"]["artifact_hashes"].append(
+        ["android-manifest", file_sha]
+    )
+    ok_template_bound, template_bound_problems = (
+        pilot_physical.validate_handover_evidence(template_bound)
+    )
+    if ok_template_bound or not any(
+        "serial" in p for p in template_bound_problems
+    ):
+        problems.append("the raw template's placeholder serial binds")
+    if problems:
+        results.append(fail(name, "; ".join(problems)))
+        return
+    results.append(ok(
+        name, "the Android-agent manifest interface works end-to-end: the "
+              "template loads and validates, a real-observation manifest "
+              "binds by file SHA-256 into artifact_hashes (apk sha recorded "
+              "when present), and missing fields, LTE->5G, serial "
+              "mismatches, malformed apk digests, and the raw template's "
+              "placeholders all fail closed",
+    ))
+
+
+# ---------------------------------------------------------------------------
 # main
 # ---------------------------------------------------------------------------
 
@@ -1862,6 +2455,9 @@ CASES = [
     case_23_physical_evidence_template,
     case_24_physical_anti_promotion,
     case_25_physical_harness_rehearsal,
+    case_26_handover_rehearsal,
+    case_27_handover_evidence_template,
+    case_28_android_manifest,
 ]
 
 
