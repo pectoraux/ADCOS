@@ -1,10 +1,11 @@
 # ADCOS execution state — persisted by the Architect.
 #
-# Reconciled after the PR #60 merge: the WORK-040 correction cycle is now
-# authorized repository-locally (DEC-0046 / WORK-040-CORRECTION-001, baseline
-# 93efa54f). The frozen mode vocabulary is implementing/awaiting-architect-
-# decisions; the correction-only qualifier of this authorization is carried
-# by halted_reason and by the authorization record itself.
+# Reconciled after the PR #67 merge: mission-immutable, architecture-evolvable
+# governance is now part of main. WORK-040 remains the sole active authorized
+# Work Item; W041/W042 are prepared candidates only. The WORK-040-CORRECTION-001
+# baseline is formally reconciled to this mainline by LEDGER-RECON-002
+# (post-PR-67 mainline reconciliation, recorded as the governance-only
+# correction commit on PR #70).
 #
 # schema: spec/architect/ (execution state v1); verified by ARCH-02/ARCH-03.
 schema_version: 1
@@ -13,8 +14,8 @@ last_updated: "2026-08-30"
 
 repository:
   canonical: "github.com/pectoraux/ADCOS"
-  main_sha: 93efa54f1edc2ec3c0bb5646827719f92af06b86
-  main_sha_semantics: "main after the merge of the persistent Architect package (PR #60); the baseline the WORK-040 correction authorization is issued against"
+  main_sha: 3810da99a86182987b1b966ee15b92b15bc65a29
+  main_sha_semantics: "main after PR #67 merged mission-immutable, architecture-evolvable governance; the persistent-state snapshot and the WORK-040-CORRECTION-001 authorization baseline are formally reconciled to this mainline by LEDGER-RECON-002 (post-PR-67 mainline reconciliation)"
 
 versions:
   architecture_version_reference: "1.0"
@@ -26,11 +27,12 @@ execution:
   mode: "implementing"
   active_work_item: WORK-040
   active_authorization: "WORK-040-CORRECTION-001"
-  halted_reason: "Correction-only implementing: WORK-040 remains CHANGES_REQUIRED (DEC-0046) and only the WORK-040-CORRECTION-001 scope may proceed; acceptance is not granted and W041+ remain blocked. When the correction PR is delivered, this halts pending Architect re-review."
+  halted_reason: "Correction-only implementing: WORK-040 remains CHANGES_REQUIRED (DEC-0046); the WORK-040-CORRECTION-001 authorization is reconciled to current main 3810da99 by LEDGER-RECON-002 and only its correction-only scope may proceed. Acceptance is not granted and W041/W042 remain blocked pending W040 disposition."
   next_required_decisions:
-    - "Review the W040 correction PR after it is submitted under WORK-040-CORRECTION-001"
+    - "Review the W040 correction PR after it is submitted under the valid current-base authorization (baseline reconciled to 3810da99 by LEDGER-RECON-002)"
     - "Disposition W035 physical-evidence PRs 45, 46, 47"
     - "Decide ACR-004 / PR #49 after the persistent Architect package is on main"
+    - "Activate W041 only after W040 is accepted/otherwise formally dispositioned"
 
 in_review:
   - work_item: WORK-040
@@ -59,7 +61,7 @@ open_prs:
   - pr: 48
     head: "work-040-pilot-deployment"
     subject: "WORK-040 Pilot deployment"
-    disposition: "changes required; correction scope authorized by WORK-040-CORRECTION-001"
+    disposition: "changes required; correction scope authorized by WORK-040-CORRECTION-001, baseline reconciled to main 3810da99 by LEDGER-RECON-002 (PR #70)"
   - pr: 49
     head: "roadmap/connectivity-economy"
     subject: "Connectivity commerce roadmap and proposed ACR-004"
@@ -72,9 +74,37 @@ open_acrs:
     on_main: false
     location: "branch roadmap/connectivity-economy (PR #49)"
 
+accepted_acrs:
+  - acr: "ACR-005"
+    status: "ACCEPTED"
+    decision: "DEC-0047"
+    merged_pr: 64
+  - acr: "ACR-006"
+    status: "ACCEPTED"
+    decision: "DEC-0048"
+    merged_pr: 64
+  - acr: "ACR-007"
+    status: "ACCEPTED"
+    decision: "DEC-0049"
+    merged_pr: 67
+
 open_architectural_questions: []
 
 accepted_work_items:
   first: "WORK-001"
   last: "WORK-039"
   note: "all Architect-accepted and merged"
+
+planned_work_items:
+  - work_item: WORK-041
+    issue: 68
+    status: "ready-candidate"
+    contract: "spec/architect/work-items/WORK-041.md"
+    authorization: "none"
+    prerequisite: "WORK-040 formally accepted/dispositioned"
+  - work_item: WORK-042
+    issue: 69
+    status: "ready-candidate"
+    contract: "spec/architect/work-items/WORK-042.md"
+    authorization: "none"
+    prerequisite: "WORK-041 accepted/merged where its interfaces are consumed"

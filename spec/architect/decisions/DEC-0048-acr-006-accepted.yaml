@@ -2,7 +2,7 @@
 # schema: spec/architect/decision-record-template.md
 # Design-level acceptance; does not itself authorize implementation.
 decision_id: DEC-0048
-type: architecture
+type: governance
 work_item: null
 acr: ACR-006
 pr: 64
@@ -10,13 +10,13 @@ reviewed_sha: 18123c97dfa3bcf88b9dbbfa6f5dd6fb56adae7e
 decision: ACCEPTED
 status: ACCEPTED
 reviewer: "Architect (pectoraux)"
-timestamp: 2026-08-30T06:25:10Z
+timestamp: 2026-08-30T06:25:00Z
 findings:
-  - "ACR-006 is accepted as a reusable architectural design contract arising from the W035/W040 physical-validation lessons."
-  - "Authoritative snapshots remain the state representation, while ordered platform events become the preferred change-notification mechanism where the platform provides them."
-  - "Recovery is journal-first: immutable configuration plus append-only journal plus compact checkpoint, followed by reconciliation with a fresh authoritative platform observation."
-  - "Android background execution is an external constraint and is not a protocol guarantee; control-plane path changes are distinct from data-plane traffic."
-  - "No new persistence, session, routing, transport, identity, or policy authority is created by this acceptance."
+  - "ACR-006 is accepted as a reusable architectural design contract for event-driven platform integration and journal-first recovery."
+  - "Platform changes should be represented as authoritative events with associated observations/snapshots rather than relying exclusively on polling."
+  - "Recovery reconstructs durable protocol state from journal and checkpoint state and reconciles with current platform observations."
+  - "Android/background execution is treated as an unreliable execution environment; durable protocol state is not dependent on a continuously running process."
+  - "No second session, routing, identity, transport, or policy authority is created by this acceptance."
 blockers: []
 required_corrections: []
 evidence:
@@ -32,5 +32,5 @@ rejected_scope:
   - "W041+ authorization"
 downstream_effect:
   - "ACR-006 is an accepted architectural direction and may be used by later authorized Work Items."
-  - "Concrete schema/API changes require an implementation Work Item and repository-local authorization."
+  - "Concrete event/recovery implementation requires an implementation Work Item and repository-local authorization."
 resolved_by: null

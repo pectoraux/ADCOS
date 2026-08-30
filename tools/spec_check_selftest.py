@@ -34,11 +34,12 @@ a stale authorization is detected, that review state cannot contradict
 execution state, that an acceptance SHA cannot differ from the reviewed
 SHA, that open evidence obligations cannot disappear, and that broken
 references fail. Since DEC-0046 the unmutated package fixture IS the
-reconciled post-PR-60 state: mode implementing with the active
+reconciled persistent-Architect state: mode implementing with the active
 WORK-040 correction authorization WORK-040-CORRECTION-001 (baseline
-93efa54f) — the "missing authorization" and "no active authorization"
-cases now revert that activation deliberately to simulate the stopped
-state. The PROVENANCE cases initialize a temporary git repository with
+93efa54f at issuance, moved to 3810da99 by the LEDGER-RECON-002
+post-PR-67 mainline reconciliation) — the "missing authorization" and
+"no active authorization" cases revert that activation deliberately to
+simulate the stopped state. The PROVENANCE cases initialize a temporary git repository with
 an origin/main base and prove the authorization-provenance rules of
 ARCH-08: governance-only deltas pass, implementation outside the
 authorized scope fails, self-authorization (modifying the inherited
@@ -486,14 +487,15 @@ ARCH_CASES: List[Case] = [
         # An active authorization whose baseline no longer matches the
         # recorded main baseline is stale. The fixture base already
         # carries the active WORK-040-CORRECTION-001 authorization
-        # (baseline 93efa54f); corrupting the recorded main baseline
+        # (baseline 3810da99 since the LEDGER-RECON-002 post-PR-67
+        # reconciliation); corrupting the recorded main baseline
         # makes it stale.
         "name": "architect-stale-authorization-detected",
         "ops": [
             (
                 "replace",
                 "spec/architect/execution-state.yaml",
-                "  main_sha: 93efa54f1edc2ec3c0bb5646827719f92af06b86",
+                "  main_sha: 3810da99a86182987b1b966ee15b92b15bc65a29",
                 "  main_sha: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             )
         ],

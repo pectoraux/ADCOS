@@ -13,6 +13,12 @@
 # entry stays descriptive only (PA-001, DEC-0045: review state is never
 # authorization).
 #
+# Baseline reconciliation (LEDGER-RECON-002, 2026-08-30, recorded on PR #70):
+# baseline_sha moves 93efa54f -> 3810da99 (post-PR-67 mainline
+# reconciliation, directed by the Architect as a governance-only
+# correction). The correction-only scope, the governing decision
+# (DEC-0046), the dependencies, and every other field are unchanged.
+#
 # schema: spec/architect/authorizations/ (v1); verified by tools/spec_check.py (ARCH-03).
 
 work_item: WORK-040
@@ -21,7 +27,7 @@ authorized: true
 type: implementation
 authorization_id: "WORK-040-CORRECTION-001"
 authorization_decision: DEC-0046
-baseline_sha: 93efa54f1edc2ec3c0bb5646827719f92af06b86
+baseline_sha: 3810da99a86182987b1b966ee15b92b15bc65a29
 existing_delivery_head: ee9b356020b6450d85837f60e60c41d08f0ec09a
 existing_delivery_pr: 48
 review_basis: "Architect CHANGES_REQUIRED ruling on the delivered W040 pilot (DEC-0046): criterion 1 physical participation and criterion 2 real 5G physical access remain open; criteria 3-6 are already evidenced and must be preserved."

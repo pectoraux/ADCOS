@@ -1,0 +1,66 @@
+schema_version: "1.0"
+status: "ACTIVE"
+lessons:
+  - id: "EXP-001"
+    title: "Integrity is not provenance"
+    status: "INCORPORATED"
+    sources:
+      - "W025"
+      - "W027"
+    observation: "Content-valid authority-bearing objects can still be unauthorized or caller-injected."
+    lesson: "Verification of internal integrity must remain distinct from proof of authority provenance."
+    disposition: "Preserve provenance verification as a first-class security requirement."
+    architectural_links:
+      - "architecture.md §6.11"
+    regression_requirement: "Maintain discriminating provenance-injection tests."
+
+  - id: "EXP-002"
+    title: "Physical validation must prove the physical boundary"
+    status: "INCORPORATED"
+    sources:
+      - "W020"
+      - "W035"
+      - "W040"
+    observation: "Repeated device validation attempts exposed the difference between an authoritative observation, a host-local path, and a genuinely handset-backed transport."
+    lesson: "Evidence claims must identify the physical boundary they actually prove; observation alone cannot prove end-to-end transport."
+    disposition: "Adopt explicit evidence chains and preserve PASS/OPEN/NOT-TESTABLE distinctions."
+    architectural_links:
+      - "ACR-005"
+    regression_requirement: "Physical claims require authoritative observation plus path and traffic evidence."
+
+  - id: "EXP-003"
+    title: "Implementation success can expose missing architecture"
+    status: "INCORPORATED"
+    sources:
+      - "W039-001"
+    observation: "Distance-labelled direct application of revocations appeared to satisfy convergence counts without performing actual hop-by-hop relay delivery."
+    lesson: "Verification must test the mechanism, not merely the resulting number or reported state."
+    disposition: "Require discriminating mechanism-level tests for critical protocol invariants."
+    architectural_links:
+      - "W039"
+    regression_requirement: "Negative controls must break the actual mechanism when a required mechanism is removed."
+
+  - id: "EXP-004"
+    title: "Ephemeral LLM context is not durable architecture memory"
+    status: "INCORPORATED"
+    sources:
+      - "PA-001"
+      - "PR-60"
+    observation: "A persistent repository state package was required to prevent implementation authorization from depending on conversation history."
+    lesson: "Architectural decisions, work authorization, execution state, and evidence obligations must survive the LLM session."
+    disposition: "Repository-local persistent Architect state is authoritative; chat is not."
+    architectural_links:
+      - "spec/architect/"
+    regression_requirement: "CI must reject implementation PRs without inherited repository-local authorization."
+
+  - id: "EXP-005"
+    title: "Architecture must evolve without losing the mission"
+    status: "ASSESSED"
+    sources:
+      - "ACR-007"
+    observation: "Repeated implementation and validation experience showed that useful architectural assumptions can be improved without changing the underlying purpose of ADCOS."
+    lesson: "The mission is the permanent objective; architecture is a versioned, evidence-driven hypothesis for achieving it."
+    disposition: "Govern architectural evolution through ACRs and a durable learning loop."
+    architectural_links:
+      - "ACR-007"
+    regression_requirement: "Every material architecture revision records motivating experience and verifies that the mission remains unchanged."

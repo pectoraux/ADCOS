@@ -1,0 +1,46 @@
+# ADCOS Architect decision record.
+# schema: spec/architect/decision-record-template.md
+# Design-level acceptance; does not itself authorize implementation.
+decision_id: DEC-0049
+type: governance
+work_item: null
+acr: ACR-007
+pr: 67
+reviewed_sha: abd7adbdb3db6f7c558b3045ee3b351999c7ea33
+decision: ACCEPTED
+status: ACCEPTED
+reviewer: "Architect (pectoraux)"
+timestamp: 2026-08-30T06:30:00Z
+findings:
+  - "The ADCOS mission is the permanent objective and is not mutable through ordinary architecture change control."
+  - "The architecture is a versioned, authoritative snapshot representing the current technical hypothesis for achieving the mission; it may evolve through accepted ACRs."
+  - "Experience from implementation, verification, physical validation, security review, deployment, and relevant research must have a durable repository-local learning path."
+  - "Experience records inform Architect reasoning but cannot directly amend architecture or authorize implementation."
+  - "Accepted architectural changes must preserve mission consistency, preserve historical provenance, and include discriminating verification where semantics change."
+  - "Chat history has no authority and cannot be the sole surviving record of an architectural decision."
+blockers: []
+required_corrections: []
+evidence:
+  merge_sha: null
+  ci_run: null
+  artifacts:
+    - "spec/mission.md"
+    - "spec/experience/README.md"
+    - "spec/experience/lessons.yaml"
+    - "spec/acr/ACR-007-mission-immutable-architecture-evolvable.md"
+accepted_scope:
+  - "Permanent Mission Authority model"
+  - "Versioned and revisable architecture model through accepted ACRs"
+  - "Repository-local experience and learning loop"
+  - "Historical preservation and evidence-driven architectural reassessment"
+rejected_scope:
+  - "Direct architecture changes from experience records"
+  - "Implementation-agent authority to change architecture"
+  - "Chat-only architectural decisions"
+  - "Any protocol semantic change not covered by a subsequent accepted ACR and authorized Work Item"
+downstream_effect:
+  - "Architectural improvement is a governed, expected process rather than an exceptional failure of a permanently frozen architecture."
+  - "Future ACRs should cite motivating experience IDs when applicable."
+  - "Future architecture versions remain subordinate to the permanent Mission Authority."
+  - "Future implementation Work Items require explicit repository-local authorization."
+resolved_by: null

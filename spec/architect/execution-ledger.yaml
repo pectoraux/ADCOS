@@ -19,7 +19,7 @@
 # never silently rewritten.
 
 schema_version: 1
-main_sha: 93efa54f1edc2ec3c0bb5646827719f92af06b86
+main_sha: 3810da99a86182987b1b966ee15b92b15bc65a29
 last_updated: "2026-08-30"
 work_items:
   - work_item: WORK-001
@@ -738,3 +738,10 @@ reconciliations:
     to_main_sha: 93efa54f1edc2ec3c0bb5646827719f92af06b86
     reason: "persistent-state reconciliation after the persistent Architect package merged (PR #60, merge 93efa54f at 2026-08-30T03:59:21Z): the package-establishment snapshot baseline moves from 1669ae9a to the post-merge mainline, and the WORK-040 round 1 verdict plus the correction-only authorization WORK-040-CORRECTION-001 are recorded on the WORK-040 entry"
     history: "no work-item history rewritten: every WORK-001..WORK-039 entry is byte-identical to the package-establishment snapshot; WORK-040 gains its review_rounds count, its correction-decision reference, and the repository-local correction handoff; the reconciliation is formal and visible, never silent"
+  - reconciliation_id: LEDGER-RECON-002
+    recorded_by: "Architect-directed governance-only correction commit on PR #70 (2026-08-30): baseline reconciliation of the still-active correction authorization; no new decision record is required because the correction scope, the governing decision (DEC-0046), and all work-item history are unchanged"
+    recorded_at: 2026-08-30T07:06:00Z
+    from_main_sha: 93efa54f1edc2ec3c0bb5646827719f92af06b86
+    to_main_sha: 3810da99a86182987b1b966ee15b92b15bc65a29
+    reason: "post-PR-67 mainline reconciliation: main advanced to 3810da99 (mission-immutable, architecture-evolvable governance, PR #67) while the persistent-state snapshot and the WORK-040-CORRECTION-001 authorization still referenced the PR #60 merge 93efa54f; the snapshot baseline (main_sha) and the authorization baseline_sha are formally moved to the current mainline so ARCH-03/ARCH-05 hold and the correction-only authorization is valid for the resumed W040 correction cycle"
+    history: "no work-item history rewritten: every WORK-001..WORK-040 entry is byte-identical (including the WORK-040 note recording the authorization as issued at baseline 93efa54f); W041/W042 stay prepared ready-candidates and are not activated; no protocol semantics changed; the only changes are the snapshot baseline, the LEDGER-RECON-002 record itself, the reconciled baseline_sha in authorizations/WORK-040.yaml, and the reconciling narrative fields in execution-state.yaml and current-state.md"

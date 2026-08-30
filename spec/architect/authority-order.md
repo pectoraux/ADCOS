@@ -2,119 +2,80 @@
 
 ## Status
 
-**ACTIVE — Persistent Governance Authority (process layer; follows the frozen Architecture Version 1.0)**
+**ACTIVE — Persistent Governance Authority**
 
-This document defines the single canonical precedence chain among all
-authorities in this repository. Where two authorities appear to conflict, the
-one that ranks higher governs, and the conflict must be reported to the
-Architect for correction through `spec/change-control.md`.
+This document defines the single canonical precedence chain among repository authorities. The **Mission Authority is permanently higher than the architecture**. The architecture is the current accepted technical snapshot and may evolve through accepted ACRs. Experience informs architecture but never overrides it directly.
+
+Where two authorities appear to conflict, the higher applicable authority governs, and the conflict must be reported through the ACR/change-control process. Chat history has no authority level.
 
 ---
 
 ## 1. Canonical precedence chain
 
 ```text
- 1. Frozen architecture
+ 1. Permanent Mission Authority
+    spec/mission.md
+ 2. Current accepted Architecture snapshot
     spec/architecture.md and the frozen specification set
- 2. Architecture locks
-    LOCK-001 … LOCK-025 (spec/architecture-lock.md)
- 3. Accepted ACRs
+ 3. Architecture locks
+    spec/architecture-lock.md
+ 4. Accepted ACRs
     spec/acr/ACR-NNN-*.md with Status: ACCEPTED
- 4. Canonical dependency graph
-    spec/dependency-graph.md (DAG, execution phases, critical path)
- 5. Canonical Work Item contract
-    spec/work-items.md (the only approved backlog)
- 6. Persistent review/decision records
+ 5. Experience and learning records
+    spec/experience/ (evidence and lessons; no direct authority to amend architecture)
+ 6. Canonical dependency graph
+    spec/dependency-graph.md
+ 7. Canonical Work Item contract
+    spec/work-items.md
+ 8. Persistent review/decision records
     spec/architect/decisions/ and spec/architect/authorizations/
- 7. Accepted implementation precedent
-    the merged, Architect-accepted implementations on main
- 8. Verification evidence
-    deterministic batteries, CI runs, evidence disclosures
- 9. Explanatory documentation
-    README.md, docs/, module READMEs
-10. Historical worklogs
-    docs/ history files and the sandbox worklog
+ 9. Accepted implementation precedent
+10. Verification evidence
+11. Explanatory documentation
+12. Historical worklogs
 ```
 
 ## 2. What each level is
 
-1. **Frozen architecture** — `spec/architecture.md`,
-   `spec/architecture-lock.md`, `spec/work-items.md`, and
-   `spec/dependency-graph.md` are the four FROZEN authoritative documents
-   (`spec/governance.md` §1). Within this set, `spec/architecture.md` is the
-   full architectural specification; a normal implementation PR is never
-   allowed to silently become an architecture change.
-2. **Architecture locks** — LOCK-001 … LOCK-025 are the non-negotiable
-   invariants: the compact, enforceable constitutional subset of the frozen
-   architecture. No interpretation of any lower authority may violate a
-   lock. The locks and the full architecture are co-frozen; this level
-   exists so that any reading of level 1 that would violate a lock is wrong.
-3. **Accepted ACRs** — accepted Architecture Change Requests are the only
-   authority that can amend levels 1–2; after acceptance the frozen documents
-   are updated synchronously, and the ACR record is the durable provenance of
-   that amendment. An ACR is required for any semantic change to a frozen
-   document (`spec/change-control.md`).
-4. **Canonical dependency graph** — `spec/dependency-graph.md` defines the
-   approved implementation order: its DAG is the ordering authority, its
-   phases and critical path must respect the DAG, and a completed PR is not a
-   satisfied dependency until the Architect accepts the Work Item
-   (`spec/workflow.md` §2).
-5. **Canonical Work Item contract** — `spec/work-items.md` is the only
-   approved implementation backlog (WORK-001 … WORK-040): objectives,
-   dependencies, acceptance criteria, and definitions of done.
-6. **Persistent review/decision records** — the decision registry
-   (`spec/architect/decisions/`), authorizations
-   (`spec/architect/authorizations/`), execution state, ledger, and evidence
-   obligations under `spec/architect/`. These records govern process state:
-   what is accepted, what is authorized, what remains open. They cannot
-   contradict levels 1–5; where they would, an ACR (level 3) is required.
-7. **Accepted implementation precedent** — the merged implementations of
-   accepted Work Items. Precedent informs interpretation of the frozen
-   contracts (how a lock was satisfied before); it can never override a
-   frozen rule or create a second authority.
-8. **Verification evidence** — deterministic batteries (`tools/*_selftest.py`),
-   CI runs, and evidence disclosures (`docs/WORK-XXX-evidence.md`). Evidence
-   proves conformance; it never redefines it. A passing test suite cannot
-   override an architecture violation.
-9. **Explanatory documentation** — README, docs, module READMEs. Explanations
-   of the architecture; never a second authority. Where documentation and a
-   frozen document conflict, the frozen document prevails.
-10. **Historical worklogs** — narrative records of how work proceeded
-    (e.g. `docs/` history files, the sandbox `worklog.md`, chat transcripts
-    referenced nowhere as authority). Historical color; zero authority.
+1. **Permanent Mission Authority** — `spec/mission.md` defines the enduring objective of ADCOS. It is intentionally immutable through ordinary architecture governance. A proposal to change the mission is not an ordinary ACR.
+2. **Current accepted Architecture snapshot** — `spec/architecture.md`, together with the current frozen specification set, defines the architecture currently in force. `FROZEN` means authoritative for that snapshot, not immutable for the lifetime of the project.
+3. **Architecture locks** — `LOCK-001 … LOCK-025` are the constitutional invariants for the current architecture snapshot.
+4. **Accepted ACRs** — accepted Architecture Change Requests are the durable change records that authorize synchronized evolution of the architecture. The current architecture snapshot remains the operational authority until the accepted changes are incorporated into the synchronized snapshot.
+5. **Experience and learning records** — `spec/experience/` records observations, incidents, implementation lessons, physical experiments, security findings, and relevant research. Experience is evidence for the Architect's reasoning; it cannot directly change architecture.
+6. **Canonical dependency graph** — `spec/dependency-graph.md` is the ordering authority.
+7. **Canonical Work Item contract** — `spec/work-items.md` defines the approved implementation backlog for the current roadmap snapshot.
+8. **Persistent review/decision records** — `spec/architect/` records acceptance, authorization, evidence obligations, and execution state. These records cannot override levels 1–7.
+9. **Accepted implementation precedent** — merged, Architect-accepted implementations inform how accepted contracts were realized but cannot redefine them.
+10. **Verification evidence** — tests, CI, experiments, and external evidence prove or fail to prove claims; they never redefine architecture.
+11. **Explanatory documentation** — READMEs and docs explain the architecture; they never become a second authority.
+12. **Historical worklogs** — historical narrative only; zero authority.
 
-## 3. Reconciliation with existing governance
+## 3. Learning and evolution rule
 
-This chain reconciles with — and does not replace — the established
-governance:
+The repository must preserve the following loop:
 
-- `spec/architecture-lock.md` §1 already establishes the four frozen
-  documents as the authoritative set, the Architect as the review authority,
-  and Z.ai as the implementation agent. Levels 1–2 restate that order.
-- `spec/governance.md` §1 (document registry) rules 1–3 already make frozen
-  documents supreme and gate all changes behind the ACR process. Level 3
-  operationalizes that.
-- `spec/dependency-graph.md` (its own header) is "the approved implementation
-  order"; `spec/workflow.md` §2 names it the ordering authority while the
-  per-item `Dependencies:` lines of `spec/work-items.md` declare deps —
-  declared dependencies not reflected in the DAG are non-blocking advisories
-  resolved only by the Architect or an ACR. Levels 4–5 preserve exactly that
-  relationship, including the advisory rule.
-- `spec/workflow.md` §2.1/§2.2 already distinguish DAG-ready /
-  execution-ready / blocked / in-review / accepted, and architectural
-  acceptance from external evidence. Level 6 (this package) is the durable
-  record layer for those states; it does not change their semantics.
-- Precedent, evidence, documentation, and history were previously unordered
-  informally; levels 7–10 make their subordination explicit. Nothing in the
-  previous governance granted any of them authority over the levels above.
+```text
+experience / research / incident
+        ↓
+experience record
+        ↓
+Architect assessment
+        ├── guidance
+        ├── rejected
+        └── ACR required
+                 ↓
+          accepted ACR
+                 ↓
+      synchronized new snapshot
+```
+
+The mission remains unchanged throughout ordinary architecture evolution.
 
 ## 4. Rules of use
 
-1. A lower level never overrides a higher level; an apparent conflict is a
-   specification-consistency finding for the Architect.
-2. Chat history has **no level**. It is never authority. If a chat decision
-   matters, the Architect persists it into level 6 (or the relevant level)
-   and it governs from there.
-3. This document itself is process authority (level 6 territory): if
-   amending it would alter a frozen rule, an ACR is required first
-   (`spec/change-control.md` §4).
+1. A lower level never overrides a higher level.
+2. Chat history has **no authority level**. If a chat decision matters, the Architect must persist it into the appropriate repository artifact.
+3. An `ACCEPTED` ACR is durable change provenance, not permission for an implementation agent to invent missing implementation semantics.
+4. An implementation Work Item still requires explicit repository-local execution authorization.
+5. Experience records must never be rewritten merely to justify a later architectural choice; corrections are appended and historical provenance is preserved.
+6. When an ACR is accepted, the prior architecture snapshot remains discoverable and is superseded only by the synchronized successor snapshot.

@@ -19,6 +19,12 @@ jobs:
       - name: Run specification consistency checks
         run: python3 tools/spec_check.py
 
+      - name: Run experience/learning registry integrity checks
+        run: python3 tools/experience_check.py
+
+      - name: Run experience/learning registry negative tests
+        run: python3 tools/experience_selftest.py
+
       - name: Run specification checker negative tests
         run: python3 tools/spec_check_selftest.py
 

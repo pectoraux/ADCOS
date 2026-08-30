@@ -2,7 +2,7 @@
 # schema: spec/architect/decision-record-template.md
 # Design-level acceptance; does not itself authorize implementation.
 decision_id: DEC-0047
-type: architecture
+type: governance
 work_item: null
 acr: ACR-005
 pr: 64
@@ -12,10 +12,11 @@ status: ACCEPTED
 reviewer: "Architect (pectoraux)"
 timestamp: 2026-08-30T06:25:00Z
 findings:
-  - "ACR-005 is accepted as a reusable architectural design contract arising from the W035/W040 physical-validation lessons."
-  - "The contract distinguishes physical facts, platform facts, and ADCOS facts; separates logical session identity from replaceable physical paths; and separates path detection, validation, binding, activation, and retirement."
-  - "Transactional handover and evidence-chain semantics are accepted as design requirements."
-  - "No new identity, session, routing, transport, federation, or policy authority is created by this acceptance."
+  - "ACR-005 is accepted as a reusable architectural design contract separating physical facts, platform observations, network paths, path validation, path binding, path activation, and logical sessions."
+  - "A logical session remains stable while physical path constituents may change."
+  - "Path detection, validation, binding, and activation are distinct semantic stages; validation must precede activation."
+  - "Physical fact, platform fact, and ADCOS fact are distinct evidence/authority layers and must not be conflated."
+  - "No new identity, routing, session, transport, or policy authority is created by this acceptance."
 blockers: []
 required_corrections: []
 evidence:
@@ -31,5 +32,5 @@ rejected_scope:
   - "W041+ authorization"
 downstream_effect:
   - "ACR-005 is an accepted architectural direction and may be used by later authorized Work Items."
-  - "Concrete schema/API changes require an implementation Work Item and repository-local authorization."
+  - "Concrete NetworkPath/schema/API implementation requires an implementation Work Item and repository-local authorization."
 resolved_by: null
