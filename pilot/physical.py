@@ -92,6 +92,13 @@ __all__ = [
     "TETHER_INTERFACE_CANDIDATES",
     "HANDOVER_EVIDENCE_SCHEMA_VERSION",
     "HANDOVER_EVIDENCE_REQUIRED",
+    "PATH_RECORD_REQUIRED",
+    "HANDOVER_LIFECYCLE_STAGES",
+    "EVIDENCE_LAYERS",
+    "FIVE_G_CHAIN_LINKS",
+    "derive_handover_lifecycle",
+    "derive_evidence_layers",
+    "derive_five_g_chain",
     "ANDROID_MANIFEST_SCHEMA_VERSION",
     "ANDROID_MANIFEST_REQUIRED",
     "detect_physical_environment",
@@ -166,8 +173,13 @@ PHYSICAL_5G_REQUIRED: Tuple[Tuple[str, str], ...] = (
     ("traffic_verification.observation", "the independent observation"),
 )
 
-#: The handover-evidence document schema version (correction cycle 2).
-HANDOVER_EVIDENCE_SCHEMA_VERSION = 1
+#: The handover-evidence document schema version (correction cycle 2
+#: introduced it; correction cycle 3 raises it to 2 -- the ACR-005/006
+#: alignment extends the template with the first-class path records,
+#: the explicit session-identity assertion, the ordered lifecycle, the
+#: evidence-plane separation, the criterion-2 chain, and the honest
+#: recovery position).
+HANDOVER_EVIDENCE_SCHEMA_VERSION = 2
 
 #: The exact evidence chain the physical HANDOVER experiment requires
 #: (frozen DATA -- the battery asserts the template covers exactly
@@ -208,10 +220,147 @@ HANDOVER_EVIDENCE_REQUIRED: Tuple[Tuple[str, str], ...] = (
     ("traffic_verification.observation", "the independent observation"),
     ("verification.validator_sha", "the validator's own SHA-256"),
     ("verification.artifact_hashes", "SHA-256 of every artifact"),
+    # -- correction cycle 3 (the ACR-005/006 alignment): the path is a
+    # -- first-class OBJECT distinct from the logical session and from
+    # -- the platform observation; the PRIMARY continuity assertion is
+    # -- explicit; the lifecycle, the evidence layers, the 5G chain,
+    # -- and the recovery position are first-class records --------
+    ("paths.old.path_id", "the OLD path's ADCOS constituent id (the "
+     "path object's own identity, distinct from the session)"),
+    ("paths.old.access_kind", "the old path's access technology/class"),
+    ("paths.old.platform_network_identity", "the platform's own "
+     "network identity for the old path"),
+    ("paths.old.host_interface", "the host interface carrying the old "
+     "path"),
+    ("paths.old.route", "the route/next-hop the old path used"),
+    ("paths.old.metered", "the platform's metering report for the old "
+     "path"),
+    ("paths.old.reachability", "the old path's observed reachability"),
+    ("paths.old.validation_state", "the ADCOS validation state of the "
+     "old path"),
+    ("paths.new.path_id", "the NEW path's ADCOS constituent id"),
+    ("paths.new.access_kind", "the new path's access technology/class"),
+    ("paths.new.platform_network_identity", "the platform's own "
+     "network identity for the new path"),
+    ("paths.new.host_interface", "the host interface carrying the new "
+     "path"),
+    ("paths.new.route", "the route/next-hop the new path uses"),
+    ("paths.new.metered", "the platform's metering report for the new "
+     "path"),
+    ("paths.new.reachability", "the new path's observed reachability"),
+    ("paths.new.validation_state", "the ADCOS validation state of the "
+     "new path"),
+    ("adcos.session_id_before", "the session id BEFORE the transition "
+     "(the PRIMARY continuity assertion)"),
+    ("adcos.session_id_after", "the session id AFTER the transition "
+     "(MUST equal BEFORE; the path/interface/route MAY change)"),
+    ("lifecycle", "the ordered ACR-005 path-lifecycle event sequence "
+     "(derived from the participant's own journal)"),
+    ("evidence_layers", "the per-layer proof separation "
+     "(PHYSICAL/PLATFORM/PATH/ADCOS/TRANSPORT; derived, never "
+     "promoting)"),
+    ("five_g_chain", "the criterion-2 eight-link chain record "
+     "(derived; any absent link keeps the criterion NOT-TESTABLE)"),
+    ("recovery.process_death_tested", "whether process death was "
+     "tested in THIS run (an honest explicit boolean)"),
+    ("recovery.model", "the recovery model the harness is honest "
+     "about (checkpoint + journal tail + fresh platform observation; "
+     "the honest session-lost semantics preserved)"),
 )
 
-#: The Android-agent observation manifest schema version.
-ANDROID_MANIFEST_SCHEMA_VERSION = 1
+#: The ACR-005 first-class NetworkPath record fields (correction
+#: cycle 3): the physical network path is a distinct OBJECT from both
+#: the logical session and the platform observation -- a generic
+#: ``wifi``/``cellular`` label is NOT sufficient to identify a path.
+#: Every path record carries the constituent id plus these attributes,
+#: each with its observation source (a rehearsal records explicit
+#: honest values where a platform observation does not exist).
+PATH_RECORD_REQUIRED: Tuple[Tuple[str, str], ...] = (
+    ("path_id", "the ADCOS multipath constituent id (the path "
+     "object's own identity -- replaceable, unlike the session)"),
+    ("access_kind", "the access technology/class of the path"),
+    ("platform_network_identity", "the platform's own network identity "
+     "for the path (never a generic label alone)"),
+    ("host_interface", "the host interface carrying the path"),
+    ("route", "the route/next-hop the path uses"),
+    ("metered", "the platform's metering report for the path"),
+    ("reachability", "the path's observed reachability"),
+    ("validation_state", "the ADCOS validation state of the path"),
+)
+
+#: The ACR-005 transactional path-lifecycle stages the handover must
+#: evidence, in the order their evidence appears in the participant's
+#: journal (correction cycle 3).  Every stage maps onto the EXISTING
+#: production seams -- the frozen pilot journal vocabulary and the
+#: WORK-018 multipath authority; there is NO second event authority.
+#: (``candidate_discovered`` precedes ``degradation_detected`` in the
+#: journal because the delivered multipath design admits the standing
+#: candidate at session start -- which is exactly why the handover
+#: CAN be transactional: a validated candidate is standing by.)
+HANDOVER_LIFECYCLE_STAGES: Tuple[Tuple[str, str], ...] = (
+    ("candidate_discovered", "pilot.route-reevaluated (both plan "
+     "constituents admitted at session start)"),
+    ("degradation_detected", "pilot.link-loss-observed + the "
+     "death-confirming pilot.probe-reported + the primary constituent "
+     "ACTIVE -> DEGRADED (recorded WITHOUT retiring the path)"),
+    ("candidate_validated", "pilot.probe-reported (target "
+     "physical-access-secondary) -- the candidate probe BEFORE any "
+     "rebind or retirement"),
+    ("candidate_bound", "pilot.session-reconnecting + the real "
+     "connect/announce on the secondary"),
+    ("rebind_committed", "pilot.session-rebound (the SAME session id)"),
+    ("candidate_traffic_probe", "pilot.datagram-sent on the secondary "
+     "(the already-protected transition datagram)"),
+    ("activation_committed", "pilot.datagram-received on the secondary "
+     "(the data-plane proof precedes the control-plane commit)"),
+    ("old_path_retired", "pilot.path-status-changed (the primary "
+     "constituent DEGRADED -> FAILED) -- only AFTER the data-plane "
+     "proof"),
+)
+
+#: The evidence-plane layers every physical result must separate
+#: (correction cycle 3): no lower-level observation may be promoted
+#: into a higher-level claim without explicit evidence of that layer's
+#: own.
+EVIDENCE_LAYERS: Tuple[str, ...] = (
+    "PHYSICAL",
+    "PLATFORM",
+    "PATH",
+    "ADCOS",
+    "TRANSPORT",
+)
+
+#: The criterion-2 5G chain links (correction cycle 3): 5G remains
+#: subject to the COMPLETE chain -- any absent link keeps the
+#: criterion NOT-TESTABLE (never weakened; the framework's NR report
+#: is the ONLY 5G observation; cellular is never automatically 5G).
+FIVE_G_CHAIN_LINKS: Tuple[Tuple[str, str], ...] = (
+    ("android_nr_report", "PLATFORM: the Android framework reports NR"),
+    ("cellular_network_active", "PLATFORM: the cellular data network "
+     "is active"),
+    ("tether_backed_by_cellular", "PLATFORM: the USB tether is backed "
+     "by the cellular connection"),
+    ("host_path_identified", "PATH: the host path (the tether "
+     "interface + the post-transition route) is identified"),
+    ("adcos_path_validated", "ADCOS: the ADCOS NetworkPath is "
+     "validated (the constituent ACTIVE; the candidate probe + the "
+     "protected traffic probe verified)"),
+    ("adcos_session_bound_to_path", "ADCOS: the session is bound to "
+     "that path (bind + rebind on the SAME session id)"),
+    ("real_packet_transmitted", "TRANSPORT: a real protected packet "
+     "is transmitted on the path"),
+    ("independent_receiver_verification", "TRANSPORT: the independent "
+     "receiver verifies it"),
+)
+
+#: The Android-agent observation manifest schema version (correction
+#: cycle 3 raises it to 2: the ACR-006 event-driven platform
+#: observation -- the manifest now carries the ordered platform EVENTS
+#: (each with its source and the authoritative framework observation
+#: that caused it) plus the snapshot basis that derives the pre/post
+#: snapshots from those events, the platform's own network identities,
+#: and its metering reports).
+ANDROID_MANIFEST_SCHEMA_VERSION = 2
 
 #: The required fields of the Android-agent observation manifest (the
 #: Android platform's OWN observations, produced by the Android
@@ -247,6 +396,35 @@ ANDROID_MANIFEST_REQUIRED: Tuple[Tuple[str, str], ...] = (
     ("usb_tether.observation_source", "how the tether state was observed"),
     ("raw_observations", "the raw getprop/dumpsys outputs the agent "
      "captured"),
+    # -- correction cycle 3 (ACR-006 event-driven platform
+    # -- observation): the ordered platform events + the snapshot
+    # -- basis + the platform's own network identities, metering
+    # -- reports, and cellular data-network state ----------------
+    ("platform_events", "the ordered Android platform events (the "
+     "authoritative callbacks/reports), each carrying the event "
+     "source and the framework observation that caused it"),
+    ("snapshot_basis.pre.event_index", "which platform event produced "
+     "the PRE-trigger snapshot (the event source + the framework data "
+     "used to derive the snapshot)"),
+    ("snapshot_basis.post.event_index", "which platform event produced "
+     "the POST-trigger snapshot"),
+    ("network_identity.pre", "the platform's own network identity for "
+     "the pre-trigger network (e.g. the framework's netId/network "
+     "handle -- never a generic wifi/cellular label alone)"),
+    ("network_identity.post", "the platform's own network identity for "
+     "the post-trigger network"),
+    ("network_identity.observation_source", "how the network identity "
+     "was observed (the framework's own report)"),
+    ("metered.pre", "the framework's metering report for the "
+     "pre-trigger network"),
+    ("metered.post", "the framework's metering report for the "
+     "post-trigger network"),
+    ("metered.observation_source", "how the metering state was "
+     "observed (the framework's own report)"),
+    ("cellular.active", "the framework's cellular data-network active "
+     "state (an explicit bool)"),
+    ("cellular.observation_source", "how the cellular state was "
+     "observed"),
 )
 
 
@@ -695,14 +873,27 @@ def validate_android_manifest(
     post-trigger NR report -- never from LTE), and every
     ``observation_source`` must be the Android framework's own report
     (never an ADCOS re-derivation).
+
+    Schema version 2 (correction cycle 3, ACR-006) additionally
+    validates the EVENT-DRIVEN platform observation: the ordered
+    ``platform_events`` (each entry carrying its event kind, its
+    framework source, its observation instant, and the authoritative
+    framework observation that caused the event), non-decreasing event
+    instants (deterministic ordering -- no stale re-reads), a valid
+    ``snapshot_basis`` (which event produced the pre/post snapshots,
+    pre at or before post), the CONSISTENCY of the pre/post snapshot
+    values with the framework observations carried by their referenced
+    events (the snapshots must genuinely derive from the recorded
+    events -- never from nowhere), explicit metering reports, and the
+    cellular data-network active state.
     """
     problems: List[str] = []
     if document.get("kind") != "android-agent-observation-manifest":
         return False, ["not an android-agent-observation-manifest document"]
     if document.get("schema_version") != ANDROID_MANIFEST_SCHEMA_VERSION:
         problems.append(
-            "unknown manifest schema version %r"
-            % (document.get("schema_version"),)
+            "unknown manifest schema version %r (expected %d)"
+            % (document.get("schema_version"), ANDROID_MANIFEST_SCHEMA_VERSION)
         )
 
     for field, _why in ANDROID_MANIFEST_REQUIRED:
@@ -741,6 +932,122 @@ def validate_android_manifest(
         for flag in ("enabled", "backed_by_cellular"):
             if not isinstance(tether.get(flag), bool):
                 problems.append("usb_tether.%s must be an explicit bool" % (flag,))
+
+    # -- the ACR-006 event-driven platform observation (schema v2) ----
+    events = document.get("platform_events")
+    if not isinstance(events, list) or not events:
+        problems.append(
+            "platform_events must be a non-empty ordered list of the "
+            "authoritative platform events"
+        )
+        events = []
+    instants: List[str] = []
+    for index, entry in enumerate(events):
+        if not isinstance(entry, Mapping):
+            problems.append(
+                "platform_events[%d] must be a mapping" % (index,)
+            )
+            continue
+        for key in ("kind", "source", "instant"):
+            value = entry.get(key)
+            if not isinstance(value, str) or not value:
+                problems.append(
+                    "platform_events[%d].%s must be a non-empty string "
+                    "(the event's %s)"
+                    % (index, key, "identity" if key == "kind" else key)
+                )
+        observation = entry.get("observation")
+        if not isinstance(observation, Mapping) or not observation:
+            problems.append(
+                "platform_events[%d].observation must be a non-empty "
+                "record of the authoritative framework data that caused "
+                "the event" % (index,)
+            )
+        if isinstance(entry.get("instant"), str) and entry.get("instant"):
+            instants.append(str(entry["instant"]))
+    if len(instants) == len(events) and instants != sorted(instants):
+        problems.append(
+            "platform_events instants are not in non-decreasing order "
+            "(ACR-006: consumers must process ordered events "
+            "deterministically -- no stale or concurrent re-reads)"
+        )
+
+    basis = document.get("snapshot_basis") or {}
+    if isinstance(basis, Mapping) and basis:
+        for label in ("pre", "post"):
+            reference = basis.get(label) or {}
+            if not isinstance(reference, Mapping):
+                problems.append(
+                    "snapshot_basis.%s must be a mapping" % (label,)
+                )
+                continue
+            index = reference.get("event_index")
+            if not isinstance(index, int) or isinstance(index, bool):
+                problems.append(
+                    "snapshot_basis.%s.event_index must be an integer"
+                    % (label,)
+                )
+            elif not (0 <= index < len(events)):
+                problems.append(
+                    "snapshot_basis.%s.event_index %r is not a valid "
+                    "platform_events index" % (label, index)
+                )
+        pre_ref = basis.get("pre") or {}
+        post_ref = basis.get("post") or {}
+        if (
+            isinstance(pre_ref, Mapping)
+            and isinstance(post_ref, Mapping)
+            and isinstance(pre_ref.get("event_index"), int)
+            and isinstance(post_ref.get("event_index"), int)
+        ):
+            if pre_ref["event_index"] > post_ref["event_index"]:
+                problems.append(
+                    "snapshot_basis.pre.event_index must reference an "
+                    "event at or before snapshot_basis.post.event_index"
+                )
+            # the consistency rule: the pre/post snapshot values must
+            # genuinely derive from the framework observations carried
+            # by their referenced events (never from nowhere)
+            for label, snapshot_value in (
+                ("pre", str(network.get("pre", ""))),
+                ("post", str(network.get("post", ""))),
+            ):
+                reference = basis.get(label) or {}
+                index = reference.get("event_index")
+                if (
+                    isinstance(index, int)
+                    and 0 <= index < len(events)
+                    and isinstance(events[index], Mapping)
+                    and snapshot_value
+                ):
+                    event_observation = json.dumps(
+                        events[index].get("observation") or {},
+                        sort_keys=True,
+                    )
+                    if snapshot_value not in event_observation:
+                        problems.append(
+                            "the network_technology.%s value %r does not "
+                            "derive from the framework observation carried "
+                            "by the referenced platform_events[%d] -- the "
+                            "snapshot must come from the recorded event "
+                            "(ACR-006)" % (label, snapshot_value, index)
+                        )
+
+    metered = document.get("metered") or {}
+    if metered:
+        for label in ("pre", "post"):
+            if not isinstance(metered.get(label), bool):
+                problems.append(
+                    "metered.%s must be an explicit bool (the framework's "
+                    "own metering report)" % (label,)
+                )
+    cellular = document.get("cellular") or {}
+    if cellular:
+        if not isinstance(cellular.get("active"), bool):
+            problems.append(
+                "cellular.active must be an explicit bool (the "
+                "framework's data-network state)"
+            )
 
     raw = document.get("raw_observations")
     if not isinstance(raw, Mapping) or not raw:
@@ -797,7 +1104,8 @@ def load_android_manifest(path: str) -> Dict[str, Any]:
 
 def android_manifest_template() -> Dict[str, Any]:
     """The COMPLETE, well-formed example manifest for the Android
-    Studio/Gemini agent to copy.
+    Studio/Gemini agent to copy (schema version 2, correction cycle 3:
+    the ACR-006 event-driven platform observation).
 
     The template is FULLY VALID under ``validate_android_manifest``
     (structural validation) with every placeholder value clearly
@@ -811,6 +1119,15 @@ def android_manifest_template() -> Dict[str, Any]:
     block is deliberately absent (the current design is pure-stdlib
     Python on the handset with NO APK); if an APK exists, add
     ``{"name": ..., "sha256": "sha256:..."}``.
+
+    The ``platform_events`` list is the ACR-006 core: the ORDERED
+    authoritative platform events (each with its framework source, its
+    observation instant, and the framework observation that CAUSED the
+    event) from which the pre/post snapshots derive via
+    ``snapshot_basis`` -- the harness records the event source and the
+    authoritative Android framework data used to derive the resulting
+    snapshot, preferring the platform's own event signals over
+    repeated polling.
     """
     return {
         "kind": "android-agent-observation-manifest",
@@ -824,8 +1141,13 @@ def android_manifest_template() -> Dict[str, Any]:
             "TEMPLATE -- copy this file, replace EVERY EXAMPLE value with "
             "the real framework observation, then REMOVE the 'template' "
             "and 'usage' fields. Every observation_source must be the "
-            "Android framework's own report (adb shell getprop / dumpsys), "
-            "never an ADCOS re-derivation. The optional apk block "
+            "Android framework's own report (adb shell getprop / dumpsys "
+            "or the framework's own callbacks), never an ADCOS "
+            "re-derivation. platform_events must be the ORDERED "
+            "authoritative platform events (non-decreasing instants); "
+            "snapshot_basis names which event produced each pre/post "
+            "snapshot (the snapshots must genuinely derive from the "
+            "recorded events' observations). The optional apk block "
             "{name, sha256} is deliberately absent: the current design is "
             "pure-stdlib Python on the handset with NO APK; record its "
             "absence honestly rather than fabricating provenance."
@@ -839,6 +1161,112 @@ def android_manifest_template() -> Dict[str, Any]:
             ),
             "observation_source": (
                 "adb shell getprop (authoritative device report)"
+            ),
+        },
+        "platform_events": [
+            {
+                "kind": "EXAMPLE-EVENT-REPLACE (e.g. "
+                "connectivity-callback-on-available)",
+                "source": (
+                    "EXAMPLE-REPLACE: the authoritative framework signal "
+                    "that caused the event (e.g. the ConnectivityManager "
+                    "NetworkCallback / the framework's connectivity "
+                    "report)"
+                ),
+                "instant": (
+                    "2025-01-01T00:00:00Z-EXAMPLE-REPLACE (the event's "
+                    "own observation instant, RFC 3339)"
+                ),
+                "observation": {
+                    "mDataNetworkType": "none",
+                    "active_network": "wifi (netId 100)",
+                    "note": (
+                        "EXAMPLE-REPLACE: the authoritative framework "
+                        "data carried by THIS event (the observation "
+                        "that caused it -- never a later re-read); "
+                        "mDataNetworkType=none means no mobile data in "
+                        "use (Wi-Fi is the active network)"
+                    ),
+                },
+            },
+            {
+                "kind": "EXAMPLE-EVENT-REPLACE (e.g. "
+                "wifi-disabled-trigger)",
+                "source": (
+                    "EXAMPLE-REPLACE: the framework's connectivity "
+                    "reports + the agent's own trigger record"
+                ),
+                "instant": "2025-01-01T00:01:00Z-EXAMPLE-REPLACE",
+                "observation": {
+                    "wifi_enabled": False,
+                    "note": "EXAMPLE-REPLACE: the trigger observation",
+                },
+            },
+            {
+                "kind": "EXAMPLE-EVENT-REPLACE (e.g. "
+                "connectivity-callback-on-available)",
+                "source": (
+                    "EXAMPLE-REPLACE: the framework's connectivity "
+                    "report after the trigger"
+                ),
+                "instant": "2025-01-01T00:01:05Z-EXAMPLE-REPLACE",
+                "observation": {
+                    "mDataNetworkType": "nr",
+                    "mNrState": "connected",
+                    "active_network": "cellular (netId 101)",
+                    "note": (
+                        "EXAMPLE-REPLACE: the post-trigger framework "
+                        "data carried by THIS event"
+                    ),
+                },
+            },
+        ],
+        "snapshot_basis": {
+            "pre": {
+                "event_index": 0,
+                "detail": (
+                    "EXAMPLE-REPLACE: which platform event produced the "
+                    "PRE-trigger snapshot (network_technology.pre MUST "
+                    "derive from this event's observation)"
+                ),
+            },
+            "post": {
+                "event_index": 2,
+                "detail": (
+                    "EXAMPLE-REPLACE: which platform event produced the "
+                    "POST-trigger snapshot (network_technology.post MUST "
+                    "derive from this event's observation)"
+                ),
+            },
+        },
+        "network_identity": {
+            "pre": (
+                "EXAMPLE-REPLACE: the framework's own identity for the "
+                "pre-trigger network (e.g. netId 100 / the network "
+                "handle from dumpsys connectivity)"
+            ),
+            "post": (
+                "EXAMPLE-REPLACE: the framework's own identity for the "
+                "post-trigger network (e.g. netId 101)"
+            ),
+            "observation_source": (
+                "adb shell dumpsys connectivity (the framework's own "
+                "network identity report)"
+            ),
+        },
+        "metered": {
+            "pre": False,
+            "post": True,
+            "observation_source": (
+                "the framework's metering report (ConnectivityManager "
+                "isActiveNetworkMetered / the connectivity dump)"
+            ),
+        },
+        "cellular": {
+            "active": True,
+            "observation_source": (
+                "adb shell dumpsys telephony.registry / connectivity "
+                "(the framework's own data-network state)"
             ),
         },
         "network_technology": {
@@ -884,7 +1312,7 @@ def android_manifest_template() -> Dict[str, Any]:
                 "EXAMPLE-REPLACE: the raw mDataNetworkType/mNrState lines"
             ),
             "dumpsys_connectivity_excerpt": (
-                "EXAMPLE-REPLACE: the raw tethering state lines"
+                "EXAMPLE-REPLACE: the raw tethering/network-id state lines"
             ),
         },
     }
@@ -1390,6 +1818,657 @@ def _sender_event(
     return None
 
 
+# ---------------------------------------------------------------------------
+# Handover evidence: the ACR-005/006 derivations (correction cycle 3)
+# ---------------------------------------------------------------------------
+
+#: The honest recovery-model statement recorded in every handover
+#: document (ACR-006): where process death is tested, recovery must be
+#: checkpoint/snapshot + journal tail + fresh platform observation,
+#: with the existing honest session-lost semantics preserved.  The
+#: W040 harness does NOT test process death -- and never makes the
+#: process appear continuously alive merely for the experiment.
+_HONEST_RECOVERY_MODEL = (
+    "checkpoint/snapshot + append-only journal tail + fresh platform "
+    "observation; the existing honest session-lost semantics are "
+    "preserved (the process is never made to appear continuously "
+    "alive merely for the experiment)"
+)
+
+
+def _sender_events(
+    sender_result: Mapping[str, Any]
+) -> List[Dict[str, Any]]:
+    """The participant's own journal events, in journal order."""
+    return [
+        dict(event)
+        for event in (sender_result.get("events") or [])
+        if isinstance(event, Mapping)
+    ]
+
+
+def derive_handover_lifecycle(
+    sender_result: Mapping[str, Any], session_id: Any
+) -> List[Dict[str, Any]]:
+    """Derive the ordered ACR-005 path-lifecycle sequence from the
+    participant's OWN journal (never caller-asserted).
+
+    Each stage entry carries the stage name, the journal event KIND
+    that evidences it (the EXISTING frozen pilot vocabulary -- there is
+    no second event authority), the event's own observation instant,
+    and the payload marker that matched.  Stages appear in journal
+    order; an incomplete transition yields an honest PREFIX of the
+    canonical stage order (the stages whose real evidence exists).
+    """
+    session = str(session_id)
+    stage_order = [name for name, _why in HANDOVER_LIFECYCLE_STAGES]
+    derived: List[Dict[str, Any]] = []
+
+    def record_stage(name: str, event: Mapping[str, Any], marker: str) -> None:
+        derived.append(
+            {
+                "stage": name,
+                "journal_event": str(event.get("kind", "")),
+                "instant": event.get("instant", ""),
+                "marker": marker,
+            }
+        )
+
+    for event in _sender_events(sender_result):
+        kind = str(event.get("kind", ""))
+        payload = event.get("payload") or {}
+        already = {entry["stage"] for entry in derived}
+        if kind == "pilot.route-reevaluated":
+            if (
+                "candidate_discovered" not in already
+                and str(payload.get("session_id")) == session
+                and payload.get("constituents") == 2
+                and payload.get("primary") == "physical-access"
+                and payload.get("secondary") == "physical-access-secondary"
+            ):
+                record_stage(
+                    "candidate_discovered",
+                    event,
+                    "constituents=2 (physical-access + "
+                    "physical-access-secondary)",
+                )
+        elif kind == "pilot.link-loss-observed":
+            if (
+                "degradation_detected" not in already
+                and payload.get("path") == "physical-access"
+            ):
+                record_stage(
+                    "degradation_detected",
+                    event,
+                    "path=physical-access (the primary carriage death; "
+                    "confirmed by the direct re-probe + the ACTIVE->"
+                    "DEGRADED path-status-changed)",
+                )
+        elif kind == "pilot.probe-reported":
+            if (
+                "candidate_validated" not in already
+                and payload.get("target") == "physical-access-secondary"
+                and payload.get("reachable") is True
+            ):
+                record_stage(
+                    "candidate_validated",
+                    event,
+                    "target=physical-access-secondary reachable=true "
+                    "(the candidate probe BEFORE any rebind or "
+                    "retirement)",
+                )
+        elif kind == "pilot.session-reconnecting":
+            if (
+                "candidate_bound" not in already
+                and str(payload.get("session_id")) == session
+                and payload.get("via") == "physical-access-secondary"
+            ):
+                record_stage(
+                    "candidate_bound",
+                    event,
+                    "via=physical-access-secondary (the re-bind start)",
+                )
+        elif kind == "pilot.session-rebound":
+            if (
+                "rebind_committed" not in already
+                and str(payload.get("session_id")) == session
+                and payload.get("carriage") == "physical-access-secondary"
+            ):
+                record_stage(
+                    "rebind_committed",
+                    event,
+                    "carriage=physical-access-secondary (the SAME "
+                    "session id)",
+                )
+        elif kind == "pilot.datagram-sent":
+            if (
+                "candidate_traffic_probe" not in already
+                and str(payload.get("session_id")) == session
+                and payload.get("carriage") == "physical-access-secondary"
+            ):
+                record_stage(
+                    "candidate_traffic_probe",
+                    event,
+                    "the already-protected transition datagram re-sent "
+                    "on the secondary",
+                )
+        elif kind == "pilot.datagram-received":
+            if (
+                "activation_committed" not in already
+                and str(payload.get("session_id")) == session
+                and payload.get("carriage") == "physical-access-secondary"
+            ):
+                record_stage(
+                    "activation_committed",
+                    event,
+                    "the echoed protected datagram verified on the new "
+                    "path (the data-plane proof precedes the "
+                    "control-plane commit)",
+                )
+        elif kind == "pilot.path-status-changed":
+            if (
+                "old_path_retired" not in already
+                and str(payload.get("session_id")) == session
+                and payload.get("to") == "FAILED"
+                and payload.get("from") == "DEGRADED"
+            ):
+                record_stage(
+                    "old_path_retired",
+                    event,
+                    "the primary constituent DEGRADED->FAILED (only "
+                    "AFTER the data-plane proof)",
+                )
+    # canonical order enforcement: the derived stages must already be
+    # in the canonical relative order (they are derived in journal
+    # order; a stage appearing out of canonical order is dropped --
+    # the honest prefix discipline)
+    canonical_index = {name: i for i, name in enumerate(stage_order)}
+    ordered: List[Dict[str, Any]] = []
+    last = -1
+    for entry in derived:
+        index = canonical_index.get(str(entry["stage"]), -1)
+        if index > last:
+            ordered.append(entry)
+            last = index
+    return ordered
+
+
+def _handover_path_records(
+    *,
+    sender_result: Mapping[str, Any],
+    host_route: Mapping[str, Any],
+    access_technology_pre: Mapping[str, Any],
+    access_technology_post: Mapping[str, Any],
+    android_manifest: Optional[Mapping[str, Any]],
+    is_physical: bool,
+) -> Dict[str, Dict[str, Any]]:
+    """Build the two ACR-005 first-class NetworkPath records (OLD and
+    NEW) from the participant's own transition record, the real host
+    observations, and (when bound) the Android platform's own manifest
+    -- never caller-asserted.
+
+    The path is a distinct OBJECT from the logical session and from
+    the platform observation: each record carries the ADCOS constituent
+    id plus the access kind, the platform's own network identity, the
+    host interface, the route, the metering report, the reachability,
+    and the ADCOS validation state -- a generic ``wifi``/``cellular``
+    label alone is never sufficient.  Where a platform observation
+    does not exist (a rehearsal, or an unbound manifest), the record
+    states that EXPLICITLY and honestly -- never a fabricated identity.
+    """
+    transition = (
+        (sender_result.get("observations") or {}).get("handover") or {}
+    )
+    interfaces_before = list(
+        (sender_result.get("observations") or {}).get(
+            "interfaces_observed_before"
+        )
+        or []
+    )
+    interfaces_after = list(
+        (sender_result.get("observations") or {}).get("interfaces_observed")
+        or []
+    )
+    tether = str(host_route.get("tether_interface", ""))
+
+    manifest_identity = {}
+    manifest_metered = {}
+    if isinstance(android_manifest, Mapping):
+        manifest_identity = dict(android_manifest.get("network_identity") or {})
+        manifest_metered = dict(android_manifest.get("metered") or {})
+
+    def _platform_identity(which: str) -> str:
+        value = str(manifest_identity.get(which, "") or "")
+        if value:
+            return value
+        if is_physical:
+            return (
+                "none (no Android observation manifest bound -- the "
+                "platform's own network identity for the %s path is "
+                "honestly unobserved)" % (which,)
+            )
+        return (
+            "none (rehearsal: no platform observation exists -- the "
+            "handover ran as a host process over the loopback carriages)"
+        )
+
+    def _metered(which: str) -> str:
+        value = manifest_metered.get(which)
+        if isinstance(value, bool):
+            return "metered" if value else "unmetered"
+        if is_physical:
+            return (
+                "unknown (no Android observation manifest bound -- the "
+                "platform's metering report for the %s path is honestly "
+                "unobserved)" % (which,)
+            )
+        return (
+            "unknown (rehearsal: no platform metering observation "
+            "exists)"
+        )
+
+    pre_technology = str(access_technology_pre.get("technology", "") or "")
+    post_technology = str(access_technology_post.get("technology", "") or "")
+
+    old_access_kind = (
+        "wifi (the platform-reported pre-transition access technology)"
+        if is_physical and pre_technology and pre_technology != "none"
+        else (
+            "none-reported (the pre-transition platform technology was "
+            "%r)" % (pre_technology,)
+            if is_physical
+            else "loopback-rehearsal (host process; no physical access "
+            "technology)"
+        )
+    )
+    new_access_kind = (
+        "usb-tether-cellular (backed by the platform-reported "
+        "post-transition technology %r)" % (post_technology,)
+        if is_physical and post_technology and post_technology != "none"
+        else (
+            "none-reported (the post-transition platform technology was "
+            "%r)" % (post_technology,)
+            if is_physical
+            else "loopback-rehearsal (the relay leg over loopback; no "
+            "physical access technology)"
+        )
+    )
+
+    old_validation = str(transition.get("old_path_status_final", "") or "")
+    new_validation = str(transition.get("new_path_status_final", "") or "")
+    old_validation_state = (
+        "%s (constituent; death %s; %s)"
+        % (
+            old_validation or "?",
+        "confirmed" if transition.get("transition_confirmed") else "unconfirmed",
+            "retired after the data-plane proof"
+            if transition.get("old_path_retired")
+            else "preserved (no activation committed -- recoverable)",
+        )
+    )
+    new_validation_state = (
+        "%s (constituent; candidate probe reachable=%s; protected "
+        "traffic probe verified=%s)"
+        % (
+            new_validation or "?",
+            transition.get("candidate_probe_reachable"),
+            bool(transition.get("candidate_traffic_probe")),
+        )
+    )
+
+    old_reachability = (
+        "unreachable (the honest post-death re-probe of the direct "
+        "access point: reachable=%s)"
+        % (transition.get("reprobe_reachable"),)
+        if transition.get("transition_confirmed")
+        else "unknown (the transition did not confirm a death: %s)"
+        % (transition.get("incomplete_reason") or "not attempted",)
+    )
+    new_reachability = (
+        "reachable (the candidate access-point probe: reachable=%s)"
+        % (transition.get("candidate_probe_reachable"),)
+        if transition.get("candidate_validated")
+        else "unvalidated (no candidate probe evidence: %s)"
+        % (transition.get("incomplete_reason") or "not attempted",)
+    )
+
+    old_interface = (
+        "device-side interfaces before the transition: %s; host "
+        "pre-transition route: %s"
+        % (
+            ", ".join(interfaces_before) or "none observed",
+            str(host_route.get("pre_transition_route", "") or ""),
+        )
+    )
+    new_interface = (
+        "host USB-tether interface: %s (addresses: %s); device-side "
+        "interfaces after the transition: %s"
+        % (
+            tether or "none observed",
+            ", ".join(
+                str(a) for a in (host_route.get("tether_interface_addresses") or [])
+            )
+            or "none observed",
+            ", ".join(interfaces_after) or "none observed",
+        )
+    )
+
+    return {
+        "old": {
+            "path_id": str(transition.get("failed_path_id", "") or ""),
+            "access_kind": old_access_kind,
+            "platform_network_identity": _platform_identity("pre"),
+            "host_interface": old_interface,
+            "route": str(
+                host_route.get("pre_transition_route", "") or ""
+            ),
+            "metered": _metered("pre"),
+            "reachability": old_reachability,
+            "validation_state": old_validation_state,
+        },
+        "new": {
+            "path_id": str(transition.get("active_path_id", "") or ""),
+            "access_kind": new_access_kind,
+            "platform_network_identity": _platform_identity("post"),
+            "host_interface": new_interface,
+            "route": str(
+                host_route.get("post_transition_route", "") or ""
+            ),
+            "metered": _metered("post"),
+            "reachability": new_reachability,
+            "validation_state": new_validation_state,
+        },
+    }
+
+
+def derive_evidence_layers(
+    document: Mapping[str, Any]
+) -> Dict[str, Dict[str, Any]]:
+    """Derive the per-layer proof separation (PHYSICAL / PLATFORM /
+    PATH / ADCOS / TRANSPORT) from the document's OWN facts -- never
+    promoting a lower-level observation into a higher-level claim.
+
+    A layer is proven ONLY by that layer's own evidence: PHYSICAL by
+    the physical execution itself (never by a rehearsal), PLATFORM by
+    the framework's own observations (never by ADCOS-side inference),
+    PATH by the real host path records, ADCOS by the session
+    bind/rebind facts, TRANSPORT by the independent receiver
+    corroboration (never by the sender's own send record alone).
+    """
+    is_physical = document.get("is_physical") is True
+    identity = document.get("device_identity") or {}
+    pre = document.get("access_technology_pre") or {}
+    post = document.get("access_technology_post") or {}
+    paths = document.get("paths") or {}
+    adcos = document.get("adcos") or {}
+    sender = adcos.get("sender_result") or {}
+    receiver = adcos.get("receiver_result") or {}
+    session_id = str(adcos.get("session_id", "") or "")
+
+    session_corroborated = False
+    direct_corroborated = False
+    relay_corroborated = False
+    if session_id:
+        for event in receiver.get("events") or []:
+            payload = event.get("payload") or {}
+            if (
+                event.get("kind") == "pilot.datagram-received"
+                and str(payload.get("session_id")) == session_id
+            ):
+                session_corroborated = True
+                if payload.get("carriage") == "direct":
+                    direct_corroborated = True
+                if payload.get("carriage") == "relay":
+                    relay_corroborated = True
+
+    session_identity_stable = (
+        str(adcos.get("session_id_before", "")) == str(session_id)
+        and str(adcos.get("session_id_after", "")) == str(session_id)
+        and bool(session_id)
+    )
+
+    layers: Dict[str, Dict[str, Any]] = {
+        "PHYSICAL": {
+            "claims": [
+                "the handset participates as a real ADCOS endpoint",
+                "the physical trigger (the Wi-Fi disable) occurred",
+            ],
+            "proven": (
+                is_physical
+                and bool(str(identity.get("serial", "") or ""))
+                and not str(identity.get("observation_source", "")).startswith(
+                    "none (rehearsal"
+                )
+            ),
+            "basis": (
+                "the physical execution record (is_physical) + the "
+                "adb-observed device identity"
+            ),
+        },
+        "PLATFORM": {
+            "claims": [
+                "the Android framework's own access-technology "
+                "observations (pre/post)",
+                "the NR-only 5G determination",
+            ],
+            "proven": (
+                is_physical
+                and bool(str(pre.get("technology", "") or ""))
+                and bool(str(post.get("technology", "") or ""))
+            ),
+            "basis": (
+                "the framework's own reports captured by the harness "
+                "(getprop/dumpsys) and/or the bound Android observation "
+                "manifest -- never ADCOS re-derivation"
+            ),
+        },
+        "PATH": {
+            "claims": [
+                "the OLD path record (identity, interface, route, "
+                "reachability, validation state)",
+                "the NEW path record (the USB-tether host path)",
+            ],
+            "proven": (
+                bool(str((paths.get("old") or {}).get("path_id", "") or ""))
+                and bool(str((paths.get("new") or {}).get("path_id", "") or ""))
+                and bool(
+                    str((paths.get("old") or {}).get("route", "") or "")
+                )
+                and bool(
+                    str((paths.get("new") or {}).get("route", "") or "")
+                )
+            ),
+            "basis": (
+                "the real host route/interface observations + the "
+                "participant's own transition record (honest even in a "
+                "rehearsal: the loopback path is a genuinely observed "
+                "path)"
+            ),
+        },
+        "ADCOS": {
+            "claims": [
+                "the session established and bound (primary carriage)",
+                "the re-bind on the SAME logical session id (secondary)",
+                "the session-record digest stability across the "
+                "transition",
+            ],
+            "proven": (
+                isinstance(adcos.get("bind_event"), Mapping)
+                and isinstance(adcos.get("rebind_event"), Mapping)
+                and adcos.get("session_continuity") is True
+                and session_identity_stable
+            ),
+            "basis": (
+                "the participant's own journal events (session-bound + "
+                "session-rebound on one session id) + the byte-identical "
+                "session-record digest"
+            ),
+        },
+        "TRANSPORT": {
+            "claims": [
+                "the protected datagram flowed on the new path",
+                "the independent receiver corroborates the session "
+                "datagrams on BOTH access points",
+            ],
+            "proven": (
+                _is_digest(adcos.get("payload_digest"))
+                and session_corroborated
+                and direct_corroborated
+                and relay_corroborated
+                and isinstance(sender.get("checks"), list)
+                and bool(sender.get("checks"))
+            ),
+            "basis": (
+                "the post-rebind payload digest + the receiver journal's "
+                "both-carriage corroboration (the sender's own send "
+                "record alone never proves this layer)"
+            ),
+        },
+    }
+    return layers
+
+
+def derive_five_g_chain(
+    document: Mapping[str, Any]
+) -> Dict[str, Dict[str, Any]]:
+    """Derive the criterion-2 eight-link 5G chain from the document's
+    OWN facts.  Every link is backed by ITS OWN layer's evidence; any
+    absent link keeps the criterion NOT-TESTABLE (the chain record
+    preserves exactly which links are present -- the honest partial
+    information lives in the RECORD, never in a promoted status)."""
+    post = document.get("access_technology_post") or {}
+    android = document.get("android_observations") or {}
+    manifest = android.get("manifest") or {}
+    network = manifest.get("network_technology") or {}
+    tether_manifest = manifest.get("usb_tether") or {}
+    cellular_manifest = manifest.get("cellular") or {}
+    host = document.get("host") or {}
+    tether = str(host.get("tether_interface", "") or "")
+    post_route = str(host.get("post_transition_route", "") or "")
+    paths = document.get("paths") or {}
+    new_path = paths.get("new") or {}
+    adcos = document.get("adcos") or {}
+    session_id = str(adcos.get("session_id", "") or "")
+    receiver = adcos.get("receiver_result") or {}
+    relay_corroborated = False
+    if session_id:
+        for event in receiver.get("events") or []:
+            payload = event.get("payload") or {}
+            if (
+                event.get("kind") == "pilot.datagram-received"
+                and str(payload.get("session_id")) == session_id
+                and payload.get("carriage") == "relay"
+            ):
+                relay_corroborated = True
+    new_validation = str(new_path.get("validation_state", "") or "")
+
+    links: Dict[str, Dict[str, Any]] = {
+        "android_nr_report": {
+            "layer": "PLATFORM",
+            "present": (
+                post.get("technology") == "nr"
+                and post.get("is_5g") is True
+            ),
+            "basis": (
+                "the framework's post-transition NR report "
+                "(technology=%r is_5g=%r)"
+                % (post.get("technology"), post.get("is_5g"))
+            ),
+        },
+        "cellular_network_active": {
+            "layer": "PLATFORM",
+            "present": (
+                cellular_manifest.get("active") is True
+                or (
+                    bool(network.get("post"))
+                    and str(network.get("post")) != "none"
+                    and isinstance(manifest, Mapping)
+                    and bool(manifest)
+                )
+            ),
+            "basis": (
+                "the framework's cellular data-network state "
+                "(manifest cellular.active=%r)"
+                % (cellular_manifest.get("active"),)
+            ),
+        },
+        "tether_backed_by_cellular": {
+            "layer": "PLATFORM",
+            "present": (
+                tether_manifest.get("enabled") is True
+                and tether_manifest.get("backed_by_cellular") is True
+            ),
+            "basis": (
+                "the framework's USB-tether state (enabled=%r "
+                "backed_by_cellular=%r)"
+                % (
+                    tether_manifest.get("enabled"),
+                    tether_manifest.get("backed_by_cellular"),
+                )
+            ),
+        },
+        "host_path_identified": {
+            "layer": "PATH",
+            "present": bool(tether) and bool(post_route) and tether in post_route,
+            "basis": (
+                "the host USB-tether interface %r + the post-transition "
+                "route running via it (route %r)"
+                % (tether, post_route[:80])
+            ),
+        },
+        "adcos_path_validated": {
+            "layer": "ADCOS",
+            "present": (
+                new_validation.startswith("ACTIVE")
+                and "reachable=True" in new_validation
+                and "verified=True" in new_validation
+            ),
+            "basis": (
+                "the new path record's validation state (%r)"
+                % (new_validation,)
+            ),
+        },
+        "adcos_session_bound_to_path": {
+            "layer": "ADCOS",
+            "present": (
+                isinstance(adcos.get("bind_event"), Mapping)
+                and isinstance(adcos.get("rebind_event"), Mapping)
+                and adcos.get("session_continuity") is True
+                and str(adcos.get("session_id_before", ""))
+                == str(adcos.get("session_id_after", ""))
+                and bool(session_id)
+            ),
+            "basis": (
+                "the bind + rebind events on the SAME session id "
+                "(before=%r after=%r)"
+                % (
+                    str(adcos.get("session_id_before", ""))[:24],
+                    str(adcos.get("session_id_after", ""))[:24],
+                )
+            ),
+        },
+        "real_packet_transmitted": {
+            "layer": "TRANSPORT",
+            "present": _is_digest(adcos.get("payload_digest")),
+            "basis": (
+                "the digest of the protected datagram that flowed after "
+                "the re-bind (%r)"
+                % (str(adcos.get("payload_digest", ""))[:24],)
+            ),
+        },
+        "independent_receiver_verification": {
+            "layer": "TRANSPORT",
+            "present": relay_corroborated,
+            "basis": (
+                "the independent receiver (appliance) journal "
+                "corroborating the session datagram on the relay "
+                "carriage"
+            ),
+        },
+    }
+    return links
+
+
 def assemble_handover_evidence(
     *,
     environment: Mapping[str, Any],
@@ -1419,6 +2498,22 @@ def assemble_handover_evidence(
     CROSS-CORROBORATED (serial + post technology agreement) -- it is
     recorded under ``android_observations`` and never overrides the
     ADCOS-side observations.  The classification is DERIVED.
+
+    Correction cycle 3 (the ACR-005/006 alignment) additionally
+    assembles: the two FIRST-CLASS path records (``paths.old`` /
+    ``paths.new`` -- the physical network path as a distinct object
+    from the logical session and the platform observation); the
+    explicit session-identity assertion (``session_id_before`` ==
+    ``session_id_after`` -- the PRIMARY continuity assertion, while
+    the path/interface/route MAY change); the ordered path-lifecycle
+    sequence (``lifecycle`` -- derived from the participant's own
+    journal through the existing frozen vocabulary); the per-layer
+    proof separation (``evidence_layers`` -- PHYSICAL / PLATFORM /
+    PATH / ADCOS / TRANSPORT, derived, never promoting); the
+    criterion-2 eight-link chain record (``five_g_chain``); and the
+    honest recovery position (``recovery`` -- process death is NOT
+    tested by this harness and the process is never made to appear
+    continuously alive merely for the experiment).
     """
     session = ((sender_result.get("observations") or {}).get("session")) or {}
     session_id = session.get("session_id", "")
@@ -1431,6 +2526,17 @@ def assemble_handover_evidence(
     handover = ((sender_result.get("observations") or {}).get("handover")) or {}
     payload_digest = str(handover.get("transition_payload_digest", ""))
     session_continuity = handover.get("session_record_stable") is True
+    session_id_before = str(handover.get("session_id_before", session_id))
+    session_id_after = str(handover.get("session_id_after", session_id))
+    path_records = _handover_path_records(
+        sender_result=sender_result,
+        host_route=host_route,
+        access_technology_pre=access_technology_pre,
+        access_technology_post=access_technology_post,
+        android_manifest=android_manifest,
+        is_physical=is_physical,
+    )
+    lifecycle = derive_handover_lifecycle(sender_result, session_id)
 
     artifacts = [
         _artifact_hash("device-result", _canonical_bytes(sender_result)),
@@ -1490,6 +2596,8 @@ def assemble_handover_evidence(
             ),
             "device_node_id": str(sender_result.get("node_id", "")),
             "session_id": str(session_id),
+            "session_id_before": session_id_before,
+            "session_id_after": session_id_after,
             "bind_event": bind_event,
             "rebind_event": rebind_event,
             "sender_result": dict(sender_result),
@@ -1501,6 +2609,21 @@ def assemble_handover_evidence(
             },
             "payload_digest": payload_digest,
             "session_continuity": session_continuity,
+        },
+        "paths": path_records,
+        "lifecycle": lifecycle,
+        "recovery": {
+            "process_death_tested": False,
+            "model": _HONEST_RECOVERY_MODEL,
+            "note": (
+                "the W040 handover harness does NOT test process death; "
+                "any operator-driven process-death test must follow the "
+                "ACR-006 recovery model above and must preserve the "
+                "honest session-lost semantics (a production recovery "
+                "implementation remains an authorized-work-item concern, "
+                "recorded honestly as an architectural gap -- not "
+                "implemented inside W040)"
+            ),
         },
         "traffic_verification": dict(traffic_verification or {}),
         "verification": {
@@ -1518,6 +2641,11 @@ def assemble_handover_evidence(
         }
     if android_observations is not None:
         document["android_observations"] = android_observations
+    # the ACR-005/006 derived records (correction cycle 3): the
+    # per-layer proof separation and the criterion-2 chain are DERIVED
+    # from the assembled document's own facts -- never asserted
+    document["evidence_layers"] = derive_evidence_layers(document)
+    document["five_g_chain"] = derive_five_g_chain(document)
     ok, problems = validate_handover_evidence(document)
     document["classification"] = {
         "criterion_1_real_devices": classify_handover_participation(document),
@@ -1545,6 +2673,27 @@ def validate_handover_evidence(
     rule on the post-transition access technology; the Android-manifest
     cross-corroboration (serial + post technology agreement); and the
     anti-promotion classification consistency.
+
+    Correction cycle 3 (the ACR-005/006 alignment) additionally
+    validates: the PRIMARY session-identity assertion
+    (``session_id_before == session_id_after == the corroborated
+    session id`` -- a handover that establishes a NEW logical session
+    merely to succeed is not a handover); the FIRST-CLASS path
+    records (each path object complete, the two path constituents
+    DISTINCT, the old path retired only after the data-plane proof,
+    the prior path preserved where the transition was honestly
+    incomplete); the ORDERED lifecycle (the recorded sequence matches
+    the re-derivation from the participant's own journal, in the
+    canonical stage order, with retirement never preceding
+    activation); the per-layer proof separation (a layer marked
+    proven must be backed by that layer's OWN evidence -- PHYSICAL
+    can never be proven by a rehearsal, TRANSPORT never by the
+    sender's own send record); the criterion-2 eight-link chain (any
+    absent link keeps the criterion NOT-TESTABLE -- never weakened,
+    never PARTIAL); and the honest recovery position (an explicit
+    process-death-tested boolean + the ACR-006 recovery model -- the
+    process is never made to appear continuously alive merely for
+    the experiment).
     """
     problems: List[str] = []
     if document.get("kind") != "physical-handover-evidence":
@@ -1632,6 +2781,252 @@ def validate_handover_evidence(
         if str(rebind.get("session_id", "")) != str(session_id or ""):
             problems.append(
                 "the rebind event does not carry the same session id"
+            )
+
+    # -- the PRIMARY session-identity assertion (ACR-005): the session
+    # -- id BEFORE the transition MUST equal the id AFTER (re-observed
+    # -- through the session authority), while the path/interface/route
+    # -- MAY change; a handover that establishes a NEW logical session
+    # -- merely to succeed is not a handover --------------------------
+    before = str(_dig(document, "adcos.session_id_before") or "")
+    after = str(_dig(document, "adcos.session_id_after") or "")
+    if before or after:
+        if not before or not after:
+            problems.append(
+                "the session-identity assertion is one-sided (before=%r "
+                "after=%r)" % (before[:24], after[:24])
+            )
+        elif before != after:
+            problems.append(
+                "the PRIMARY continuity assertion FAILED: session_id "
+                "BEFORE %r != session_id AFTER %r (a handover that "
+                "establishes a new logical session merely to succeed is "
+                "not a handover)" % (before[:24], after[:24])
+            )
+        elif session_id and before != str(session_id):
+            problems.append(
+                "the session-identity assertion does not match the "
+                "corroborated session id"
+            )
+
+    # -- the FIRST-CLASS path records (ACR-005): each path object is a
+    # -- distinct object from the logical session; the two path
+    # -- constituents MUST be distinct; the old path is retired only
+    # -- after the data-plane proof; a preserved (non-retired) prior
+    # -- path is honest only where the transition was honestly
+    # -- incomplete -----------------------------------------------
+    paths = document.get("paths") or {}
+    old_path = paths.get("old") or {}
+    new_path = paths.get("new") or {}
+    if isinstance(paths, Mapping) and paths:
+        for label, record in (("old", old_path), ("new", new_path)):
+            if not isinstance(record, Mapping) or not record:
+                problems.append(
+                    "the %s path record is missing (the physical network "
+                    "path is a first-class object -- ACR-005)" % (label,)
+                )
+                continue
+            for field, _why in PATH_RECORD_REQUIRED:
+                if not str(record.get(field, "") or ""):
+                    marker = _dig(document, "honest_absences")
+                    if not (
+                        isinstance(marker, list)
+                        and ("paths.%s.%s" % (label, field)) in marker
+                    ):
+                        problems.append(
+                            "the %s path record omits %r without an honest "
+                            "absence" % (label, field)
+                        )
+        old_pid = str(old_path.get("path_id", "") or "")
+        new_pid = str(new_path.get("path_id", "") or "")
+        if old_pid and new_pid and old_pid == new_pid:
+            problems.append(
+                "the old and new path records carry the SAME constituent "
+                "id -- a handover must change the path, not the session"
+            )
+        transition = (
+            ((document.get("adcos") or {}).get("sender_result") or {})
+            .get("observations", {})
+            .get("handover")
+            or {}
+        )
+        old_state = str(old_path.get("validation_state", "") or "")
+        new_state = str(new_path.get("validation_state", "") or "")
+        retired = bool(transition.get("old_path_retired"))
+        activation = bool(transition.get("activation_committed"))
+        if retired and not activation:
+            problems.append(
+                "the old path is retired WITHOUT the activation commit -- "
+                "the control-plane retirement must FOLLOW the data-plane "
+                "proof (ACR-006 control/data separation)"
+            )
+        if retired and not old_state.startswith("FAILED"):
+            problems.append(
+                "the old path record's validation state %r does not "
+                "reflect the retirement" % (old_state[:40],)
+            )
+        if transition and transition.get("prior_path_preserved"):
+            if retired:
+                problems.append(
+                    "the transition claims BOTH retirement and preservation "
+                    "of the prior path -- preservation is honest only where "
+                    "the transition was incomplete (no activation, no "
+                    "retirement)"
+                )
+            elif not old_state.startswith("DEGRADED"):
+                problems.append(
+                    "the prior path is claimed preserved but its validation "
+                    "state %r is not the preserved DEGRADED state"
+                    % (old_state[:40],)
+                )
+        if activation and new_state and not new_state.startswith("ACTIVE"):
+            problems.append(
+                "the new path record's validation state %r does not "
+                "reflect the committed activation" % (new_state[:40],)
+            )
+
+    # -- the ORDERED lifecycle (ACR-005 journal-first evidence): the
+    # -- recorded sequence must match the re-derivation from the
+    # -- participant's OWN journal, in the canonical stage order -----
+    lifecycle = document.get("lifecycle")
+    if not isinstance(lifecycle, list) or not lifecycle:
+        problems.append(
+            "the ordered path-lifecycle sequence is missing (journal-first "
+            "evidence -- ACR-005)"
+        )
+    else:
+        sender_result = (document.get("adcos") or {}).get("sender_result") or {}
+        rederived = derive_handover_lifecycle(
+            sender_result, _dig(document, "adcos.session_id")
+        )
+        recorded_stages = [str(entry.get("stage")) for entry in lifecycle]
+        rederived_stages = [str(entry.get("stage")) for entry in rederived]
+        if recorded_stages != rederived_stages:
+            problems.append(
+                "the recorded lifecycle %r does not match the sequence "
+                "re-derived from the participant's journal %r"
+                % (recorded_stages, rederived_stages)
+            )
+        canonical = [name for name, _why in HANDOVER_LIFECYCLE_STAGES]
+        rank = [canonical.index(s) for s in recorded_stages if s in canonical]
+        if rank != sorted(rank) or len(rank) != len(recorded_stages):
+            problems.append(
+                "the lifecycle stages %r are not in the canonical order %r"
+                % (recorded_stages, canonical)
+            )
+        if "old_path_retired" in recorded_stages and (
+            "activation_committed" not in recorded_stages
+            or recorded_stages.index("old_path_retired")
+            < recorded_stages.index("activation_committed")
+        ):
+            problems.append(
+                "the old path is retired BEFORE the activation commit in "
+                "the lifecycle -- retirement must follow the data-plane "
+                "proof"
+            )
+        transition = (
+            (sender_result.get("observations") or {}).get("handover") or {}
+        )
+        if (
+            transition.get("old_path_retired")
+            and recorded_stages != canonical
+        ):
+            problems.append(
+                "a completed transition must evidence the COMPLETE "
+                "lifecycle %r (got %r)" % (canonical, recorded_stages)
+            )
+
+    # -- the per-layer proof separation (the evidence-plane rule): a
+    # -- layer marked proven must be backed by that layer's OWN
+    # -- evidence; the recorded layers must match the re-derivation --
+    layers = document.get("evidence_layers")
+    if not isinstance(layers, Mapping) or not layers:
+        problems.append(
+            "the per-layer proof separation is missing (every physical "
+            "result must identify which layer it proves)"
+        )
+    else:
+        rederived_layers = derive_evidence_layers(document)
+        for layer in EVIDENCE_LAYERS:
+            recorded = layers.get(layer)
+            if not isinstance(recorded, Mapping) or not recorded:
+                problems.append(
+                    "the %s evidence layer is missing" % (layer,)
+                )
+                continue
+            recorded_proven = recorded.get("proven")
+            if not isinstance(recorded_proven, bool):
+                problems.append(
+                    "the %s layer's proven flag must be an explicit bool"
+                    % (layer,)
+                )
+            elif recorded_proven != rederived_layers[layer]["proven"]:
+                problems.append(
+                    "the %s layer is marked proven=%r but its own facts "
+                    "derive proven=%r (no lower-level observation may be "
+                    "promoted into a higher-level claim)"
+                    % (layer, recorded_proven, rederived_layers[layer]["proven"])
+                )
+        if (
+            (layers.get("PHYSICAL") or {}).get("proven") is True
+            and is_physical is not True
+        ):
+            problems.append(
+                "PHYSICAL is proven in a rehearsal document (a rehearsal "
+                "can never prove the physical layer)"
+            )
+        if (layers.get("TRANSPORT") or {}).get("proven") is True and not (
+            direct_corroborated and relay_corroborated
+        ):
+            problems.append(
+                "TRANSPORT is proven without the independent receiver's "
+                "both-carriage corroboration"
+            )
+
+    # -- the criterion-2 chain: any absent link keeps the criterion
+    # -- NOT-TESTABLE (never weakened; never PARTIAL) -----------------
+    chain = document.get("five_g_chain")
+    if not isinstance(chain, Mapping) or not chain:
+        problems.append(
+            "the criterion-2 eight-link chain record is missing"
+        )
+    else:
+        rederived_chain = derive_five_g_chain(document)
+        for link, _why in FIVE_G_CHAIN_LINKS:
+            recorded = chain.get(link)
+            if not isinstance(recorded, Mapping) or not recorded:
+                problems.append("the 5G chain link %r is missing" % (link,))
+                continue
+            recorded_present = recorded.get("present")
+            if not isinstance(recorded_present, bool):
+                problems.append(
+                    "the 5G chain link %r present flag must be an explicit "
+                    "bool" % (link,)
+                )
+            elif recorded_present != rederived_chain[link]["present"]:
+                problems.append(
+                    "the 5G chain link %r is marked present=%r but its own "
+                    "layer's facts derive present=%r (no promotion)"
+                    % (link, recorded_present, rederived_chain[link]["present"])
+                )
+
+    # -- the honest recovery position (ACR-006) -----------------------
+    recovery = document.get("recovery")
+    if not isinstance(recovery, Mapping) or not recovery:
+        problems.append("the honest recovery position is missing")
+    else:
+        if not isinstance(recovery.get("process_death_tested"), bool):
+            problems.append(
+                "recovery.process_death_tested must be an explicit bool "
+                "(the harness never makes the process appear "
+                "continuously alive merely for the experiment)"
+            )
+        if not str(recovery.get("model", "") or ""):
+            problems.append("recovery.model is missing")
+        elif "session-lost" not in str(recovery.get("model")):
+            problems.append(
+                "recovery.model must preserve the honest session-lost "
+                "semantics (ACR-006)"
             )
 
     # -- session continuity: a handover that broke the session is not
@@ -1737,6 +3132,14 @@ def validate_handover_evidence(
             continue  # not yet classified (assembly validates pre-classification)
         if status not in CriterionStatus.values():
             problems.append("unknown criterion status %r" % (status,))
+    if c2 == CriterionStatus.PARTIAL:
+        problems.append(
+            "criterion 2 classified PARTIAL -- the correction-cycle-3 rule "
+            "is PASS only when the COMPLETE eight-link chain is present "
+            "and NOT-TESTABLE whenever any link is absent (the chain "
+            "record preserves the partial information; the status is "
+            "never promoted)"
+        )
     if c1 == CriterionStatus.PASS and is_physical is not True:
         problems.append(
             "criterion 1 classified PASS but is_physical is not true "
@@ -1761,6 +3164,16 @@ def validate_handover_evidence(
         checks = sender.get("checks", [])
         if not all(check.get("ok") for check in checks):
             problems.append("criterion 1 PASS requires every device check to pass")
+        # the evidence-plane rule: closing a physical criterion requires
+        # EVERY layer proven by its own evidence
+        layers_record = document.get("evidence_layers") or {}
+        for layer in EVIDENCE_LAYERS:
+            if (layers_record.get(layer) or {}).get("proven") is not True:
+                problems.append(
+                    "criterion 1 PASS requires the %s layer proven by its "
+                    "own evidence (no promotion across the evidence "
+                    "planes)" % (layer,)
+                )
     if c2 == CriterionStatus.PASS:
         if is_physical is not True:
             problems.append("criterion 2 PASS requires a physical document")
@@ -1788,6 +3201,17 @@ def validate_handover_evidence(
             problems.append(
                 "criterion 2 PASS requires independent traffic verification"
             )
+        # the complete eight-link chain: every link present by its OWN
+        # layer's evidence (any absent link keeps the criterion
+        # NOT-TESTABLE -- never weakened)
+        chain_record = document.get("five_g_chain") or {}
+        for link, _why in FIVE_G_CHAIN_LINKS:
+            if (chain_record.get(link) or {}).get("present") is not True:
+                problems.append(
+                    "criterion 2 PASS requires the complete 5G chain -- the "
+                    "link %r is absent by its own layer's evidence (any "
+                    "absent link keeps the criterion NOT-TESTABLE)" % (link,)
+                )
     if (
         c2 not in (None, CriterionStatus.NOT_TESTABLE)
         and post.get("is_5g") is not True
@@ -1806,7 +3230,9 @@ def classify_handover_participation(document: Mapping[str, Any]) -> str:
     PASS requires: a physical handset participant (is_physical), the
     complete corroborated chain (session continuity + receiver
     corroboration on BOTH carriages + the executed service on the
-    secondary), and a fully valid document.  A rehearsal with the full
+    secondary), EVERY evidence layer proven by its own evidence
+    (PHYSICAL / PLATFORM / PATH / ADCOS / TRANSPORT -- correction
+    cycle 3), and a fully valid document.  A rehearsal with the full
     corroborated chain is PARTIAL (the software-class chain is
     verified; the physical demonstration is unresolved).  No device at
     all is NOT-TESTABLE.
@@ -1824,21 +3250,30 @@ def classify_handover_participation(document: Mapping[str, Any]) -> str:
     ok, _problems = validate_handover_evidence(document)
     if not ok:
         return CriterionStatus.PARTIAL
+    layers = document.get("evidence_layers") or {}
+    if not all(
+        (layers.get(layer) or {}).get("proven") is True
+        for layer in EVIDENCE_LAYERS
+    ):
+        return CriterionStatus.PARTIAL
     return CriterionStatus.PASS
 
 
 def classify_handover_five_g(document: Mapping[str, Any]) -> str:
     """The honest criterion-2 status DERIVED from the handover
-    document's facts.
+    document's facts (correction cycle 3: the complete-chain rule).
 
-    PASS requires: a physical document, the framework's NR report
-    AFTER the transition, the USB-tether interface observation, the
-    route transition onto the tether, and the independent traffic
-    verification -- all on a fully valid document.  NR observed but
-    the chain incomplete is PARTIAL; anything else (rehearsal,
-    non-NR post technology, no device) is NOT-TESTABLE (cellular is
-    never automatically 5G; a rehearsal can never close a physical
-    criterion).
+    PASS requires: a physical document AND every one of the eight
+    chain links present by its OWN layer's evidence (the framework's
+    NR report, the cellular network active, the tether backed by
+    cellular, the host path identified, the ADCOS path validated, the
+    session bound to that path, the real packet transmitted, and the
+    independent receiver verification) -- all on a fully valid
+    document.  ANY absent link keeps the criterion NOT-TESTABLE: the
+    chain record preserves exactly which links are present (the
+    honest partial information lives in the RECORD, never in a
+    promoted status); cellular is never automatically 5G; a
+    rehearsal can never close a physical criterion.
     """
     is_physical = document.get("is_physical") is True
     if document.get("kind") == "physical-environment-detection":
@@ -1848,21 +3283,15 @@ def classify_handover_five_g(document: Mapping[str, Any]) -> str:
     post = document.get("access_technology_post") or {}
     if post.get("technology") != "nr" or post.get("is_5g") is not True:
         return CriterionStatus.NOT_TESTABLE
-    host = document.get("host") or {}
-    tether = str(host.get("tether_interface", ""))
-    post_route = str(host.get("post_transition_route", ""))
-    traffic = document.get("traffic_verification") or {}
-    if (
-        not tether
-        or not post_route
-        or tether not in post_route
-        or not traffic.get("method")
-        or not traffic.get("observation")
-    ):
-        return CriterionStatus.PARTIAL
+    chain = document.get("five_g_chain") or {}
+    if not isinstance(chain, Mapping):
+        return CriterionStatus.NOT_TESTABLE
+    for link, _why in FIVE_G_CHAIN_LINKS:
+        if (chain.get(link) or {}).get("present") is not True:
+            return CriterionStatus.NOT_TESTABLE
     ok, _problems = validate_handover_evidence(document)
     if not ok:
-        return CriterionStatus.PARTIAL
+        return CriterionStatus.NOT_TESTABLE
     return CriterionStatus.PASS
 
 

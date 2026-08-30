@@ -1325,6 +1325,13 @@ def run_device_node(
         )
         digest_before_transition = _session_digest()
 
+        # the participant's REAL pre-transition interface view (the
+        # old path's device-side interface observation -- ACR-005 path
+        # record input)
+        interfaces_observed_before = [
+            snapshot.name for snapshot in interface_source.discover()
+        ]
+
         # the primary-phase exchanges (real protected echo exchanges
         # over the primary physical carriage)
         for payload_bytes in PILOT_ECHO_PAYLOADS_HANDOVER_PRIMARY:
@@ -1379,6 +1386,14 @@ def run_device_node(
         final_plan = multipath.get_plan(session_id)
         primary_failed = _plan_has_status(final_plan, "FAILED", 1)
         secondary_active = _plan_has_status(final_plan, "ACTIVE", 1)
+        # the final constituent statuses feed the ACR-005 path records
+        # (the ADCOS validation state of each path object)
+        transition["old_path_status_final"] = _plan_entry_status(
+            final_plan, transition.get("failed_path_id", "")
+        )
+        transition["new_path_status_final"] = _plan_entry_status(
+            final_plan, transition.get("active_path_id", "")
+        )
         # the interface re-observation AFTER the transition (the
         # participant's real post-transition interface view)
         interface_names = [
@@ -1457,6 +1472,9 @@ def run_device_node(
         if service_outcome is not None:
             observations["service"] = _public_record(service_outcome)
         observations["interfaces_observed"] = interface_names
+        observations["interfaces_observed_before"] = (
+            interfaces_observed_before
+        )
         observations["carriage"] = {
             "kind": "physical-access-handover",
             "primary": "physical-access",
@@ -1775,6 +1793,16 @@ def _plan_has_status(plan: Any, status: str, expect: int) -> bool:
         if entry is not None and entry.status == status:
             count += 1
     return count == expect
+
+
+def _plan_entry_status(plan: Any, path_id: str) -> str:
+    """The FINAL constituent status of one path object (the ADCOS
+    validation state feeding the ACR-005 path record); ``""`` when the
+    plan or the constituent is absent."""
+    if plan is None or not path_id:
+        return ""
+    entry = plan.get(path_id)
+    return entry.status if entry is not None else ""
 
 
 def _plan_document(plan: Any) -> Dict[str, Any]:
@@ -2228,6 +2256,25 @@ def _failover_to_secondary(
     }
 
 
+def _read_back_session_id(
+    multipath: MultipathStore, session_id: str
+) -> str:
+    """The session id read back from the session store AFTER the
+    transition -- the logical session's own identity RE-OBSERVED
+    through the production session authority, never asserted from
+    memory.
+
+    The PRIMARY handover continuity assertion (ACR-005) is
+
+        session_id BEFORE == session_id AFTER
+
+    while the path constituent, interface, and route MAY change; the
+    read-back makes the AFTER side a genuine observation.
+    """
+    session = multipath.session_store().get(session_id)
+    return session.session_id if session is not None else ""
+
+
 def _handover_transition(
     runtime: AgentRuntime,
     journal: NodeJournal,
@@ -2245,7 +2292,10 @@ def _handover_transition(
     wait_seconds: float,
     attempt_interval: float,
 ) -> Tuple[Dict[str, Any], Optional[socket.socket]]:
-    """The handover path-transition phase (WORK-040 correction cycle 2).
+    """The handover path-transition phase (WORK-040 correction cycle 2;
+    re-sequenced in correction cycle 3 onto the accepted ACR-005
+    transactional path lifecycle and the ACR-006 control/data-plane
+    separation).
 
     Attempt the transition datagram on the primary physical carriage
     until it REALLY dies -- in the rehearsal the appliance's declared
@@ -2255,16 +2305,60 @@ def _handover_transition(
     paces the attempts while the carriage is still alive).  A hard
     socket failure is an OBSERVED death; a response timeout is only a
     SUSPECTED death and is confirmed -- or refuted -- by the honest
-    re-probe (``probe_tcp_path``).  On a confirmed death the primary
-    constituent is failed through the REAL WORK-018 multipath
-    authority and the carriage re-binds onto the secondary
-    (USB-tether relayed) leg -- mirroring device-1's delivered
-    ``_failover_to_secondary`` exactly, including the RE-SEND of the
-    already-protected transition datagram on the SAME logical session.
+    re-probe (``probe_tcp_path``).
+
+    The transactional lifecycle (every stage through the EXISTING
+    production seams -- the REAL WORK-018 multipath authority and the
+    frozen pilot journal vocabulary; there is NO second event
+    authority):
+
+    ======================  ==========================================
+    stage                   the existing ADCOS mechanism
+    ======================  ==========================================
+    candidate discovered    the plan admission at session start
+                           (``pilot.route-reevaluated``; both
+                           constituents admitted -- the standing
+                           candidate is why the handover can be
+                           transactional)
+    degradation detected    ``pilot.link-loss-observed`` + the honest
+                           death-confirming re-probe
+                           (``pilot.probe-reported``) + the primary
+                           constituent ``ACTIVE -> DEGRADED``
+                           (recoverable per the frozen transition
+                           table -- degradation is recorded WITHOUT
+                           retiring the path)
+    candidate validated     the candidate access-point probe
+                           (``pilot.probe-reported``, target
+                           ``physical-access-secondary``) BEFORE any
+                           rebind or retirement; failure leaves the
+                           prior authoritative path INTACT at DEGRADED
+    candidate bound         ``pilot.session-reconnecting`` + the real
+                           connect/announce on the secondary
+    rebind committed        ``pilot.session-rebound`` (the SAME
+                           session id)
+    candidate traffic       the re-sent ALREADY-PROTECTED transition
+    probe                   datagram + its echo on the secondary
+                           (``pilot.datagram-sent``/``received``)
+    activation committed    the echoed protected datagram verified on
+                           the new path -- the DATA-PLANE proof that
+                           precedes the control-plane commit
+    old path retired        the primary constituent ``DEGRADED ->
+                           FAILED`` (``pilot.path-status-changed``) --
+                           only AFTER the data-plane proof, never
+                           before
+    ======================  ==========================================
+
+    A control-plane transition is never committed on an unvalidated
+    candidate, and is never treated as a successful data-plane
+    handover without the transport evidence (ACR-006).  Failure at any
+    pre-activation stage preserves the prior authoritative path where
+    the production contract allows it (DEGRADED is recoverable:
+    ``DEGRADED -> ACTIVE`` is a legal edge of the frozen table).
 
     Returns ``(record, secondary_sock)``; ``secondary_sock`` is None
-    whenever the transition was NOT confirmed (the record then carries
-    the honest ``incomplete_reason``).
+    whenever the transition did not complete (the record then carries
+    the honest ``incomplete_reason`` and, where a stage was reached,
+    ``prior_path_preserved``).
     """
     plan = multipath.get_plan(session_id)
     if plan is None:
@@ -2303,6 +2397,23 @@ def _handover_transition(
         "failed_path_id": primary_path_id,
         "active_path_id": secondary_path_id,
         "transition_payload_digest": sha256_hex_of_bytes(transition_payload),
+        # -- the ACR-005 first-class separation: the logical session's
+        # -- identity (BEFORE == AFTER is the PRIMARY continuity
+        # -- assertion) versus the replaceable path constituents
+        "session_id": session_id,
+        "session_id_before": session_id,
+        "session_id_after": "",
+        # -- the transactional lifecycle progress flags (each set only
+        # -- when its stage's real evidence exists)
+        "old_path_degraded": False,
+        "candidate_probe_reachable": None,
+        "candidate_validated": False,
+        "candidate_bound": False,
+        "rebind_committed": False,
+        "candidate_traffic_probe": False,
+        "activation_committed": False,
+        "old_path_retired": False,
+        "prior_path_preserved": False,
     }
     deadline = time.monotonic() + max(0.0, float(wait_seconds))
     artifact = None
@@ -2415,55 +2526,127 @@ def _handover_transition(
             "the path death is not confirmed; the handover is honestly "
             "incomplete" % (record["stage"],)
         )
+        record["session_id_after"] = _read_back_session_id(
+            multipath, session_id
+        )
         return record, None
     record["transition_confirmed"] = True
 
-    failed = multipath.change_path_status(
+    # -- DEGRADATION DETECTED (recorded WITHOUT retiring the path): the
+    # -- primary constituent goes ACTIVE -> DEGRADED -- recoverable per
+    # -- the frozen WORK-013 transition table; retirement happens only
+    # -- AFTER the data-plane proof on the candidate (ACR-005
+    # -- transactional handover; ACR-006 control/data separation)
+    degraded = multipath.change_path_status(
         session_id,
         primary_path_id,
-        PathStatus.FAILED,
+        PathStatus.DEGRADED,
         event_instant=journal.now(),
         actor_reference="pilot:%s" % (device_label,),
-        reason_code="pilot.primary-path-loss",
+        reason_code="pilot.primary-path-degradation",
     )
-    if not failed.ok:
+    if not degraded.ok:
         raise PilotError(
             PilotReasonCode.NODE_FAILED,
-            "primary constituent failure transition rejected: %s"
-            % (failed.detail,),
+            "primary constituent degradation transition rejected: %s"
+            % (degraded.detail,),
         )
+    record["old_path_degraded"] = True
     journal.append(
         PilotEventKind.PATH_STATUS_CHANGED,
         {
             "session_id": session_id,
             "path": primary_path_id,
             "from": "ACTIVE",
-            "to": "FAILED",
+            "to": "DEGRADED",
         },
     )
+
+    # -- CANDIDATE VALIDATED: the honest probe of the candidate access
+    # -- point BEFORE any rebind or retirement -- a control-plane
+    # -- transition is never committed on an unvalidated candidate
+    # -- ("do not treat detection of a new network as equivalent to a
+    # -- validated ADCOS path")
+    candidate_reachable, _c_detail, _c_elapsed = probe_tcp_path(
+        relay_host, relay_port, timeout=3.0
+    )
+    record["candidate_probe_reachable"] = candidate_reachable
+    journal.append(
+        PilotEventKind.PROBE_REPORTED,
+        {
+            "target": "physical-access-secondary",
+            "reachable": candidate_reachable,
+        },
+    )
+    if not candidate_reachable:
+        record["incomplete_reason"] = (
+            "the candidate access point (%s:%s) did not validate (the "
+            "real probe found it unreachable); the prior authoritative "
+            "path is PRESERVED at DEGRADED (recoverable per the frozen "
+            "transition table) -- no rebind, no activation, no "
+            "retirement (ACR-005: failure before activation leaves the "
+            "prior authoritative path intact)"
+            % (relay_host, relay_port)
+        )
+        record["prior_path_preserved"] = True
+        record["session_id_after"] = _read_back_session_id(
+            multipath, session_id
+        )
+        return record, None
+    record["candidate_validated"] = True
+
+    # -- CANDIDATE BOUND: the re-bind onto the secondary carriage
     journal.append(
         PilotEventKind.SESSION_RECONNECTING,
         {"session_id": session_id, "via": "physical-access-secondary"},
     )
-
-    secondary_sock = connect_to(relay_host, relay_port)
-    _exchange_announce(
-        secondary_sock,
-        self_label=device_label,
-        self_node_id=runtime.node_id,
-        self_credential_mapping=_active_credential_mapping(runtime),
-        journal=journal,
-        initiate=True,
-    )
+    try:
+        secondary_sock = connect_to(relay_host, relay_port)
+        _exchange_announce(
+            secondary_sock,
+            self_label=device_label,
+            self_node_id=runtime.node_id,
+            self_credential_mapping=_active_credential_mapping(runtime),
+            journal=journal,
+            initiate=True,
+        )
+    except (OSError, PilotError) as error:
+        record["incomplete_reason"] = (
+            "the candidate bind failed (%s: %s); activation is NOT "
+            "committed and the prior authoritative path is PRESERVED "
+            "at DEGRADED -- no retirement"
+            % (type(error).__name__, error)
+        )
+        record["prior_path_preserved"] = True
+        record["session_id_after"] = _read_back_session_id(
+            multipath, session_id
+        )
+        return record, None
+    record["candidate_bound"] = True
     journal.append(
         PilotEventKind.SESSION_REBOUND,
         {"session_id": session_id, "carriage": "physical-access-secondary"},
     )
+    record["rebind_committed"] = True
 
-    # the SAME logical session continues over the secondary carriage:
-    # re-send the ALREADY-PROTECTED transition datagram that hit the
-    # dead path (same session, same protection, new carriage)
-    if artifact is not None:
+    # -- CANDIDATE TRAFFIC PROBE: the SAME logical session continues
+    # -- over the secondary carriage -- re-send the ALREADY-PROTECTED
+    # -- transition datagram that hit the dead path (same session,
+    # -- same protection, new carriage)
+    if artifact is None:
+        record["incomplete_reason"] = (
+            "no protected transition artifact exists to re-send (the "
+            "primary carriage died before the transition datagram "
+            "completed an exchange); activation is NOT committed and "
+            "the prior authoritative path is PRESERVED at DEGRADED"
+        )
+        record["prior_path_preserved"] = True
+        record["session_id_after"] = _read_back_session_id(
+            multipath, session_id
+        )
+        close_quietly(secondary_sock)
+        return record, None
+    try:
         _send_pilot_envelope(
             secondary_sock,
             "pilot.datagram",
@@ -2492,14 +2675,65 @@ def _handover_transition(
                 PilotReasonCode.NODE_FAILED,
                 "secondary-carriage echo mismatch",
             )
-        journal.append(
-            PilotEventKind.DATAGRAM_RECEIVED,
-            {
-                "session_id": session_id,
-                "carriage": "physical-access-secondary",
-                "bytes": len(echoed),
-            },
+    except (OSError, PilotError) as error:
+        record["incomplete_reason"] = (
+            "the candidate traffic probe failed (%s: %s); activation "
+            "is NOT committed and the prior authoritative path is "
+            "PRESERVED at DEGRADED (a control-plane transition is "
+            "never treated as a successful data-plane handover "
+            "without the transport evidence -- ACR-006)"
+            % (type(error).__name__, error)
         )
+        record["prior_path_preserved"] = True
+        record["session_id_after"] = _read_back_session_id(
+            multipath, session_id
+        )
+        close_quietly(secondary_sock)
+        return record, None
+    journal.append(
+        PilotEventKind.DATAGRAM_RECEIVED,
+        {
+            "session_id": session_id,
+            "carriage": "physical-access-secondary",
+            "bytes": len(echoed),
+        },
+    )
+    record["candidate_traffic_probe"] = True
+
+    # -- ACTIVATION COMMITTED: the echoed protected datagram verified on
+    # -- the new path is the DATA-PLANE proof that precedes the
+    # -- control-plane commit
+    record["activation_committed"] = True
+    record["session_id_after"] = _read_back_session_id(
+        multipath, session_id
+    )
+
+    # -- OLD PATH RETIRED: only now -- after the data-plane proof --
+    # -- the primary constituent goes DEGRADED -> FAILED (terminal)
+    failed = multipath.change_path_status(
+        session_id,
+        primary_path_id,
+        PathStatus.FAILED,
+        event_instant=journal.now(),
+        actor_reference="pilot:%s" % (device_label,),
+        reason_code="pilot.primary-path-retirement",
+    )
+    if not failed.ok:
+        raise PilotError(
+            PilotReasonCode.NODE_FAILED,
+            "primary constituent retirement transition rejected: %s"
+            % (failed.detail,),
+        )
+    record["old_path_retired"] = True
+    journal.append(
+        PilotEventKind.PATH_STATUS_CHANGED,
+        {
+            "session_id": session_id,
+            "path": primary_path_id,
+            "from": "DEGRADED",
+            "to": "FAILED",
+        },
+    )
 
     journal.append(
         PilotEventKind.FAILOVER_COMPLETED,

@@ -40,6 +40,28 @@ The battery proves the pilot family's own discipline:
   not-testable -- the v9 transition is generic cellular with no NR
   report); tampered artifacts, broken chains, missing files, and
   malformed digests all fail closed;
+- the correction cycle 3 ACR-005/006 alignment (case_30): the accepted
+  architecture applied to the physical handover experiment THROUGH THE
+  EXISTING production seams -- the first-class NetworkPath records
+  (path_id + access kind + platform identity + host interface + route
+  + metering + reachability + validation state, distinct from the
+  logical session and the platform observation); the transactional
+  path lifecycle (degradation recorded WITHOUT retirement via the
+  frozen ACTIVE->DEGRADED->FAILED table; the candidate PROBED before
+  any rebind; the already-protected datagram re-sent as the candidate
+  traffic probe; the old path retired only AFTER the data-plane
+  proof); the explicit session-identity assertion (BEFORE == AFTER
+  while the path constituents change); the journal-first lifecycle
+  derived from the participant's own journal through the frozen pilot
+  vocabulary (no second event authority); the evidence-plane
+  separation (PHYSICAL/PLATFORM/PATH/ADCOS/TRANSPORT, each proven only
+  by its own evidence); the criterion-2 complete eight-link 5G chain
+  (any absent link keeps the criterion NOT-TESTABLE, never PARTIAL);
+  the event-driven Android observation manifest (schema v2: the
+  ordered platform events + the snapshot basis + the network
+  identities + the metering + the cellular state); and the honest
+  recovery position (process death NOT tested; checkpoint + journal
+  tail + fresh platform observation; session-lost preserved);
 - no second authority, no secrets in evidence, frozen API, frozen
   spec, the sanctioned PR-delta shape, and the CI wiring.
 """
@@ -2027,9 +2049,20 @@ def case_26_handover_rehearsal(results: List[Result]) -> None:
 
 def _synthetic_handover_document() -> dict:
     """A complete, well-formed SYNTHETIC physical handover document (the
-    template's structural checks; every field explicitly present)."""
+    template's structural checks; every field explicitly present).
+
+    Correction cycle 3: the synthetic document carries the complete
+    ACR-005/006 records -- the full lifecycle journal sequence (from
+    which the lifecycle is DERIVED), the two first-class path records,
+    the explicit session-identity assertion, a BOUND Android
+    observation manifest (schema v2: the ordered platform events, the
+    snapshot basis, the network identities, the metering reports, the
+    cellular state), and the derived evidence layers + the complete
+    5G chain."""
     session_id = "sha256:" + "c" * 64
     payload_digest = "sha256:" + "e" * 64
+    old_path_id = "sha256:" + "1" * 64
+    new_path_id = "sha256:" + "2" * 64
     node_id = pilot_topology.node_identity_for("device-android").node_id.text
     sender_result = {
         "label": "device-android",
@@ -2038,9 +2071,41 @@ def _synthetic_handover_document() -> dict:
             {"kind": "pilot.session-bound",
              "payload": {"session_id": session_id,
                          "carriage": "physical-access"}},
+            {"kind": "pilot.route-reevaluated",
+             "payload": {"session_id": session_id, "constituents": 2,
+                         "primary": "physical-access",
+                         "secondary": "physical-access-secondary"}},
+            {"kind": "pilot.link-loss-observed",
+             "payload": {"path": "physical-access",
+                         "error_class": "OSError", "stage": "carriage-echo"}},
+            {"kind": "pilot.probe-reported",
+             "payload": {"target": "direct-access-point",
+                         "reachable": False}},
+            {"kind": "pilot.path-status-changed",
+             "payload": {"session_id": session_id, "path": old_path_id,
+                         "from": "ACTIVE", "to": "DEGRADED"}},
+            {"kind": "pilot.probe-reported",
+             "payload": {"target": "physical-access-secondary",
+                         "reachable": True}},
+            {"kind": "pilot.session-reconnecting",
+             "payload": {"session_id": session_id,
+                         "via": "physical-access-secondary"}},
             {"kind": "pilot.session-rebound",
              "payload": {"session_id": session_id,
                          "carriage": "physical-access-secondary"}},
+            {"kind": "pilot.datagram-sent",
+             "payload": {"session_id": session_id,
+                         "carriage": "physical-access-secondary", "bytes": 40}},
+            {"kind": "pilot.datagram-received",
+             "payload": {"session_id": session_id,
+                         "carriage": "physical-access-secondary", "bytes": 40}},
+            {"kind": "pilot.path-status-changed",
+             "payload": {"session_id": session_id, "path": old_path_id,
+                         "from": "DEGRADED", "to": "FAILED"}},
+            {"kind": "pilot.failover-completed",
+             "payload": {"session_id": session_id,
+                         "failed_path": old_path_id,
+                         "active_path": new_path_id}},
         ],
         "checks": [
             {"label": "device-android-session-continuity", "ok": True},
@@ -2055,6 +2120,23 @@ def _synthetic_handover_document() -> dict:
             "handover": {
                 "transition_payload_digest": payload_digest,
                 "session_record_stable": True,
+                "session_id": session_id,
+                "session_id_before": session_id,
+                "session_id_after": session_id,
+                "failed_path_id": old_path_id,
+                "active_path_id": new_path_id,
+                "old_path_status_final": "FAILED",
+                "new_path_status_final": "ACTIVE",
+                "transition_confirmed": True,
+                "old_path_degraded": True,
+                "candidate_probe_reachable": True,
+                "candidate_validated": True,
+                "candidate_bound": True,
+                "rebind_committed": True,
+                "candidate_traffic_probe": True,
+                "activation_committed": True,
+                "old_path_retired": True,
+                "prior_path_preserved": False,
             },
             "service": {"verdict": "executed", "response_matches": True},
         },
@@ -2075,7 +2157,70 @@ def _synthetic_handover_document() -> dict:
         ],
         "checks": [],
     }
-    return {
+    manifest = {
+        "kind": "android-agent-observation-manifest",
+        "schema_version": pilot_physical.ANDROID_MANIFEST_SCHEMA_VERSION,
+        "produced_by": "the synthetic Android agent (battery fixture)",
+        "device_identity": {
+            "model": "m", "brand": "b", "serial": "s",
+            "android_release": "15",
+            "observation_source": "adb shell getprop",
+        },
+        "platform_events": [
+            {"kind": "connectivity-on-available",
+             "source": "ConnectivityManager NetworkCallback",
+             "instant": "2025-01-01T00:00:00Z",
+             "observation": {"mDataNetworkType": "lte",
+                             "active_network": "wifi (netId 100)"}},
+            {"kind": "wifi-disabled-trigger",
+             "source": "the framework's connectivity reports + the agent record",
+             "instant": "2025-01-01T00:01:00Z",
+             "observation": {"wifi_enabled": False}},
+            {"kind": "connectivity-on-available",
+             "source": "ConnectivityManager NetworkCallback",
+             "instant": "2025-01-01T00:01:05Z",
+             "observation": {"mDataNetworkType": "nr",
+                             "mNrState": "connected",
+                             "active_network": "cellular (netId 101)"}},
+        ],
+        "snapshot_basis": {
+            "pre": {"event_index": 0,
+                    "detail": "the pre-trigger platform event"},
+            "post": {"event_index": 2,
+                     "detail": "the post-trigger platform event"},
+        },
+        "network_identity": {
+            "pre": "netId 100 (wifi)",
+            "post": "netId 101 (cellular)",
+            "observation_source": "adb shell dumpsys connectivity",
+        },
+        "metered": {
+            "pre": False, "post": True,
+            "observation_source": "the framework's metering report",
+        },
+        "cellular": {
+            "active": True,
+            "observation_source": "adb shell dumpsys telephony.registry",
+        },
+        "network_technology": {
+            "pre": "lte", "post": "nr", "is_5g": True,
+            "nr_state": "connected",
+            "observation_source": "adb shell dumpsys telephony.registry",
+        },
+        "trigger": {
+            "description": "Wi-Fi disabled on the handset at the marked step",
+            "observation_source": "the agent's own trigger record",
+        },
+        "usb_tether": {
+            "enabled": True, "backed_by_cellular": True,
+            "observation_source": "adb shell dumpsys connectivity",
+        },
+        "raw_observations": {
+            "dumpsys_telephony_registry_excerpt":
+                "mDataNetworkType=nr mNrState=connected",
+        },
+    }
+    document = {
         "kind": "physical-handover-evidence",
         "schema_version": pilot_physical.HANDOVER_EVIDENCE_SCHEMA_VERSION,
         "is_physical": True,
@@ -2104,6 +2249,8 @@ def _synthetic_handover_document() -> dict:
             "access_classification": "primary direct + secondary relayed",
             "device_node_id": node_id,
             "session_id": session_id,
+            "session_id_before": session_id,
+            "session_id_after": session_id,
             "bind_event": {"session_id": session_id,
                            "carriage": "physical-access"},
             "rebind_event": {"session_id": session_id,
@@ -2113,16 +2260,70 @@ def _synthetic_handover_document() -> dict:
             "payload_digest": payload_digest,
             "session_continuity": True,
         },
+        "paths": {
+            "old": {
+                "path_id": old_path_id,
+                "access_kind": "wifi (the pre-transition access)",
+                "platform_network_identity": "netId 100 (wifi)",
+                "host_interface": "device wlan0; host route wlan0",
+                "route": "default via 1.2.3.4 dev wlan0",
+                "metered": "unmetered",
+                "reachability": "unreachable (the post-death re-probe)",
+                "validation_state": (
+                    "FAILED (constituent; death confirmed; retired after "
+                    "the data-plane proof)"
+                ),
+            },
+            "new": {
+                "path_id": new_path_id,
+                "access_kind": "usb-tether-cellular (backed by nr)",
+                "platform_network_identity": "netId 101 (cellular)",
+                "host_interface": "host usb0; device rmnet0",
+                "route": "default via 5.6.7.8 dev usb0",
+                "metered": "metered",
+                "reachability": "reachable (the candidate probe)",
+                "validation_state": (
+                    "ACTIVE (constituent; candidate probe reachable=True; "
+                    "protected traffic probe verified=True)"
+                ),
+            },
+        },
+        "recovery": {
+            "process_death_tested": False,
+            "model": (
+                "checkpoint/snapshot + append-only journal tail + fresh "
+                "platform observation; the existing honest session-lost "
+                "semantics are preserved"
+            ),
+            "note": "the synthetic template's recovery position",
+        },
         "traffic_verification": {
             "method": "route + interface observation across the pilot window",
             "observation": "pre=wlan0; post=usb0; both carriages corroborated",
         },
         "verification": {
             "validator_sha": pilot_physical.validator_sha(),
-            "artifact_hashes": [["a", "sha256:" + "0" * 64]],
+            "artifact_hashes": [
+                ["a", "sha256:" + "0" * 64],
+                ["android-manifest", "sha256:" + "8" * 64],
+            ],
+        },
+        "android_observations": {
+            "manifest": manifest,
+            "manifest_file_sha256": "sha256:" + "8" * 64,
         },
         "classification": {},
     }
+    # the derived records are built with the module's OWN derivation
+    # functions so the synthetic document is consistent by construction
+    document["lifecycle"] = pilot_physical.derive_handover_lifecycle(
+        sender_result, session_id
+    )
+    document["evidence_layers"] = pilot_physical.derive_evidence_layers(
+        document
+    )
+    document["five_g_chain"] = pilot_physical.derive_five_g_chain(document)
+    return document
 
 
 def case_27_handover_evidence_template(results: List[Result]) -> None:
@@ -2159,6 +2360,30 @@ def case_27_handover_evidence_template(results: List[Result]) -> None:
         "traffic_verification.observation",
         "verification.validator_sha",
         "verification.artifact_hashes",
+        # -- correction cycle 3 (the ACR-005/006 alignment) ------------
+        "paths.old.path_id",
+        "paths.old.access_kind",
+        "paths.old.platform_network_identity",
+        "paths.old.host_interface",
+        "paths.old.route",
+        "paths.old.metered",
+        "paths.old.reachability",
+        "paths.old.validation_state",
+        "paths.new.path_id",
+        "paths.new.access_kind",
+        "paths.new.platform_network_identity",
+        "paths.new.host_interface",
+        "paths.new.route",
+        "paths.new.metered",
+        "paths.new.reachability",
+        "paths.new.validation_state",
+        "adcos.session_id_before",
+        "adcos.session_id_after",
+        "lifecycle",
+        "evidence_layers",
+        "five_g_chain",
+        "recovery.process_death_tested",
+        "recovery.model",
     )
     if required != expected_fields:
         problems.append("the required template drifted from the frozen list")
@@ -2241,6 +2466,114 @@ def case_27_handover_evidence_template(results: List[Result]) -> None:
         CriterionStatus.NOT_TESTABLE
     ):
         problems.append("the derived classifier promotes 5G from a rehearsal")
+
+    # (h) a handover that establishes a NEW logical session merely to
+    #     succeed: session_id AFTER != BEFORE is not a handover
+    new_session = json.loads(json.dumps(base))
+    new_session["adcos"]["session_id_after"] = "sha256:" + "f" * 64
+    _rejected(new_session, "a session-identity break is not rejected")
+
+    # (i) the PHYSICAL layer promoted inside a rehearsal document
+    promoted_layer = json.loads(json.dumps(base))
+    promoted_layer["is_physical"] = False
+    promoted_layer["evidence_layers"]["PHYSICAL"]["proven"] = True
+    _rejected(
+        promoted_layer,
+        "a rehearsal proving the PHYSICAL layer is not rejected",
+    )
+
+    # (j) a layer flag DEMOTED below its own facts (the flags are
+    #     derived, never asserted)
+    demoted_layer = json.loads(json.dumps(base))
+    demoted_layer["evidence_layers"]["TRANSPORT"]["proven"] = False
+    _rejected(
+        demoted_layer,
+        "a layer flag contradicting its own facts is not rejected",
+    )
+
+    # (k) the lifecycle reordered: the old path retired BEFORE the
+    #     activation commit (control-plane commit ahead of the
+    #     data-plane proof)
+    reordered = json.loads(json.dumps(base))
+    events = reordered["adcos"]["sender_result"]["events"]
+    retired_at = next(
+        i for i, e in enumerate(events)
+        if e["kind"] == "pilot.path-status-changed"
+        and e["payload"].get("to") == "FAILED"
+    )
+    activation_at = next(
+        i for i, e in enumerate(events)
+        if e["kind"] == "pilot.datagram-received"
+        and e["payload"].get("carriage") == "physical-access-secondary"
+    )
+    events.insert(activation_at, events.pop(retired_at))
+    reordered["lifecycle"] = pilot_physical.derive_handover_lifecycle(
+        reordered["adcos"]["sender_result"],
+        reordered["adcos"]["session_id"],
+    )
+    _rejected(
+        reordered,
+        "a lifecycle retiring the old path before the activation commit "
+        "is not rejected",
+    )
+
+    # (l) criterion 2 classified PARTIAL (the correction-cycle-3 rule:
+    #     PASS only with the COMPLETE chain, NOT-TESTABLE otherwise)
+    partial_c2 = json.loads(json.dumps(base))
+    partial_c2["classification"]["criterion_2_5g"] = (
+        CriterionStatus.PARTIAL
+    )
+    _rejected(partial_c2, "a criterion-2 PARTIAL classification is not rejected")
+
+    # (m) a 5G chain link forced present without its own layer's
+    #     evidence (no manifest is bound in this mutation)
+    forced_link = json.loads(json.dumps(base))
+    forced_link.pop("android_observations", None)
+    forced_link["verification"]["artifact_hashes"] = [
+        entry for entry in forced_link["verification"]["artifact_hashes"]
+        if entry[0] != "android-manifest"
+    ]
+    forced_link["five_g_chain"] = pilot_physical.derive_five_g_chain(
+        forced_link
+    )
+    forced_link["five_g_chain"]["cellular_network_active"]["present"] = True
+    _rejected(
+        forced_link,
+        "a 5G chain link promoted without its own layer's evidence is "
+        "not rejected",
+    )
+
+    # (n) the old path retired WITHOUT the activation commit (the
+    #     transition flags themselves)
+    retired_no_activation = json.loads(json.dumps(base))
+    retired_no_activation["adcos"]["sender_result"]["observations"][
+        "handover"
+    ]["activation_committed"] = False
+    _rejected(
+        retired_no_activation,
+        "a retirement without the activation commit is not rejected",
+    )
+
+    # (o) a preserved prior path claimed with a terminal validation
+    #     state (the honest DEGRADED-preservation semantics)
+    bad_preserved = json.loads(json.dumps(base))
+    bad_preserved["adcos"]["sender_result"]["observations"][
+        "handover"
+    ]["prior_path_preserved"] = True
+    _rejected(
+        bad_preserved,
+        "a preserved prior path with a terminal validation state is not "
+        "rejected",
+    )
+
+    # (p) a non-boolean recovery.process_death_tested
+    bad_recovery = json.loads(json.dumps(base))
+    bad_recovery["recovery"]["process_death_tested"] = "no"
+    _rejected(
+        bad_recovery,
+        "a non-boolean recovery.process_death_tested is not rejected",
+    )
+
     if problems:
         results.append(fail(name, "; ".join(problems)))
         return
@@ -2248,7 +2581,11 @@ def case_27_handover_evidence_template(results: List[Result]) -> None:
         name, "the frozen handover template covers every required field "
               "(%d); removing ANY field fails validation; rehearsal PASS, "
               "non-physical 5G PASS, LTE->5G, broken continuity, malformed "
-              "digests, and one-sided evidence all fail closed"
+              "digests, one-sided evidence, session-identity breaks, layer "
+              "promotions/demotions, lifecycle reordering, criterion-2 "
+              "PARTIAL, forced chain links, retirement without activation, "
+              "dishonest preservation claims, and dishonest recovery "
+              "records all fail closed"
               % (len(required),),
     ))
 
@@ -2422,16 +2759,72 @@ def case_28_android_manifest(results: List[Result]) -> None:
         "serial" in p for p in template_bound_problems
     ):
         problems.append("the raw template's placeholder serial binds")
+
+    # (f) a schema-v1 manifest (the correction-cycle-3 contract is v2)
+    v1 = json.loads(json.dumps(manifest))
+    v1["schema_version"] = 1
+    if pilot_physical.validate_android_manifest(v1)[0]:
+        problems.append("a schema-v1 manifest still validates")
+
+    # (g) platform_events out of order (ACR-006: deterministic event
+    #     ordering -- no stale or concurrent re-reads)
+    unordered = json.loads(json.dumps(manifest))
+    unordered["platform_events"][0]["instant"] = (
+        "2025-01-01T00:09:00Z"
+    )
+    if pilot_physical.validate_android_manifest(unordered)[0]:
+        problems.append("out-of-order platform_events validate")
+
+    # (h) a snapshot_basis index out of range
+    bad_index = json.loads(json.dumps(manifest))
+    bad_index["snapshot_basis"]["post"]["event_index"] = 9
+    if pilot_physical.validate_android_manifest(bad_index)[0]:
+        problems.append("an out-of-range snapshot_basis index validates")
+
+    # (i) the post snapshot value does not derive from the referenced
+    #     platform event (the snapshot must come from the recorded
+    #     event's own observation)
+    inconsistent = json.loads(json.dumps(manifest))
+    inconsistent["platform_events"][2]["observation"] = {
+        "mDataNetworkType": "lte", "mNrState": "",
+        "active_network": "cellular (netId 101)",
+    }
+    if pilot_physical.validate_android_manifest(inconsistent)[0]:
+        problems.append(
+            "a snapshot inconsistent with its referenced event validates"
+        )
+
+    # (j) missing platform_events entirely
+    no_events = json.loads(json.dumps(manifest))
+    no_events["platform_events"] = []
+    if pilot_physical.validate_android_manifest(no_events)[0]:
+        problems.append("a manifest without platform_events validates")
+
+    # (k) a non-boolean cellular.active
+    bad_cellular = json.loads(json.dumps(manifest))
+    bad_cellular["cellular"]["active"] = "yes"
+    if pilot_physical.validate_android_manifest(bad_cellular)[0]:
+        problems.append("a non-boolean cellular.active validates")
+
+    # (l) a non-boolean metering report
+    bad_metered = json.loads(json.dumps(manifest))
+    bad_metered["metered"]["pre"] = "false"
+    if pilot_physical.validate_android_manifest(bad_metered)[0]:
+        problems.append("a non-boolean metering report validates")
+
     if problems:
         results.append(fail(name, "; ".join(problems)))
         return
     results.append(ok(
-        name, "the Android-agent manifest interface works end-to-end: the "
-              "template loads and validates, a real-observation manifest "
-              "binds by file SHA-256 into artifact_hashes (apk sha recorded "
-              "when present), and missing fields, LTE->5G, serial "
-              "mismatches, malformed apk digests, and the raw template's "
-              "placeholders all fail closed",
+        name, "the Android-agent manifest interface works end-to-end (schema "
+              "v2, the ACR-006 event-driven observation): the template loads "
+              "and validates, a real-observation manifest binds by file "
+              "SHA-256 into artifact_hashes (apk sha recorded when present), "
+              "and missing fields, LTE->5G, serial mismatches, malformed apk "
+              "digests, the raw template's placeholders, v1 manifests, "
+              "out-of-order platform events, bad snapshot bases, "
+              "event-inconsistent snapshots, missing events, and non-boolean "
+              "platform states all fail closed",
     ))
 
 
@@ -2597,6 +2990,186 @@ def case_29_android_v9_integration(results: List[Result]) -> None:
     ))
 
 
+def case_30_acr005_006_alignment(results: List[Result]) -> None:
+    """Correction cycle 3: the accepted ACR-005/006 architecture is
+    applied to the physical handover experiment THROUGH THE EXISTING
+    production seams -- and nowhere else.
+
+    Asserts: the frozen cycle-3 templates (the first-class path record,
+    the transactional lifecycle stages, the evidence-plane layers, the
+    criterion-2 chain links); the real rehearsal's derived lifecycle is
+    complete and ordered; the layer separation is honest (a rehearsal
+    proves PATH/ADCOS/TRANSPORT by their own evidence and honestly NOT
+    PHYSICAL/PLATFORM); the session-identity assertion holds while the
+    path constituents change; the schema versions are v2; and the
+    fail-closed negatives from case_27's cycle-3 amendments hold here
+    through the REAL rehearsal document as well."""
+    name = "case_30_acr005_006_alignment"
+    problems: List[str] = []
+
+    # -- the frozen cycle-3 templates ----------------------------------
+    expected_path_fields = (
+        "path_id", "access_kind", "platform_network_identity",
+        "host_interface", "route", "metered", "reachability",
+        "validation_state",
+    )
+    if tuple(f for f, _ in pilot_physical.PATH_RECORD_REQUIRED) != (
+        expected_path_fields
+    ):
+        problems.append("the path-record template drifted")
+    expected_stages = (
+        "candidate_discovered", "degradation_detected",
+        "candidate_validated", "candidate_bound", "rebind_committed",
+        "candidate_traffic_probe", "activation_committed",
+        "old_path_retired",
+    )
+    if tuple(s for s, _ in pilot_physical.HANDOVER_LIFECYCLE_STAGES) != (
+        expected_stages
+    ):
+        problems.append("the lifecycle-stage template drifted")
+    if pilot_physical.EVIDENCE_LAYERS != (
+        "PHYSICAL", "PLATFORM", "PATH", "ADCOS", "TRANSPORT",
+    ):
+        problems.append("the evidence-layer template drifted")
+    expected_links = (
+        "android_nr_report", "cellular_network_active",
+        "tether_backed_by_cellular", "host_path_identified",
+        "adcos_path_validated", "adcos_session_bound_to_path",
+        "real_packet_transmitted", "independent_receiver_verification",
+    )
+    if tuple(l for l, _ in pilot_physical.FIVE_G_CHAIN_LINKS) != (
+        expected_links
+    ):
+        problems.append("the 5G-chain template drifted")
+    if pilot_physical.HANDOVER_EVIDENCE_SCHEMA_VERSION != 2:
+        problems.append("the handover evidence schema is not v2")
+    if pilot_physical.ANDROID_MANIFEST_SCHEMA_VERSION != 2:
+        problems.append("the Android manifest schema is not v2")
+
+    # -- the REAL rehearsal's derived records --------------------------
+    document = pilot_physical.run_handover_rehearsal()
+    stages = [str(entry["stage"]) for entry in document.get("lifecycle") or []]
+    if stages != list(expected_stages):
+        problems.append(
+            "the rehearsal lifecycle is not the complete ordered "
+            "sequence (got %s)" % (stages,)
+        )
+    layers = document.get("evidence_layers") or {}
+    proven = {k: (v or {}).get("proven") for k, v in layers.items()}
+    if proven != {
+        "PHYSICAL": False, "PLATFORM": False, "PATH": True,
+        "ADCOS": True, "TRANSPORT": True,
+    }:
+        problems.append(
+            "the rehearsal layer separation is not honest (got %s)"
+            % (proven,)
+        )
+    adcos = document.get("adcos") or {}
+    if adcos.get("session_id_before") != adcos.get("session_id_after"):
+        problems.append("the rehearsal session-identity assertion fails")
+    if adcos.get("session_id_before") != adcos.get("session_id"):
+        problems.append(
+            "the rehearsal session identity does not match the record"
+        )
+    paths = document.get("paths") or {}
+    if (paths.get("old") or {}).get("path_id") == (
+        paths.get("new") or {}
+    ).get("path_id"):
+        problems.append("the rehearsal path constituents did not change")
+    transition = (
+        (adcos.get("sender_result") or {}).get("observations") or {}
+    ).get("handover") or {}
+    if not (
+        transition.get("old_path_degraded")
+        and transition.get("candidate_validated")
+        and transition.get("candidate_bound")
+        and transition.get("rebind_committed")
+        and transition.get("candidate_traffic_probe")
+        and transition.get("activation_committed")
+        and transition.get("old_path_retired")
+    ):
+        problems.append(
+            "the rehearsal transition flags do not evidence the complete "
+            "transactional lifecycle"
+        )
+    chain = document.get("five_g_chain") or {}
+    present = {k: (v or {}).get("present") for k, v in chain.items()}
+    if present.get("android_nr_report") is not False:
+        problems.append("the rehearsal 5G chain claims an NR report")
+    if present.get("adcos_path_validated") is not True:
+        problems.append(
+            "the rehearsal 5G chain denies the validated ADCOS path"
+        )
+    if (document.get("recovery") or {}).get("process_death_tested") is not (
+        False
+    ):
+        problems.append("the rehearsal recovery record is not honest")
+
+    # the honest classification under the complete-chain rule
+    cls = document.get("classification") or {}
+    if cls.get("criterion_1_real_devices") != CriterionStatus.PARTIAL:
+        problems.append("the rehearsal criterion 1 is not PARTIAL")
+    if cls.get("criterion_2_5g") != CriterionStatus.NOT_TESTABLE:
+        problems.append("the rehearsal criterion 2 is not NOT-TESTABLE")
+
+    # -- fail-closed negatives over the REAL rehearsal document --------
+    def _rejected(mutated: dict, why: str) -> None:
+        ok_mutated, _ = pilot_physical.validate_handover_evidence(mutated)
+        if ok_mutated:
+            problems.append(why)
+
+    # (a) PHYSICAL proven in the real rehearsal
+    promoted = json.loads(json.dumps(document))
+    promoted["evidence_layers"]["PHYSICAL"]["proven"] = True
+    _rejected(promoted, "a rehearsal PHYSICAL promotion validates")
+
+    # (b) the session identity broken in the real rehearsal
+    broken = json.loads(json.dumps(document))
+    broken["adcos"]["session_id_after"] = "sha256:" + "a" * 64
+    _rejected(broken, "a rehearsal session-identity break validates")
+
+    # (c) a chain link promoted in the real rehearsal
+    forced = json.loads(json.dumps(document))
+    forced["five_g_chain"]["android_nr_report"]["present"] = True
+    _rejected(forced, "a rehearsal NR-report promotion validates")
+
+    # (d) the lifecycle truncated dishonestly (retirement claimed
+    #     without the recorded sequence)
+    truncated = json.loads(json.dumps(document))
+    truncated["lifecycle"] = [
+        entry for entry in truncated["lifecycle"]
+        if entry["stage"] != "activation_committed"
+    ]
+    _rejected(
+        truncated, "a lifecycle with retirement but no activation validates"
+    )
+
+    # (e) the recovery model stripped of the honest session-lost
+    #     semantics
+    no_lost = json.loads(json.dumps(document))
+    no_lost["recovery"]["model"] = "the process is continuously alive"
+    _rejected(no_lost, "a recovery model without session-lost validates")
+
+    if problems:
+        results.append(fail(name, "; ".join(problems)))
+        return
+    results.append(ok(
+        name,
+        "the accepted ACR-005/006 architecture is applied through the "
+        "existing seams: the frozen cycle-3 templates (the 8-field path "
+        "record, the 8-stage transactional lifecycle, the 5 evidence "
+        "planes, the 8-link 5G chain, schema v2) are exact; the real "
+        "rehearsal derives the complete ordered lifecycle, the honest "
+        "layer separation (PATH/ADCOS/TRANSPORT proven by their own "
+        "evidence; PHYSICAL/PLATFORM honestly unproven), the "
+        "session-identity assertion with changed path constituents, and "
+        "the honest chain + recovery records; layer promotions, "
+        "session-identity breaks, chain promotions, lifecycle "
+        "truncations, and session-lost-free recovery models all fail "
+        "closed",
+    ))
+
+
 CASES = [
     case_01_frozen_vocabularies,
     case_02_value_records,
@@ -2627,6 +3200,7 @@ CASES = [
     case_27_handover_evidence_template,
     case_28_android_manifest,
     case_29_android_v9_integration,
+    case_30_acr005_006_alignment,
 ]
 
 
