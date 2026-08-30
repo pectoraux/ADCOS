@@ -29,6 +29,17 @@ The battery proves the pilot family's own discipline:
   observation manifest loads, validates, binds by file SHA-256, and
   cross-corroborates (serial + post-technology agreement) -- never
   duplicating the Android platform authority in Python;
+- the preserved W035 v9 Android-agent artifact set integration
+  (case_29, cycle 2 amendment): the five observation artifacts pushed
+  by the Android agent (d014425) and preserved byte-identically under
+  the authorized evidence directory (evidence/work-040/
+  android-agent-v9/) validate with every evidence-manifest-declared
+  hash verified against the actual bytes; the integration record
+  classifies EXTERNAL-PHYSICAL and NEVER promotes the external
+  harness's chain (W040 criterion 1 stays partial, criterion 2 stays
+  not-testable -- the v9 transition is generic cellular with no NR
+  report); tampered artifacts, broken chains, missing files, and
+  malformed digests all fail closed;
 - no second authority, no secrets in evidence, frozen API, frozen
   spec, the sanctioned PR-delta shape, and the CI wiring.
 """
@@ -2429,6 +2440,163 @@ def case_28_android_manifest(results: List[Result]) -> None:
 # ---------------------------------------------------------------------------
 
 
+def case_29_android_v9_integration(results: List[Result]) -> None:
+    name = "case_29_android_v9_integration"
+    problems: List[str] = []
+
+    repo_root = Path(__file__).resolve().parents[1]
+    v9_dir = repo_root / "evidence" / "work-040" / "android-agent-v9"
+
+    # (1) the REAL preserved artifact set validates (every
+    # evidence-manifest-declared hash verified against the bytes)
+    if not v9_dir.is_dir():
+        problems.append(
+            "the preserved v9 artifact set is absent "
+            "(evidence/work-040/android-agent-v9/)"
+        )
+    else:
+        v9_ok, v9_problems = pilot_physical.validate_android_v9_artifacts(
+            str(v9_dir)
+        )
+        if not v9_ok:
+            problems.append(
+                "the real v9 artifact set fails validation: %s"
+                % (v9_problems[:3],)
+            )
+
+        # (2) the integration record: the honest never-promoting
+        # classification + the hash-bound external observations
+        record = pilot_physical.integrate_android_v9_observations(
+            str(v9_dir), origin_note="battery case_29 verification"
+        )
+        classification = record.get("classification") or {}
+        if classification.get("evidence_class") != "EXTERNAL-PHYSICAL":
+            problems.append(
+                "the v9 integration is not classified EXTERNAL-PHYSICAL"
+            )
+        if (
+            classification.get("w040_criterion_1_real_devices")
+            != pilot_physical.CriterionStatus.PARTIAL
+        ):
+            problems.append(
+                "an external harness's chain must never close W040 "
+                "criterion 1 (expected partial)"
+            )
+        if (
+            classification.get("w040_criterion_2_5g")
+            != pilot_physical.CriterionStatus.NOT_TESTABLE
+        ):
+            problems.append(
+                "a generic wifi->cellular transition with no NR report "
+                "must classify criterion 2 NOT-TESTABLE"
+            )
+        hashes = record.get("verification", {}).get("artifact_hashes") or []
+        if len(hashes) != len(pilot_physical.ANDROID_V9_ARTIFACTS):
+            problems.append(
+                "not every preserved v9 artifact is hash-bound (%d)"
+                % (len(hashes),)
+            )
+        handover = record.get("handover_observation") or {}
+        if not handover.get("route_transition_recorded"):
+            problems.append(
+                "the recorded default-route transition is not reflected"
+            )
+        if not str(handover.get("session_id", "")).startswith("sha256:"):
+            problems.append("the v9 session id is not recorded")
+
+        # (3) negatives on COPIES: each FAILS closed
+        import shutil as _shutil
+        import tempfile as _tempfile
+
+        with _tempfile.TemporaryDirectory() as scratch:
+            tampered = Path(scratch) / "v9"
+            _shutil.copytree(v9_dir, tampered)
+
+            # (a) a tampered artifact (hash mismatch vs the manifest)
+            reactions_path = tampered / "protocol_reactions.jsonl"
+            reactions_path.write_text(
+                reactions_path.read_text(encoding="utf-8")
+                + json.dumps(
+                    {"kind": "extra", "subject": "x", "detail": "y"}
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            tampered_ok, tampered_problems = (
+                pilot_physical.validate_android_v9_artifacts(str(tampered))
+            )
+            if tampered_ok or not any(
+                "hash mismatch" in p for p in tampered_problems
+            ):
+                problems.append(
+                    "a tampered artifact is not detected by the hash "
+                    "cross-corroboration"
+                )
+
+            # (b) a broken handover chain (drop the handover event)
+            _shutil.copytree(v9_dir, Path(scratch) / "v9b")
+            broken = Path(scratch) / "v9b" / "protocol_reactions.jsonl"
+            lines = [
+                line
+                for line in broken.read_text(encoding="utf-8").splitlines()
+                if "handover-completed" not in line
+            ]
+            # restore the byte-exact file first, then break the chain
+            # while keeping the manifest hash mismatch expected
+            broken.write_text(
+                "\n".join(lines) + "\n", encoding="utf-8"
+            )
+            broken_ok, broken_problems = (
+                pilot_physical.validate_android_v9_artifacts(
+                    str(Path(scratch) / "v9b")
+                )
+            )
+            if broken_ok or not any(
+                "handover-chain event" in p for p in broken_problems
+            ):
+                problems.append(
+                    "a reaction set without the handover-completed event "
+                    "validates"
+                )
+
+            # (c) a missing artifact
+            _shutil.copytree(v9_dir, Path(scratch) / "v9c")
+            (Path(scratch) / "v9c" / "test_matrix.md").unlink()
+            missing_ok, _ = pilot_physical.validate_android_v9_artifacts(
+                str(Path(scratch) / "v9c")
+            )
+            if missing_ok:
+                problems.append("a missing v9 artifact validates")
+
+            # (d) a malformed manifest digest
+            _shutil.copytree(v9_dir, Path(scratch) / "v9d")
+            dm_path = Path(scratch) / "v9d" / "device_manifest.json"
+            dm = json.loads(dm_path.read_text(encoding="utf-8"))
+            dm["apk_sha256"] = "not-a-digest"
+            dm_path.write_text(json.dumps(dm), encoding="utf-8")
+            bad_apk_ok, bad_apk_problems = (
+                pilot_physical.validate_android_v9_artifacts(
+                    str(Path(scratch) / "v9d")
+                )
+            )
+            if bad_apk_ok or not any(
+                "apk_sha256" in p for p in bad_apk_problems
+            ):
+                problems.append("a malformed v9 apk digest validates")
+
+    if problems:
+        results.append(fail(name, "; ".join(problems)))
+        return
+    results.append(ok(
+        name,
+        "the preserved W035 v9 artifact set validates (every manifest hash "
+        "verified against the bytes); the integration record classifies "
+        "EXTERNAL-PHYSICAL with W040 criterion 1 partial / criterion 2 "
+        "not-testable (never promoted); tampered artifacts, broken "
+        "chains, missing files, and malformed digests all fail closed",
+    ))
+
+
 CASES = [
     case_01_frozen_vocabularies,
     case_02_value_records,
@@ -2458,6 +2626,7 @@ CASES = [
     case_26_handover_rehearsal,
     case_27_handover_evidence_template,
     case_28_android_manifest,
+    case_29_android_v9_integration,
 ]
 
 

@@ -1,0 +1,25 @@
+{
+  "project": "ADCOS",
+  "work_item": "W035",
+  "evidence_type": "PHYSICAL_DEVICE_PROTOCOL_VALIDATION_PRODUCTION_ONLY_V9",
+  "artifacts": [
+    {
+      "file": "device_manifest.json",
+      "sha256": "a3b629e498e89e3e28d7ca9d197bbc096a69289803be8119ba09f5ebad2405bb"
+    },
+    {
+      "file": "protocol_reactions.jsonl",
+      "sha256": "eb5ee2028a38c3bab0c4ec0049d78bc0c6886816e783104967faa1d097e10b74"
+    },
+    {
+      "file": "linux_network_observations.jsonl",
+      "sha256": "81905db1d6644b78ca2cf20397916dfe605083e108ee7033cb590e76a2843421"
+    },
+    {
+      "file": "test_matrix.md",
+      "sha256": "f5ab27f2033acb3f11fb027afafd059778dba66ce312d8e18f5be854b6e30553"
+    }
+  ],
+  "result": "PASS (FULL PRODUCTION PATH VALIDATED WITH RECEIVER-SIDE PROOF)",
+  "timestamp": "2026-08-29T16:25:00Z"
+}

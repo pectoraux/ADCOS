@@ -106,6 +106,12 @@ __all__ = [
     "validate_android_manifest",
     "load_android_manifest",
     "android_manifest_template",
+    "ANDROID_V9_ARTIFACTS",
+    "ANDROID_V9_INTEGRATION_SCHEMA_VERSION",
+    "ANDROID_V9_DEVICE_MANIFEST_REQUIRED",
+    "validate_android_v9_artifacts",
+    "integrate_android_v9_observations",
+    "write_android_v9_integration",
     "assemble_handover_evidence",
     "validate_handover_evidence",
     "classify_handover_participation",
@@ -882,6 +888,486 @@ def android_manifest_template() -> Dict[str, Any]:
             ),
         },
     }
+
+
+# ---------------------------------------------------------------------------
+# The W035 v9 Android-agent artifact-set integration (correction cycle 2)
+# ---------------------------------------------------------------------------
+
+#: The five files of the preserved W035 v9 Android-agent observation
+#: artifact set: byte-identical copies of the Android agent's push
+#: (d014425, "WORK-035/W040: physical handover validator v10 -
+#: definitive") kept under the AUTHORIZED W040 evidence directory at
+#: ``evidence/work-040/android-agent-v9/`` after the out-of-scope raw
+#: harness (the android/ project + the validator tools) was reverted
+#: from this branch (the ARCH-08 authorization gate rejects those paths
+#: on a WORK-040 PR; the revert preserves history -- d014425 remains).
+ANDROID_V9_ARTIFACTS: Tuple[str, ...] = (
+    "device_manifest.json",
+    "evidence_manifest.json",
+    "linux_network_observations.jsonl",
+    "protocol_reactions.jsonl",
+    "test_matrix.md",
+)
+
+#: The schema version of the integration record produced below.
+ANDROID_V9_INTEGRATION_SCHEMA_VERSION = 1
+
+#: The required fields of the v9 device manifest (the Android agent's
+#: own provenance record for the handset + the harness APK).
+ANDROID_V9_DEVICE_MANIFEST_REQUIRED: Tuple[str, ...] = (
+    "device_model",
+    "android_version",
+    "build_fingerprint",
+    "apk_package",
+    "apk_version",
+    "apk_sha256",
+    "validator",
+    "validator_sha",
+    "timestamp",
+)
+
+#: The protocol-reaction event kinds that constitute the v9 handover
+#: chain, in order (each must appear; the session id must be the SAME
+#: across the session-scoped events).
+_ANDROID_V9_CHAIN_KINDS: Tuple[str, ...] = (
+    "connectivity-changed",
+    "session-tracked",
+    "session-bound-to-access",
+    "grant-granted",
+    "connectivity-changed",
+    "handover-completed",
+    "datagram-sent",
+    "datagram-received",
+)
+
+
+def _load_json_file(path: Path) -> Dict[str, Any]:
+    """Load one JSON object from disk, failing closed with a typed
+    pilot error (malformed files are never silently tolerated)."""
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError as error:
+        raise PilotError(
+            PilotReasonCode.EVIDENCE_INVALID,
+            "the v9 artifact %s is unreadable: %s: %s"
+            % (path, type(error).__name__, error),
+        ) from error
+    try:
+        document = json.loads(text)
+    except ValueError as error:
+        raise PilotError(
+            PilotReasonCode.EVIDENCE_INVALID,
+            "the v9 artifact %s is not valid JSON: %s: %s"
+            % (path, type(error).__name__, error),
+        ) from error
+    if not isinstance(document, dict):
+        raise PilotError(
+            PilotReasonCode.EVIDENCE_INVALID,
+            "the v9 artifact %s is not a JSON object" % (path,),
+        )
+    return document
+
+
+def _load_jsonl_file(path: Path) -> List[Dict[str, Any]]:
+    """Load one JSONL observation file, failing closed on any
+    malformed line (the observations are evidence; partial parses
+    would silently weaken them)."""
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError as error:
+        raise PilotError(
+            PilotReasonCode.EVIDENCE_INVALID,
+            "the v9 artifact %s is unreadable: %s: %s"
+            % (path, type(error).__name__, error),
+        ) from error
+    records: List[Dict[str, Any]] = []
+    for number, line in enumerate(text.splitlines(), start=1):
+        if not line.strip():
+            continue
+        try:
+            record = json.loads(line)
+        except ValueError as error:
+            raise PilotError(
+                PilotReasonCode.EVIDENCE_INVALID,
+                "the v9 artifact %s line %d is not valid JSON: %s"
+                % (path, number, error),
+            ) from error
+        if not isinstance(record, dict):
+            raise PilotError(
+                PilotReasonCode.EVIDENCE_INVALID,
+                "the v9 artifact %s line %d is not a JSON object"
+                % (path, number),
+            )
+        records.append(record)
+    return records
+
+
+def validate_android_v9_artifacts(
+    directory: str,
+) -> Tuple[bool, List[str]]:
+    """Validate the preserved W035 v9 Android-agent artifact set.
+
+    Pure with respect to evidence semantics (reads the preserved
+    bytes, fails closed): every declared artifact must exist; every
+    ``evidence_manifest.json``-declared SHA-256 must match the ACTUAL
+    file bytes (the one cross-corroboration ADCOS can independently
+    perform on this artifact set); the device manifest must be
+    complete with a well-formed APK digest; the protocol reactions
+    must carry the complete handover chain on ONE session id with the
+    receiver-side VERIFIED claim; and the network observations must
+    record a genuine default-route transition (baseline vs post-
+    handover interface differ).  The Android platform authority is
+    never duplicated here -- ADCOS only verifies the artifact set's
+    internal consistency and hashes.
+    """
+    problems: List[str] = []
+    base = Path(directory)
+
+    for name in ANDROID_V9_ARTIFACTS:
+        if not (base / name).is_file():
+            problems.append("missing v9 artifact %r" % (name,))
+    if problems:
+        return False, problems
+
+    device_manifest = _load_json_file(base / "device_manifest.json")
+    evidence_manifest = _load_json_file(base / "evidence_manifest.json")
+    reactions = _load_jsonl_file(base / "protocol_reactions.jsonl")
+    observations = _load_jsonl_file(base / "linux_network_observations.jsonl")
+
+    # (1) the device manifest: completeness + APK digest well-formedness
+    for field in ANDROID_V9_DEVICE_MANIFEST_REQUIRED:
+        value = device_manifest.get(field)
+        if value is None or value == "":
+            problems.append(
+                "device_manifest.json missing required field %r" % (field,)
+            )
+    apk_digest = str(device_manifest.get("apk_sha256", ""))
+    if len(apk_digest) != 64 or any(
+        character not in "0123456789abcdef" for character in apk_digest.lower()
+    ):
+        problems.append(
+            "device_manifest.json apk_sha256 %r is not a bare sha-256 "
+            "hex digest" % (apk_digest,)
+        )
+
+    # (2) the evidence manifest: the declared hashes must match the
+    # ACTUAL preserved bytes (the independent cross-corroboration)
+    declared = {
+        str(entry.get("file")): str(entry.get("sha256"))
+        for entry in evidence_manifest.get("artifacts") or []
+        if isinstance(entry, dict)
+    }
+    if not declared:
+        problems.append(
+            "evidence_manifest.json declares no artifact hashes"
+        )
+    for name, sha in declared.items():
+        artifact_path = base / name
+        if not artifact_path.is_file():
+            problems.append(
+                "evidence_manifest.json declares %r which is not present" % (name,)
+            )
+            continue
+        actual = _sha256_file(artifact_path)
+        if actual != sha:
+            problems.append(
+                "artifact %r hash mismatch: manifest %r != actual %r"
+                % (name, sha, actual)
+            )
+    result = str(evidence_manifest.get("result", ""))
+    if not result:
+        problems.append("evidence_manifest.json records no result")
+
+    # (3) the protocol reactions: the complete handover chain on ONE
+    # session id, with the datagram actually received (receiver-side)
+    kinds = [str(record.get("kind")) for record in reactions]
+    for kind in _ANDROID_V9_CHAIN_KINDS:
+        if kind not in kinds:
+            problems.append(
+                "protocol_reactions.jsonl lacks the %r handover-chain event"
+                % (kind,)
+            )
+    session_ids = {
+        str(record.get("subject"))
+        for record in reactions
+        if str(record.get("kind")).startswith("session-")
+        or str(record.get("kind"))
+        in ("handover-completed", "datagram-sent", "datagram-received")
+    }
+    session_ids.discard("None")
+    if len(session_ids) != 1:
+        problems.append(
+            "the handover chain does not run on a single session id "
+            "(observed %d distinct session subjects)" % (len(session_ids),)
+        )
+    handover_events = [
+        record for record in reactions
+        if record.get("kind") == "handover-completed"
+    ]
+    if handover_events:
+        detail = str(handover_events[0].get("detail", ""))
+        if "->" not in detail:
+            problems.append(
+                "the handover-completed detail %r does not record a "
+                "transition" % (detail,)
+            )
+    received = [
+        record for record in reactions
+        if record.get("kind") == "datagram-received"
+    ]
+    if received and "VERIFIED" not in str(received[0].get("detail", "")):
+        problems.append(
+            "the datagram-received detail does not record receiver-side "
+            "verification"
+        )
+
+    # (4) the host network observations: a genuine default-route
+    # transition (baseline vs post-handover interface DIFFER)
+    routes = {
+        str(record.get("state")): str(record.get("default_route"))
+        for record in observations
+        if record.get("default_route")
+    }
+    if len(routes) < 2:
+        problems.append(
+            "linux_network_observations.jsonl does not record a baseline "
+            "and a post-handover default route"
+        )
+    else:
+        distinct = set(routes.values())
+        if len(distinct) < 2:
+            problems.append(
+                "the recorded default route never transitions (%r)" % (distinct,)
+            )
+
+    return (not problems), problems
+
+
+def integrate_android_v9_observations(
+    directory: str,
+    *,
+    origin_note: str,
+) -> Dict[str, Any]:
+    """Assemble the W040-side INTEGRATION RECORD for the preserved v9
+    artifact set.
+
+    The record integrates the Android agent's authoritative physical
+    observations into the W040 evidence chain WITHOUT promoting them:
+    the v9 chain was produced by the W035 validation harness (its own
+    identities and topology), NOT by the W040 pilot harness, so it is
+    recorded as EXTERNAL physical evidence.  The W040 criterion
+    classifications are derived honestly and stay unchanged: criterion
+    1 PARTIAL (the W040-harness physical run remains the runbook step;
+    this record materially strengthens the physical evidence base but
+    an external harness's chain is never inferentially promoted to
+    W040-harness evidence), criterion 2 NOT-TESTABLE (the v9 set
+    records a generic wifi->cellular transition with NO NR/5G
+    determination anywhere -- cellular is never automatically 5G).
+    """
+    base = Path(directory)
+    ok, problems = validate_android_v9_artifacts(directory)
+    device_manifest = _load_json_file(base / "device_manifest.json")
+    evidence_manifest = _load_json_file(base / "evidence_manifest.json")
+    reactions = _load_jsonl_file(base / "protocol_reactions.jsonl")
+    observations = _load_jsonl_file(base / "linux_network_observations.jsonl")
+
+    session_events = [
+        record for record in reactions
+        if str(record.get("kind")) in (
+            "session-tracked",
+            "session-bound-to-access",
+            "handover-completed",
+            "datagram-sent",
+            "datagram-received",
+        )
+    ]
+    session_id = (
+        str(session_events[0].get("subject")) if session_events else ""
+    )
+    handover = next(
+        (
+            record for record in reactions
+            if record.get("kind") == "handover-completed"
+        ),
+        {},
+    )
+    sent = next(
+        (
+            record for record in reactions
+            if record.get("kind") == "datagram-sent"
+        ),
+        {},
+    )
+    received = next(
+        (
+            record for record in reactions
+            if record.get("kind") == "datagram-received"
+        ),
+        {},
+    )
+    baseline_route = next(
+        (
+            record for record in observations
+            if "baseline" in str(record.get("state", "")).lower()
+        ),
+        {},
+    )
+    post_route = next(
+        (
+            record for record in observations
+            if "handover" in str(record.get("state", "")).lower()
+        ),
+        {},
+    )
+
+    # the honest 5G determination: NO NR report exists anywhere in the
+    # v9 set (the transition detail is generic "wifi -> cellular"; the
+    # NR-only rule demands the framework's own NR report -- a generic
+    # cellular transition is NEVER 5G)
+    transition_detail = str(handover.get("detail", ""))
+    reaction_text = json.dumps(reactions)
+    nr_reported = re.search(r"\bnr\b", transition_detail, re.IGNORECASE) or re.search(
+        r"\bnr\b", reaction_text, re.IGNORECASE
+    )
+    five_g = (
+        CriterionStatus.NOT_TESTABLE
+        if not nr_reported
+        else CriterionStatus.OPEN
+    )
+
+    artifact_hashes = [
+        ("android-agent-v9/" + name, "sha256:" + _sha256_file(base / name))
+        for name in ANDROID_V9_ARTIFACTS
+    ]
+
+    return {
+        "kind": "android-agent-v9-integration",
+        "schema_version": ANDROID_V9_INTEGRATION_SCHEMA_VERSION,
+        "origin": {
+            "note": origin_note,
+            "source_push": (
+                "d0144252e91f8739fa221b62ad732481cbc52e05 "
+                "('WORK-035/W040: physical handover validator v10 - "
+                "definitive')"
+            ),
+            "preservation": (
+                "the five observation artifacts are preserved "
+                "byte-identically under the authorized W040 evidence "
+                "directory (evidence/work-040/android-agent-v9/); the raw "
+                "harness (android/ project + validator tools) was reverted "
+                "from this branch as outside the WORK-040-CORRECTION-001 "
+                "scope (ARCH-08 fails closed on those paths) and remains "
+                "in the d014425 commit for the Architect's disposition"
+            ),
+            "hash_cross_corroboration": (
+                "every evidence_manifest.json-declared SHA-256 was verified "
+                "against the actual preserved bytes (all match)"
+                if ok
+                else "FAILED: %s" % (problems[:3],)
+            ),
+        },
+        "device_identity": {
+            "model": device_manifest.get("device_model"),
+            "android_version": device_manifest.get("android_version"),
+            "build_fingerprint": device_manifest.get("build_fingerprint"),
+            "observation_source": (
+                "the Android agent's device_manifest.json (authoritative "
+                "device report)"
+            ),
+        },
+        "apk_provenance": {
+            "package": device_manifest.get("apk_package"),
+            "version": device_manifest.get("apk_version"),
+            "sha256": "sha256:" + str(device_manifest.get("apk_sha256", "")),
+            "note": (
+                "the v9 harness IS an APK-backed Android app (unlike the "
+                "W040 pilot's pure-stdlib design); the digest is the "
+                "agent's own declared APK provenance"
+            ),
+        },
+        "handover_observation": {
+            "session_id": session_id,
+            "transition": transition_detail,
+            "trigger": (
+                "Wi-Fi disabled on the handset (the v9 runbook's physical "
+                "trigger), recorded by the agent's harness"
+            ),
+            "baseline_default_route": baseline_route.get("default_route"),
+            "post_handover_default_route": post_route.get("default_route"),
+            "route_transition_recorded": bool(
+                baseline_route.get("default_route")
+                and post_route.get("default_route")
+                and baseline_route.get("default_route")
+                != post_route.get("default_route")
+            ),
+            "datagram_sent": sent.get("detail"),
+            "datagram_received": received.get("detail"),
+            "receiver_verification_claim": str(evidence_manifest.get("result")),
+        },
+        "validator_provenance": {
+            "declared_validator": device_manifest.get("validator"),
+            "declared_validator_sha": device_manifest.get("validator_sha"),
+            "harness_discrepancy": (
+                "the pushed harness code (titled v10) is NOT the byte-exact "
+                "validator that produced this v9 record (declared "
+                "validator_sha %r); the v10 IF_MAP also names a different "
+                "tether interface than the recorded observation -- recorded "
+                "honestly, not resolved; the raw harness is not on this "
+                "branch"
+                % (device_manifest.get("validator_sha"),)
+            ),
+        },
+        "validation": {
+            "ok": ok,
+            "problems": problems,
+            "validator_sha": validator_sha(),
+        },
+        "verification": {"artifact_hashes": artifact_hashes},
+        "classification": {
+            "evidence_class": "EXTERNAL-PHYSICAL",
+            "w040_criterion_1_real_devices": CriterionStatus.PARTIAL,
+            "w040_criterion_2_5g": five_g,
+            "statement": (
+                "the W035 v9 chain is authoritative Android-side physical "
+                "evidence of a REAL handover on a REAL handset (TECNO KL4, "
+                "Android 14) through production ADCOS classes (a real "
+                "MobileAgent session, a real Wi-Fi->USB-tether default-route "
+                "transition, a real datagram over the tether with the "
+                "agent's receiver-side VERIFIED claim). It was produced by "
+                "the W035 validation harness -- NOT the W040 pilot harness "
+                "-- so it is integrated as external physical evidence and "
+                "never promoted: W040 criterion 1 stays PARTIAL (the "
+                "W040-harness physical run, handoff section 8, remains the "
+                "step that would close it) and criterion 2 stays "
+                "NOT-TESTABLE (the transition is generic cellular; NO NR "
+                "report exists anywhere in the v9 set)"
+            ),
+        },
+    }
+
+
+def write_android_v9_integration(
+    out_dir: str,
+    *,
+    origin_note: str,
+) -> Dict[str, Any]:
+    """Write the integration record to the authorized evidence
+    directory (``android-agent-v9-observations.json``) at the current
+    execution SHA -- the internally consistent W040-side record of the
+    Android agent's v9 artifact set."""
+    repo_root = Path(__file__).resolve().parents[1]
+    directory = str(repo_root / "evidence" / "work-040" / "android-agent-v9")
+    record = integrate_android_v9_observations(
+        directory, origin_note=origin_note
+    )
+    record["execution_sha"] = _execution_sha()
+    output = Path(out_dir) / "android-agent-v9-observations.json"
+    output.write_text(
+        json.dumps(record, sort_keys=True, indent=1) + "\n",
+        encoding="utf-8",
+    )
+    return record
 
 
 # ---------------------------------------------------------------------------
