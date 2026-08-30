@@ -392,6 +392,15 @@ HONEST incomplete record (never a fabricated handover).
 
 ### 8.4 The Android-agent coordination contract
 
+> **Correction cycle 3 (schema v2):** the manifest contract below is
+> EXTENDED by §8.6 with the ACR-006 event-driven fields
+> (`platform_events`, `snapshot_basis`, `network_identity`, `metered`,
+> `cellular`); the authoritative template is ALWAYS the regenerated
+> `evidence/work-040/android-manifest-template.json` (schema v2), and
+> a v1 manifest is rejected. The contract's PRINCIPLE is unchanged:
+> the Android agent is the platform authority; ADCOS never duplicates
+> it in Python.
+
 The Android Studio/Gemini agent is the AUTHORITY for the Android
 platform's own observations; ADCOS only loads, validates, binds, and
 corroborates them — **do not duplicate the Android platform authority in
@@ -481,3 +490,79 @@ an external harness's chain is never inferentially promoted. The
 Android agent's next contribution for THAT run is the observation
 manifest per `evidence/work-040/android-manifest-template.json` (§8.4),
 filled with the framework's own reports at the marked operator step.
+
+### 8.6 The ACR-005/006 alignment (correction cycle 3 — the software side, pre-physical)
+
+The Architect's cycle-3 directive ordered the physical experiment's
+implementation and validation harness updated onto the accepted
+ACR-005/006 principles BEFORE any physical run: use the accepted
+architecture through the existing seams, finish the software side +
+CI verification, then STOP and wait for the Android physical run.
+That is exactly the state of this branch: implementation SHA
+`6813af8`, battery 30/30, all governance checks green, the physical
+experiment NOT run.
+
+**The runbook surface is unchanged** (§8.2's commands, the marked
+operator step, the Android-agent contract at §8.4) — the alignment
+changed what the harness DOES and RECORDS, not how it is invoked:
+
+* the transition is now TRANSACTIONAL: the operator disabling Wi-Fi
+  (the marked step) will produce, in the participant's journal, the
+  ordered lifecycle — degradation recorded WITHOUT retirement (the
+  primary constituent goes `ACTIVE → DEGRADED`, recoverable), the
+  candidate access point PROBED before any rebind, the re-bind on the
+  same session, the already-protected transition datagram re-sent as
+  the candidate traffic probe, the activation committed on the echoed
+  proof, and only THEN the old path retired (`DEGRADED → FAILED`). If
+  the candidate fails to validate, the prior path is preserved at
+  DEGRADED and the record is honestly incomplete — never a faked
+  handover.
+* the evidence document (schema v2) now carries the first-class path
+  records, the explicit session-identity assertion (BEFORE == AFTER),
+  the ordered journal-derived lifecycle, the five evidence planes
+  (each proven only by its own evidence), the eight-link 5G chain
+  (any absent link keeps criterion 2 NOT-TESTABLE), and the honest
+  recovery position (process death not tested; session-lost
+  preserved).
+
+**The Android-agent manifest contract is now schema v2** (§8.4
+amended): the manifest must additionally carry `platform_events` (the
+ORDERED authoritative platform events — each with its kind, its
+framework source, its observation instant, and the framework
+observation that caused it; non-decreasing instants), `snapshot_basis`
+(which event produced the pre/post snapshots — the snapshot values
+must genuinely derive from the referenced events' observations),
+`network_identity` (the platform's own network identities for the
+pre/post networks — never a generic wifi/cellular label alone),
+`metered` (the framework's metering reports), and `cellular` (the
+data-network active state). The complete template:
+`evidence/work-040/android-manifest-template.json` (regenerated from
+the in-code template — it can never drift from the validator). A v1
+manifest is rejected (the contract is v2); prefer the framework's own
+event signals (callbacks / connectivity reports) over repeated
+polling, and never infer the app's background state from screen-off or
+5G from a generic cellular state.
+
+**What the operator/Android agent will observe differently:** nothing
+in the mechanics (the same device-node command, the same marked step);
+in the EVIDENCE — the handset's journal shows the two
+`path-status-changed` events (ACTIVE→DEGRADED, then DEGRADED→FAILED)
+with the candidate probe between them, and the assembled document
+separates the layers explicitly, so a reviewer can see exactly which
+layer each claim proves (the Android NR report is PLATFORM; the tether
+interface is PATH; the session binding is ADCOS; the receiver's
+datagram is TRANSPORT; the handset's participation is PHYSICAL).
+
+**The honest architectural gaps** (reported, not implemented in W040):
+a production first-class NetworkPath record type, a production
+platform-event adapter surface, and production checkpoint/journal-tail
+recovery machinery all remain authorized-work-item concerns — see
+`docs/WORK-040-evidence.md` §8.4. Nothing in W040 introduced a second
+authority or touched a frozen surface.
+
+**NEXT STEP (the Architect's call):** the Android physical run per
+§8.2/§8.4 with the manifest v2 contract — then the seven-item PR #48
+update (the exact execution SHA, the physical evidence summary, the
+per-criterion status, the evidence hashes, the verification results,
+the remaining limitations) and the Architect's re-review. The software
+side stops here and waits.

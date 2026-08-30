@@ -583,3 +583,182 @@ transition) and `integrate_android_v9_observations` (the integration
 record with the honest never-promoting classification). Tampered
 artifacts, broken chains, missing files, and malformed digests all
 fail closed.
+
+## 8. The correction cycle's third round: the ACR-005/006 alignment (software-side)
+
+Execution SHA: `6813af8` (the implementation commit; the evidence
+artifacts regenerated at the same SHA). Authorization:
+`WORK-040-CORRECTION-001` (unchanged, correction-only; the correction
+scope `pilot/` + `tools/pilot_selftest.py` + these docs +
+`evidence/work-040/` covers the whole delta — ARCH-08 PASS, 21 files).
+
+The Architect's cycle-3 directive: apply the ACCEPTED ACR-005/006
+architecture (NetworkPath as a first-class object, path
+validation/activation, event-driven platform observation, logical-session
+continuity, evidence-layer separation) to the physical handover
+experiment THROUGH THE EXISTING PRODUCTION SEAMS — do not invent a
+second authority, do not redesign the pilot, do not run the physical
+experiment yet (software-side work + CI verification, then stop and
+wait for the Android physical run).
+
+### 8.1 What correction 3 adds
+
+**The path is a first-class object (ACR-005 §2).** The handover evidence
+gains two path records (`paths.old` / `paths.new`), each carrying the
+constituent id plus access_kind, platform_network_identity,
+host_interface, route, metered, reachability, and validation_state
+(frozen `PATH_RECORD_REQUIRED`; schema v2). A generic `wifi`/`cellular`
+label alone is never sufficient to identify a path; where a platform
+observation does not exist (a rehearsal, an unbound manifest) the record
+states that explicitly — never a fabricated identity. The path is a
+distinct object from BOTH the logical session (session_id is stable;
+path_id/interface/route change) and the platform observation (the
+manifest's own reports, loaded and cross-corroborated, never
+re-derived).
+
+**The transactional path lifecycle (ACR-005 §4/§5).** `_handover_transition`
+is re-sequenced so that every stage runs through the EXISTING seams
+(the WORK-018 multipath authority's frozen `ACTIVE → DEGRADED → FAILED`
+table and the frozen pilot journal vocabulary — no second event
+authority, no new event kinds, no production-module changes):
+
+| stage | the existing ADCOS mechanism |
+|---|---|
+| candidate discovered | the plan admission at session start (`pilot.route-reevaluated`, both constituents) |
+| degradation detected | `pilot.link-loss-observed` + the death-confirming `pilot.probe-reported` + the primary constituent `ACTIVE → DEGRADED` (recoverable — degradation recorded WITHOUT retiring the path) |
+| candidate validated | the candidate access-point probe (`pilot.probe-reported`, target `physical-access-secondary`) BEFORE any rebind or retirement |
+| candidate bound | `pilot.session-reconnecting` + the real connect/announce |
+| rebind committed | `pilot.session-rebound` (the SAME session id) |
+| candidate traffic probe | the re-sent already-protected transition datagram (`pilot.datagram-sent`) |
+| activation committed | the echoed datagram verified on the new path (`pilot.datagram-received`) — the DATA-PLANE proof precedes the control-plane commit (ACR-006 §6) |
+| old path retired | the primary constituent `DEGRADED → FAILED` (`pilot.path-status-changed`) — only AFTER the data-plane proof |
+
+Failure at any pre-activation stage (candidate unreachable, bind
+failure, traffic-probe failure, no protected artifact) is an HONEST
+incomplete record that PRESERVES the prior authoritative path at
+DEGRADED (`DEGRADED → ACTIVE` is a legal edge of the frozen table —
+"failure before activation leaves the prior authoritative path intact
+where the production contract allows it"); the old path is never
+retired before the new path demonstrably carries the protected session
+traffic.
+
+**The primary session-identity assertion (ACR-005 §3).**
+`session_id BEFORE == session_id AFTER` is now explicit, with the AFTER
+side a genuine read-back through the session authority — while the path
+constituents, interfaces, and routes MAY change (and did: the two path
+records carry distinct constituent ids). A handover that establishes a
+new logical session merely to succeed is rejected by the validator.
+
+**Journal-first evidence (the directive's event vocabulary).** The
+evidence document carries the ORDERED lifecycle derived from the
+participant's OWN journal (`derive_handover_lifecycle`); the validator
+re-derives it and asserts the canonical order, completeness for a
+completed transition, and retirement-never-before-activation — all in
+the existing frozen vocabulary.
+
+**Event-driven platform observation (ACR-006 §1/§2).** The Android
+observation manifest is schema v2: it carries the ORDERED
+`platform_events` (each with its kind, its framework source, its
+observation instant, and the authoritative framework observation that
+caused the event), non-decreasing instants (deterministic ordering —
+no stale re-reads), a `snapshot_basis` naming which event produced each
+pre/post snapshot, and the CONSISTENCY rule that the snapshot values
+genuinely derive from the referenced events' observations; plus the
+platform's own network identities (never a generic label), the metering
+reports, and the cellular data-network state. The ADCOS side never
+duplicates the Android platform authority: it loads, validates, binds
+by file SHA-256, and cross-corroborates.
+
+**Evidence-plane separation (the directive's five layers).** The
+document carries `evidence_layers` — PHYSICAL / PLATFORM / PATH /
+ADCOS / TRANSPORT — each with its claims and a DERIVED proven flag
+backed only by that layer's own evidence: PHYSICAL by the physical
+execution (never a rehearsal), PLATFORM by the framework's own
+observations, PATH by the real host path records (honestly proven even
+in a rehearsal — the loopback path is genuinely observed), ADCOS by
+the bind/rebind/continuity facts, TRANSPORT by the independent
+receiver corroboration (never the sender's own send record alone). The
+validator re-derives every flag and rejects any promotion or demotion.
+
+**The complete 5G chain (the directive's eight links).** The document
+carries `five_g_chain` — android_nr_report, cellular_network_active,
+tether_backed_by_cellular, host_path_identified, adcos_path_validated,
+adcos_session_bound_to_path, real_packet_transmitted,
+independent_receiver_verification — each link present only by its OWN
+layer's evidence. Criterion 2 is PASS only when every link is present
+on a fully valid physical document; ANY absent link keeps it
+NOT-TESTABLE (the cycle-2 PARTIAL branch for criterion 2 is withdrawn
+per the directive: the honest partial information lives in the chain
+RECORD, never in a promoted status; cellular is never automatically
+5G; the NR-only rule is unchanged).
+
+**The honest recovery position (ACR-006 §3/§4).** The document carries
+`recovery`: process_death_tested is an explicit boolean (false — the
+W040 harness does NOT test process death), and the recorded model is
+checkpoint/snapshot + journal tail + fresh platform observation with
+the honest session-lost semantics preserved — the process is never
+made to appear continuously alive merely for the experiment.
+
+### 8.2 The rehearsal record (what the software class proves)
+
+The re-sequenced handover rehearsal (three real processes; battery
+cases 26 + 30) validates end-to-end: the complete ordered lifecycle
+(all eight stages), the honest layer separation (PATH/ADCOS/TRANSPORT
+proven by their own evidence; PHYSICAL/PLATFORM honestly unproven in
+a rehearsal), the session-identity assertion with changed path
+constituents, the old path FAILED only after the data-plane proof, the
+new path ACTIVE with the candidate probe + protected traffic probe
+verified, and the honest chain (the ADCOS/TRANSPORT links present; the
+PLATFORM links honestly absent). Criterion 1 PARTIAL, criterion 2
+NOT-TESTABLE — unchanged.
+
+### 8.3 The criterion-by-criterion bookkeeping (correction 3)
+
+| criterion | status | the correction-3 fact |
+|---|---|---|
+| 1 real devices | PARTIAL (unchanged) | the full transactional chain is now software-verified end-to-end with the ACR-005/006 semantics; the physical run (handoff §8) remains the step that would close it — now against a validator that enforces the first-class path records, the lifecycle order, the layer separation, and the session-identity assertion |
+| 2 the 5G path | NOT-TESTABLE (unchanged) | the complete eight-link chain is enforced in code; any absent link keeps the criterion NOT-TESTABLE (never PARTIAL); the NR-only rule unchanged |
+| 3 non-cellular path | PASS (preserved) | untouched; the default deployment run digest is byte-identical with/without the correction at the same HEAD (measured: `sha256:696e9f85…` both ways) |
+| 4 relay/backhaul | PASS (preserved) | untouched |
+| 5 resilience/failover | PASS (preserved) | device-1's delivered `_failover_to_secondary` is byte-untouched; the re-sequencing lives only in `_handover_transition` |
+| 6 operational evidence | PASS (preserved) | untouched |
+
+### 8.4 The remaining architectural gaps (reported honestly, NOT implemented in W040)
+
+Per the implementation boundary in the directive — "if implementing
+the complete ACR-005/006 model requires a new authority, protocol
+change, or frozen-spec change, stop and report it as an architectural
+requirement rather than implementing it inside W040" — the following
+remain OUT of W040 and are recorded as architectural requirements for
+an authorized work item (the ACRs themselves say the concrete
+schema/API implementation "remains gated by an authorized Work Item"):
+
+* a PRODUCTION first-class NetworkPath record type (the pilot's path
+  records are evidence-layer documents over the multipath
+  constituents, not a new production schema);
+* a PRODUCTION platform-event adapter surface (the manifest interface
+  carries the Android platform's own event record; the production
+  MobileAgent consumes snapshots through its existing source seam);
+* production checkpoint/journal-tail recovery machinery (the W040
+  harness honestly records that process death is not tested and never
+  fakes continuous liveness).
+
+No second event authority was introduced; no frozen vocabulary, wire
+semantic, or production module was modified; the frozen correction-1
+participation templates are byte-identical.
+
+### 8.5 Verification (correction 3)
+
+spec_check 17/17 + ARCH-08 provenance PASS (the 21-file delta within
+the correction scope); spec_check_selftest 32/32; experience checks
+PASS (5 records; selftest 8/8); the pilot battery 30/30 (cases 26-28
+amended for the cycle-3 templates; the new case_30 asserts the
+alignment end-to-end); the six evidence-sensitive batteries green with
+the regenerated artifacts (appliance 42/42, edge 48/48, imt 34/34,
+mobile 45/45, oran 36/36, scale 39/39); the four documented full-clone
+cases fail only at their pre-existing frozen-spec cases (passing in
+CI's base-less PR context, as at delivery); the no-regression proof
+re-measured (the default deployment run digest byte-identical
+with/without the correction at the same HEAD). The physical experiment
+was NOT run — per the Architect's directive the software side stops
+here and waits for the Android physical run.

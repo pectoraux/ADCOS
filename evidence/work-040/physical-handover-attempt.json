@@ -40,7 +40,7 @@
    }
   },
   "kind": "physical-handover-attempt",
-  "schema_version": 1
+  "schema_version": 2
  },
  "environment": {
   "adb_binary": {
@@ -71,7 +71,7 @@
    "present": true
   }
  },
- "execution_sha": "916f05594486b53dc0cb4627a4a3a5d605097815",
+ "execution_sha": "6813af8ce4f7ed259a39c4024ee3a8564070d204",
  "kind": "work-040-physical-handover-attempt",
  "rehearsal": {
   "access_technology_post": {
@@ -667,41 +667,40 @@
        "from": "ACTIVE",
        "path": "sha256:43533d6b0dd3da972d80603370e959e59e75464d3ed5c20717e83a0bd1bc4bd8",
        "session_id": "sha256:bad27642e5ec59c40d8efcb7c917bb472d1435f4f00d6166b48d4862749ca4e6",
-       "to": "FAILED"
+       "to": "DEGRADED"
       },
       "sequence": 15
      },
      {
       "at_instant": "2026-08-01T00:18:00Z",
-      "kind": "pilot.session-reconnecting",
+      "kind": "pilot.probe-reported",
       "payload": {
-       "session_id": "sha256:bad27642e5ec59c40d8efcb7c917bb472d1435f4f00d6166b48d4862749ca4e6",
-       "via": "physical-access-secondary"
+       "reachable": true,
+       "target": "physical-access-secondary"
       },
       "sequence": 16
      },
      {
       "at_instant": "2026-08-01T00:19:00Z",
-      "kind": "pilot.discovery-announced",
+      "kind": "pilot.session-reconnecting",
       "payload": {
-       "peer_label": "appliance-1"
+       "session_id": "sha256:bad27642e5ec59c40d8efcb7c917bb472d1435f4f00d6166b48d4862749ca4e6",
+       "via": "physical-access-secondary"
       },
       "sequence": 17
      },
      {
       "at_instant": "2026-08-01T00:20:00Z",
-      "kind": "pilot.session-rebound",
+      "kind": "pilot.discovery-announced",
       "payload": {
-       "carriage": "physical-access-secondary",
-       "session_id": "sha256:bad27642e5ec59c40d8efcb7c917bb472d1435f4f00d6166b48d4862749ca4e6"
+       "peer_label": "appliance-1"
       },
       "sequence": 18
      },
      {
       "at_instant": "2026-08-01T00:21:00Z",
-      "kind": "pilot.datagram-sent",
+      "kind": "pilot.session-rebound",
       "payload": {
-       "bytes": 34,
        "carriage": "physical-access-secondary",
        "session_id": "sha256:bad27642e5ec59c40d8efcb7c917bb472d1435f4f00d6166b48d4862749ca4e6"
       },
@@ -709,7 +708,7 @@
      },
      {
       "at_instant": "2026-08-01T00:22:00Z",
-      "kind": "pilot.datagram-received",
+      "kind": "pilot.datagram-sent",
       "payload": {
        "bytes": 34,
        "carriage": "physical-access-secondary",
@@ -719,68 +718,89 @@
      },
      {
       "at_instant": "2026-08-01T00:23:00Z",
+      "kind": "pilot.datagram-received",
+      "payload": {
+       "bytes": 34,
+       "carriage": "physical-access-secondary",
+       "session_id": "sha256:bad27642e5ec59c40d8efcb7c917bb472d1435f4f00d6166b48d4862749ca4e6"
+      },
+      "sequence": 21
+     },
+     {
+      "at_instant": "2026-08-01T00:25:00Z",
+      "kind": "pilot.path-status-changed",
+      "payload": {
+       "from": "DEGRADED",
+       "path": "sha256:43533d6b0dd3da972d80603370e959e59e75464d3ed5c20717e83a0bd1bc4bd8",
+       "session_id": "sha256:bad27642e5ec59c40d8efcb7c917bb472d1435f4f00d6166b48d4862749ca4e6",
+       "to": "FAILED"
+      },
+      "sequence": 22
+     },
+     {
+      "at_instant": "2026-08-01T00:26:00Z",
       "kind": "pilot.failover-completed",
       "payload": {
        "active_path": "sha256:1dcc2d25847f1c9918ae8200c4b6c654e85e26233d549fd7234a66c29ce28dc9",
        "failed_path": "sha256:43533d6b0dd3da972d80603370e959e59e75464d3ed5c20717e83a0bd1bc4bd8",
        "session_id": "sha256:bad27642e5ec59c40d8efcb7c917bb472d1435f4f00d6166b48d4862749ca4e6"
       },
-      "sequence": 21
+      "sequence": 23
      },
      {
-      "at_instant": "2026-08-01T00:24:00Z",
+      "at_instant": "2026-08-01T00:27:00Z",
       "kind": "pilot.datagram-sent",
       "payload": {
        "bytes": 35,
        "carriage": "physical-access-secondary",
        "session_id": "sha256:bad27642e5ec59c40d8efcb7c917bb472d1435f4f00d6166b48d4862749ca4e6"
       },
-      "sequence": 22
+      "sequence": 24
      },
      {
-      "at_instant": "2026-08-01T00:25:00Z",
+      "at_instant": "2026-08-01T00:28:00Z",
       "kind": "pilot.datagram-received",
       "payload": {
        "bytes": 35,
        "carriage": "physical-access-secondary",
        "session_id": "sha256:bad27642e5ec59c40d8efcb7c917bb472d1435f4f00d6166b48d4862749ca4e6"
       },
-      "sequence": 23
+      "sequence": 25
      },
      {
-      "at_instant": "2026-08-01T00:26:00Z",
+      "at_instant": "2026-08-01T00:29:00Z",
       "kind": "pilot.service-requested",
       "payload": {
        "service_ref": "services:service:054d6450e219984a22538e3682b154cf",
        "session_id": "sha256:bad27642e5ec59c40d8efcb7c917bb472d1435f4f00d6166b48d4862749ca4e6"
       },
-      "sequence": 24
+      "sequence": 26
      },
      {
-      "at_instant": "2026-08-01T00:27:00Z",
+      "at_instant": "2026-08-01T00:30:00Z",
       "kind": "pilot.service-executed",
       "payload": {
        "service_ref": "services:service:054d6450e219984a22538e3682b154cf",
        "verdict": "executed"
       },
-      "sequence": 25
+      "sequence": 27
      },
      {
-      "at_instant": "2026-08-01T00:28:00Z",
+      "at_instant": "2026-08-01T00:31:00Z",
       "kind": "pilot.demonstration-completed",
       "payload": {
        "demonstration": "physical-handover",
        "device": "device-android"
       },
-      "sequence": 26
+      "sequence": 28
      },
      {
-      "at_instant": "2026-08-01T00:29:00Z",
+      "at_instant": "2026-08-01T00:32:00Z",
       "kind": "pilot.node-shutdown",
       "payload": {
        "label": "device-android"
       },
-      "sequence": 27
+      "sequence": 29
      }
     ],
     "label": "device-android",
@@ -793,14 +813,28 @@
       "secondary": "physical-access-secondary"
      },
      "handover": {
+      "activation_committed": true,
       "active_path_id": "sha256:1dcc2d25847f1c9918ae8200c4b6c654e85e26233d549fd7234a66c29ce28dc9",
       "attempts": 2,
+      "candidate_bound": true,
+      "candidate_probe_reachable": true,
+      "candidate_traffic_probe": true,
+      "candidate_validated": true,
       "error_class": "PilotError",
       "failed_path_id": "sha256:43533d6b0dd3da972d80603370e959e59e75464d3ed5c20717e83a0bd1bc4bd8",
       "incomplete_reason": "",
+      "new_path_status_final": "ACTIVE",
       "observed_real_loss": true,
+      "old_path_degraded": true,
+      "old_path_retired": true,
+      "old_path_status_final": "FAILED",
+      "prior_path_preserved": false,
       "raw_error": "PilotError: pilot.wire-closed: frame send failed: [Errno 32] Broken pipe",
+      "rebind_committed": true,
       "reprobe_reachable": false,
+      "session_id": "sha256:bad27642e5ec59c40d8efcb7c917bb472d1435f4f00d6166b48d4862749ca4e6",
+      "session_id_after": "sha256:bad27642e5ec59c40d8efcb7c917bb472d1435f4f00d6166b48d4862749ca4e6",
+      "session_id_before": "sha256:bad27642e5ec59c40d8efcb7c917bb472d1435f4f00d6166b48d4862749ca4e6",
       "session_record_stable": true,
       "stage": "carriage-send",
       "suspected_loss": false,
@@ -809,6 +843,11 @@
       "transition_timed_out": false
      },
      "interfaces_observed": [
+      "dummy0",
+      "eth0",
+      "lo"
+     ],
+     "interfaces_observed_before": [
       "dummy0",
       "eth0",
       "lo"
@@ -830,7 +869,9 @@
     "role": "device"
    },
    "session_continuity": true,
-   "session_id": "sha256:bad27642e5ec59c40d8efcb7c917bb472d1435f4f00d6166b48d4862749ca4e6"
+   "session_id": "sha256:bad27642e5ec59c40d8efcb7c917bb472d1435f4f00d6166b48d4862749ca4e6",
+   "session_id_after": "sha256:bad27642e5ec59c40d8efcb7c917bb472d1435f4f00d6166b48d4862749ca4e6",
+   "session_id_before": "sha256:bad27642e5ec59c40d8efcb7c917bb472d1435f4f00d6166b48d4862749ca4e6"
   },
   "attempt": {
    "executed": true,
@@ -859,6 +900,91 @@
    "returncode": 0,
    "stderr_tail": ""
   },
+  "evidence_layers": {
+   "ADCOS": {
+    "basis": "the participant's own journal events (session-bound + session-rebound on one session id) + the byte-identical session-record digest",
+    "claims": [
+     "the session established and bound (primary carriage)",
+     "the re-bind on the SAME logical session id (secondary)",
+     "the session-record digest stability across the transition"
+    ],
+    "proven": true
+   },
+   "PATH": {
+    "basis": "the real host route/interface observations + the participant's own transition record (honest even in a rehearsal: the loopback path is a genuinely observed path)",
+    "claims": [
+     "the OLD path record (identity, interface, route, reachability, validation state)",
+     "the NEW path record (the USB-tether host path)"
+    ],
+    "proven": true
+   },
+   "PHYSICAL": {
+    "basis": "the physical execution record (is_physical) + the adb-observed device identity",
+    "claims": [
+     "the handset participates as a real ADCOS endpoint",
+     "the physical trigger (the Wi-Fi disable) occurred"
+    ],
+    "proven": false
+   },
+   "PLATFORM": {
+    "basis": "the framework's own reports captured by the harness (getprop/dumpsys) and/or the bound Android observation manifest -- never ADCOS re-derivation",
+    "claims": [
+     "the Android framework's own access-technology observations (pre/post)",
+     "the NR-only 5G determination"
+    ],
+    "proven": false
+   },
+   "TRANSPORT": {
+    "basis": "the post-rebind payload digest + the receiver journal's both-carriage corroboration (the sender's own send record alone never proves this layer)",
+    "claims": [
+     "the protected datagram flowed on the new path",
+     "the independent receiver corroborates the session datagrams on BOTH access points"
+    ],
+    "proven": true
+   }
+  },
+  "five_g_chain": {
+   "adcos_path_validated": {
+    "basis": "the new path record's validation state ('ACTIVE (constituent; candidate probe reachable=True; protected traffic probe verified=True)')",
+    "layer": "ADCOS",
+    "present": true
+   },
+   "adcos_session_bound_to_path": {
+    "basis": "the bind + rebind events on the SAME session id (before='sha256:bad27642e5ec59c40' after='sha256:bad27642e5ec59c40')",
+    "layer": "ADCOS",
+    "present": true
+   },
+   "android_nr_report": {
+    "basis": "the framework's post-transition NR report (technology='' is_5g=False)",
+    "layer": "PLATFORM",
+    "present": false
+   },
+   "cellular_network_active": {
+    "basis": "the framework's cellular data-network state (manifest cellular.active=None)",
+    "layer": "PLATFORM",
+    "present": false
+   },
+   "host_path_identified": {
+    "basis": "the host USB-tether interface '' + the post-transition route running via it (route 'default via 21.0.0.1 dev eth0 onlink')",
+    "layer": "PATH",
+    "present": false
+   },
+   "independent_receiver_verification": {
+    "basis": "the independent receiver (appliance) journal corroborating the session datagram on the relay carriage",
+    "layer": "TRANSPORT",
+    "present": true
+   },
+   "real_packet_transmitted": {
+    "basis": "the digest of the protected datagram that flowed after the re-bind ('sha256:7c44e43f48f1db969')",
+    "layer": "TRANSPORT",
+    "present": true
+   },
+   "tether_backed_by_cellular": {
+    "basis": "the framework's USB-tether state (enabled=None backed_by_cellular=None)",
+    "layer": "PLATFORM",
+    "present": false
+   }
+  },
   "honest_absences": [
    "device_identity.model",
    "device_identity.brand",
@@ -884,8 +1010,85 @@
   },
   "is_physical": false,
   "kind": "physical-handover-evidence",
+  "lifecycle": [
+   {
+    "instant": "",
+    "journal_event": "pilot.route-reevaluated",
+    "marker": "constituents=2 (physical-access + physical-access-secondary)",
+    "stage": "candidate_discovered"
+   },
+   {
+    "instant": "",
+    "journal_event": "pilot.link-loss-observed",
+    "marker": "path=physical-access (the primary carriage death; confirmed by the direct re-probe + the ACTIVE->DEGRADED path-status-changed)",
+    "stage": "degradation_detected"
+   },
+   {
+    "instant": "",
+    "journal_event": "pilot.probe-reported",
+    "marker": "target=physical-access-secondary reachable=true (the candidate probe BEFORE any rebind or retirement)",
+    "stage": "candidate_validated"
+   },
+   {
+    "instant": "",
+    "journal_event": "pilot.session-reconnecting",
+    "marker": "via=physical-access-secondary (the re-bind start)",
+    "stage": "candidate_bound"
+   },
+   {
+    "instant": "",
+    "journal_event": "pilot.session-rebound",
+    "marker": "carriage=physical-access-secondary (the SAME session id)",
+    "stage": "rebind_committed"
+   },
+   {
+    "instant": "",
+    "journal_event": "pilot.datagram-sent",
+    "marker": "the already-protected transition datagram re-sent on the secondary",
+    "stage": "candidate_traffic_probe"
+   },
+   {
+    "instant": "",
+    "journal_event": "pilot.datagram-received",
+    "marker": "the echoed protected datagram verified on the new path (the data-plane proof precedes the control-plane commit)",
+    "stage": "activation_committed"
+   },
+   {
+    "instant": "",
+    "journal_event": "pilot.path-status-changed",
+    "marker": "the primary constituent DEGRADED->FAILED (only AFTER the data-plane proof)",
+    "stage": "old_path_retired"
+   }
+  ],
+  "paths": {
+   "new": {
+    "access_kind": "loopback-rehearsal (the relay leg over loopback; no physical access technology)",
+    "host_interface": "host USB-tether interface: none observed (addresses: none observed); device-side interfaces after the transition: dummy0, eth0, lo",
+    "metered": "unknown (rehearsal: no platform metering observation exists)",
+    "path_id": "sha256:1dcc2d25847f1c9918ae8200c4b6c654e85e26233d549fd7234a66c29ce28dc9",
+    "platform_network_identity": "none (rehearsal: no platform observation exists -- the handover ran as a host process over the loopback carriages)",
+    "reachability": "reachable (the candidate access-point probe: reachable=True)",
+    "route": "default via 21.0.0.1 dev eth0 onlink",
+    "validation_state": "ACTIVE (constituent; candidate probe reachable=True; protected traffic probe verified=True)"
+   },
+   "old": {
+    "access_kind": "loopback-rehearsal (host process; no physical access technology)",
+    "host_interface": "device-side interfaces before the transition: dummy0, eth0, lo; host pre-transition route: default via 21.0.0.1 dev eth0 onlink",
+    "metered": "unknown (rehearsal: no platform metering observation exists)",
+    "path_id": "sha256:43533d6b0dd3da972d80603370e959e59e75464d3ed5c20717e83a0bd1bc4bd8",
+    "platform_network_identity": "none (rehearsal: no platform observation exists -- the handover ran as a host process over the loopback carriages)",
+    "reachability": "unreachable (the honest post-death re-probe of the direct access point: reachable=False)",
+    "route": "default via 21.0.0.1 dev eth0 onlink",
+    "validation_state": "FAILED (constituent; death confirmed; retired after the data-plane proof)"
+   }
+  },
+  "recovery": {
+   "model": "checkpoint/snapshot + append-only journal tail + fresh platform observation; the existing honest session-lost semantics are preserved (the process is never made to appear continuously alive merely for the experiment)",
+   "note": "the W040 handover harness does NOT test process death; any operator-driven process-death test must follow the ACR-006 recovery model above and must preserve the honest session-lost semantics (a production recovery implementation remains an authorized-work-item concern, recorded honestly as an architectural gap -- not implemented inside W040)",
+   "process_death_tested": false
+  },
   "rehearsal": true,
-  "schema_version": 1,
+  "schema_version": 2,
   "traffic_verification": {
    "method": "route + interface observation across the pilot window (pre/post) with both carriages active + receiver corroboration on both access points (rehearsal: loopback carriages)",
    "observation": "pre=default via 21.0.0.1 dev eth0 onlink; post=default via 21.0.0.1 dev eth0 onlink; tether=none (rehearsal); the appliance journal corroborates the session datagrams on BOTH access points (direct and relay)"
@@ -898,11 +1101,11 @@
    "artifact_hashes": [
     [
      "device-result",
-     "sha256:dec9157a919d94734edbb606cda8e607145c0eb9e58478d1f09a258f8a2bc4bd"
+     "sha256:716e17898ac65426f92c325100423e9142273bd700f89423a410bcdded64967f"
     ],
     [
      "appliance-result",
-     "sha256:89da597f09e8430ae5648780cd7f03bd545f4c6da4afae21a40f286f3de9dbf7"
+     "sha256:28fa4c1aff47bb33276b0dc815493039a48cc1e54533e962c1e6de3d393ad3da"
     ],
     [
      "environment-detection",
@@ -913,10 +1116,10 @@
      "sha256:3f278112f1d5a9af18c663f7a33b7ea4737c1b012c0caf895884f90b241f4f09"
     ]
    ],
-   "validator_sha": "sha256:5cc1728582772212b7a26be788114c176618e7550f5822dcc2c2899f3a9bea63"
+   "validator_sha": "sha256:fb83d0ed3cf1957aa5831fba7e864460c622dd6c14b109f22e448fa0514e9383"
   }
  },
- "schema_version": 1,
+ "schema_version": 2,
  "summary": {
   "criterion_1_real_devices": "partial",
   "criterion_2_5g": "not-testable",
