@@ -1,0 +1,91 @@
+{
+  "kind": "android-agent-observation-manifest",
+  "schema_version": 2,
+  "produced_by": "ADCOS physical-device agent (v10 definitive)",
+  "device_identity": {
+    "model": "TECNO KL4",
+    "brand": "TECNO",
+    "device": "TECNO-KL4",
+    "serial": "12922554B5023086",
+    "android_release": "14",
+    "sdk": "34",
+    "abi": "arm64-v8a",
+    "observation_source": "adb shell getprop (authoritative device report)"
+  },
+  "platform_events": [
+    {
+      "kind": "wifi-baseline",
+      "source": "manual",
+      "instant": "2026-08-01T00:07:50Z",
+      "observation": {
+        "mDataNetworkType": "none",
+        "active_network": "wifi"
+      }
+    },
+    {
+      "kind": "handover-trigger",
+      "source": "svc wifi disable",
+      "instant": "2026-08-01T00:08:00Z",
+      "observation": {
+        "wifi_enabled": false
+      }
+    },
+    {
+      "kind": "cellular-post",
+      "source": "connectivity-callback",
+      "instant": "2026-08-01T00:08:10Z",
+      "observation": {
+        "mDataNetworkType": "none",
+        "mNrState": null,
+        "active_network": "cellular"
+      }
+    }
+  ],
+  "snapshot_basis": {
+    "pre": {
+      "event_index": 0
+    },
+    "post": {
+      "event_index": 2
+    }
+  },
+  "network_identity": {
+    "pre": "netId-wifi",
+    "post": "netId-cellular",
+    "observation_source": "adb shell dumpsys connectivity"
+  },
+  "metered": {
+    "pre": false,
+    "post": true,
+    "observation_source": "adb shell dumpsys connectivity"
+  },
+  "cellular": {
+    "active": true,
+    "observation_source": "adb shell dumpsys telephony.registry"
+  },
+  "network_technology": {
+    "pre": "none",
+    "post": "none",
+    "is_5g": false,
+    "nr_state": "none",
+    "observation_source": "adb shell dumpsys telephony.registry"
+  },
+  "trigger": {
+    "description": "manual Wi-Fi disable",
+    "observation_source": "harness"
+  },
+  "usb_tether": {
+    "enabled": true,
+    "backed_by_cellular": true,
+    "observation_source": "adb shell dumpsys connectivity"
+  },
+  "raw_observations": {
+    "getprop_ro_product_model": "TECNO KL4",
+    "dumpsys_telephony_registry_excerpt": "mServiceState={mVoiceRegState=0(IN_SERVICE), mDataRegState=0(IN_SERVICE), mChannelNumber=3000, duplexMode()=1, mCellBandwidths=[20000, 15000], mOperatorAlphaLong=MTN GH, mOperatorAlphaShort=MTN, isManualNetworkSelection=false(automatic), getRilVoiceRadioTechnology=14(LTE), getRilDataRadioTechnology=14(LTE), mCssIndicator=unsupported, mNetworkId=-1, mSystemId=-1, mCdmaRoamingIndicator=-1, mCdmaDefaultRoamingIndicator=-1, mIsEmergencyOnly=false, isUsingCarrierAggregation=true, mArfcnRsrpBoost=0, mNetworkRegistrationInfos=[NetworkRegistrationInfo{ domain=PS transportType=WLAN registrationState=NOT_REG_OR_SEARCHING networkRegistrationState=NOT_REG_OR_SEARCHING roamingType=NOT_ROAMING accessNetworkTechnology=UNKNOWN rejectCause=0 emergencyEnabled=false availableServices=[VOICE,SMS,EMERGENCY] cellIdentity=null voiceSpecificInfo=null dataSpecificInfo=null nrState=**** rRplmn= isUsingCarrierAggregation=false}, NetworkRegistrationInfo{ domain=CS transportType=WWAN registrationState=HOME networkRegistrationState=HOME roamingType=NOT_ROAMING accessNetworkTechnology=LTE rejectCause=0 emergencyEnabled=false availableServices=[VOICE,SMS,VIDEO] cellIdentity=CellIdentityLte:{ mCi=153658951 mPci=373 mTac=11214 mEarfcn=3000 mBands=[7] mBandwidth=20000 mMcc=620 mMnc=01 mAlphaLong=MTN GH mAlphaShort=MTN mAdditionalPlmns={} mCsgInfo=null} voiceSpecificInfo=VoiceSpecificRegistrationInfo { mCssSupported=false mRoamingIndicator=0 mSystemIsInPrl=0 mDefaultRoamingIndicator=0} dataSpecificInfo=null nrState=**** rRplmn=62001 isUsingCarrierAggregation=false}, NetworkRegistrationInfo{ domain=PS transportType=WWAN registrationState=HOME networkRegistrationState=HOME roamingType=NOT_ROAMING accessNetworkTechnology=LTE rejectCause=-1 emergencyEnabled=false availableServices=[DATA] cellIdentity=CellIdentityLte:{ mCi=153658951 mPci=373 mTac=11214 mEarfcn=3000 mBands=[7] mBandwidth=20000 mMcc=620 mMnc=01 mAlphaLong=MTN GH mAlphaShort=MTN mAdditionalPlmns={} mCsgInfo=null} voiceSpecificInfo=null dataSpecificInfo=android.telephony.DataSpecificRegistrationInfo :{ maxDataCalls = 16 isDcNrRestricted = false isNrAvailable = false isEnDcAvailable = false mLteAttachResultType = 0 mLteAttachExtraInfo = 0 LteVopsSupportInfo :  mVopsSupport = 2 mEmcBearerSupport = 2 } nrState=**** rRplmn=62001 isUsingCarrierAggregation=false}], mNrFrequencyRange=0, mOperatorAlphaLongRaw=MTN GH, mOperatorAlphaShortRaw=MTN, mIsDataRoamingFromRegistration=false, mIsIwlanPreferred=false} | mCarrierServiceState=<package=***, uid=-1> | mServiceState={mVoiceRegState=1(OUT_OF_SERVICE), mDataRegState=1(OUT_OF_SERVICE), mChannelNumber=-1, duplexMode()=0, mCellBandwidths=[], mOperatorAlphaLong=null, mOperatorAlphaShort=null, isManualNetworkSelection=false(automatic), getRilVoiceRadioTechnology=0(Unknown), getRilDataRadioTechnology=0(Unknown), mCssIndicator=unsupported, mNetworkId=-1, mSystemId=-1, mCdmaRoamingIndicator=-1, mCdmaDefaultRoamingIndicator=-1, mIsEmergencyOnly=false, isUsingCarrierAggregation=false, mArfcnRsrpBoost=0, mNetworkRegistrationInfos=[NetworkRegistrationInfo{ domain=CS transportType=WWAN registrationState=UNKNOWN networkRegistrationState=UNKNOWN roamingType=NOT_ROAMING accessNetworkTechnology=UNKNOWN rejectCause=0 emergencyEnabled=false availableServices=[] cellIdentity=null voiceSpecificInfo=null dataSpecificInfo=null nrState=**** rRplmn= isUsingCarrierAggregation=false}, NetworkRegistrationInfo{ domain=PS transportType=WWAN registrationState=UNKNOWN networkRegistrationState=UNKNOWN roamingType=NOT_ROAMING accessNetworkTechnology=UNKNOWN rejectCause=0 emergencyEnabled=false availableServices=[] cellIdentity=null voiceSpecificInfo=null dataSpecificInfo=null nrState=**** rRplmn= isUsingCarrierAggregation=false}, NetworkRegistrationInfo{ domain=PS transportType=WLAN registrationState=UNKNOWN networkRegistrationState=UNKNOWN roamingType=NOT_ROAMING accessNetworkTechnology=UNKNOWN rejectCause=0 emergencyEnabled=false availableServices=[] cellIdentity=null voiceSpecificInfo=null dataSpecificInfo=null nrState=**** rRplmn= isUsingCarrierAggregation=false}], mNrFrequencyRange=0, mOperatorAlphaLongRaw=null, mOperatorAlphaShortRaw=null, mIsDataRoamingFromRegistration=false, mIsIwlanPreferred=false} | mCarrierServiceState=<package=***, uid=-1> | 2026-08-30T17:33:18.324664 - notifyServiceStateForSubscriber: subId=1 phoneId=0 state={mVoiceRegState=0(IN_SERVICE), mDataRegState=0(IN_SERVICE), mChannelNumber=2829, duplexMode()=1, mCellBandwidths=[15000], mOperatorAlphaLong=MTN GH, mOperatorAlphaShort=MTN, isManualNetworkSelection=false(automatic), getRilVoiceRadioTechnology=14(LTE), getRilDataRadioTechnology=14(LTE), mCssIndicator=unsupported, mNetworkId=-1, mSystemId=-1, mCdmaRoamingIndicator=-1, mCdmaDefaultRoamingIndicator=-1, mIsEmergencyOnly=false, isUsingCarrierAggregation=false, mArfcnRsrpBoost=0, mNetworkRegistrationInfos=[NetworkRegistrationInfo{ domain=PS transportType=WLAN registrationState=NOT_REG_OR_SEARCHING networkRegistrationState=NOT_REG_OR_SEARCHING roamingType=NOT_ROAMING accessNetworkTechnology=UNKNOWN rejectCause=0 emergencyEnabled=false availableServices=[VOICE,SMS,EMERGENCY] cellIdentity=null voiceSpecificInfo=null dataSpecificInfo=null nrState=**** rRplmn= isUsingCarrierAggregation=false}, NetworkRegistrationInfo{ domain=CS transportType=WWAN registrationState=HOME networkRegistrationState=HOME roamingType=NOT_ROAMING accessNetworkTechnology=LTE rejectCause=0 emergencyEnabled=false availableServices=[VOICE,SMS,VIDEO] cellIdentity=CellIdentityLte:{ mCi=153658991 mPci=373 mTac=11214 mEarfcn=2829 mBands=[7] mBandwidth=15000 mMcc=620 mMnc=01 mAlphaLong=MTN GH mAlphaShort=MTN mAdditionalPlmns={} mCsgInfo=null} voiceSpecificInfo=VoiceSpecificRegistrationInfo { mCssSupported=false mRoamingIndicator=0 mSystemIsInPrl=0 mDefaultRoamingIndicator=0} dataSpecificInfo=null nrState=**** rRplmn=62001 isUsingCarrierAggregation=false}, NetworkRegistrationInfo{ domain=PS transportType=WWAN registrationState=HOME networkRegistrationState=HOME roamingType=NOT_ROAMING accessNetworkTechnology=LTE rejectCause=-1 emergencyEnabled=false availableServices=[DATA] cellIdentity=CellIdentityLte:{ mCi=153658991 mPci=373 mTac=11214 mEarfcn=2829 mBands=[7] mBandwidth=15000 mMcc=620 mMnc=01 mAlphaLong=MTN GH mAlphaShort=MTN mAdditionalPlmns={} mCsgInfo=null} voiceSpecificInfo=null dataSpecificInfo=android.telephony.DataSpecificRegistrationInfo :{ maxDataCalls = 16 isDcNrRestricted = false isNrAvailable = false isEnDcAvailable = false mLteAttachResultType = 0 mLteAttachExtraInfo = 0 LteVopsSupportInfo :  mVopsSupport = 2 mEmcBearerSupport = 2 } nrState=**** rRplmn=62001 isUsingCarrierAggregation=false}], mNrFrequencyRange=0, mOperatorAlphaLongRaw=MTN GH, mOperatorAlphaShortRaw=MTN, mIsDataRoamingFromRegistration=false, mIsIwlanPreferred=false} | 2026-08-30T17:34:05.999569 - notifyServiceStateForSubscriber: subId=1 phoneId=0 state={mVoiceRegState=0(IN_SERVICE), mDataRegState=0(IN_SERVICE), mChannelNumber=6375, duplexMode()=1, mCellBandwidths=[15000], mOperatorAlphaLong=MTN GH, mOperatorAlphaShort=MTN, isManualNetworkSelection=false(automatic), getRilVoiceRadioTechnology=14(LTE), getRilDataRadioTechnology=14(LTE), mCssIndicator=unsupported, mNetworkId=-1, mSystemId=-1, mCdmaRoamingIndicator=-1, mCdmaDefaultRoamingIndicator=-1, mIsEmergencyOnly=false, isUsingCarrierAggregation=false, mArfcnRsrpBoost=0, mNetworkRegistrationInfos=[NetworkRegistrationInfo{ domain=PS transportType=WLAN registrationState=NOT_REG_OR_SEARCHING networkRegistrationState=NOT_REG_OR_SEARCHING roamingType=NOT_ROAMING accessNetworkTechnology=UNKNOWN rejectCause=0 emergencyEnabled=false availableServices=[VOICE,SMS,EMERGENCY] cellIdentity=null voiceSpecificInfo=null dataSpecificInfo=null nrState=**** rRplmn= isUsingCarrierAggregation=false}, NetworkRegistrationInfo{ domain=CS transportType=WWAN registrationState=HOME networkRegistrationState=HOME roamingType=NOT_ROAMING accessNetworkTechnology=LTE rejectCause=0 emergencyEnabled=false availableServices=[VOICE,SMS,VIDEO] cellIdentity=CellIdentityLte:{ mCi=153658991 mPci=57 mTac=11214 mEarfcn=6375 mBands=[20] mBandwidth=15000 mMcc=620 mMnc=01 mAlphaLong=MTN GH mAlphaShort=MTN mAdditionalPlmns={} mCsgInfo=null} voiceSpecificInfo=VoiceSpecificRegistrationInfo { mCssSupported=false mRoamingIndicator=0 mSystemIsInPrl=0 mDefaultRoamingIndicator=0} dataSpecificInfo=null nrState=**** rRplmn=62001 isUsingCarrierAggregation=false}, NetworkRegistrationInfo{ domain=PS transportType=WWAN registrationState=HOME networkRegistrationState=HOME roamingType=NOT_ROAMING accessNetworkTechnology=LTE rejectCause=-1 emergencyEnabled=false availableServices=[DATA] cellIdentity=CellIdentityLte:{ mCi=153658991 mPci=57 mTac=11214 mEarfcn=6375 mBands=[20] mBandwidth=15000 mMcc=620 mMnc=01 mAlphaLong=MTN GH mAlphaShort=MTN mAdditionalPlmns={} mCsgInfo=null} voiceSpecificInfo=null dataSpecificInfo=android.telephony.DataSpecificRegistrationInfo :{ maxDataCalls = 16 isDcNrRestricted = false isNrAvailable = false isEnDcAvailable = false mLteAttachResultType = 0 mLteAttachExtraInfo = 0 LteVopsSupportInfo :  mVopsSupport = 2 mEmcBearerSupport = 2 } nrState=**** rRplmn=62001 isUsingCarrierAggregation=false}], mNrFrequencyRange=0, mOperatorAlphaLongRaw=MTN GH, mOperatorAlphaShortRaw=MTN, mIsDataRoamingFromRegistration=false, mIsIwlanPreferred=false}",
+    "dumpsys_connectivity_excerpt": "Tethering: active"
+  },
+  "apk": {
+    "name": "current_harness.apk",
+    "sha256": "sha256:a043eb2fa974efdb87dd538ca669a9bd306ff0034b210066d40d8ab36a37b75c"
+  }
+}
