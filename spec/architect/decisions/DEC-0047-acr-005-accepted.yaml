@@ -1,0 +1,35 @@
+# ADCOS Architect decision record.
+# schema: spec/architect/decision-record-template.md
+# Design-level acceptance; does not itself authorize implementation.
+decision_id: DEC-0047
+type: architecture
+work_item: null
+acr: ACR-005
+pr: 64
+reviewed_sha: 18123c97dfa3bcf88b9dbbfa6f5dd6fb56adae7e
+decision: ACCEPTED
+status: ACCEPTED
+reviewer: "Architect (pectoraux)"
+timestamp: 2026-08-30T06:25:00Z
+findings:
+  - "ACR-005 is accepted as a reusable architectural design contract arising from the W035/W040 physical-validation lessons."
+  - "The contract distinguishes physical facts, platform facts, and ADCOS facts; separates logical session identity from replaceable physical paths; and separates path detection, validation, binding, activation, and retirement."
+  - "Transactional handover and evidence-chain semantics are accepted as design requirements."
+  - "No new identity, session, routing, transport, federation, or policy authority is created by this acceptance."
+blockers: []
+required_corrections: []
+evidence:
+  merge_sha: 8835309ad159df77a0f73bc07cff3450bab5c6cb
+  ci_run: null
+  artifacts:
+    - "ACR-005 proposal merged by PR #64"
+accepted_scope:
+  - "ACR-005 design principles and constraints"
+rejected_scope:
+  - "Silent modification of frozen protocol wire semantics"
+  - "Implementation authorization"
+  - "W041+ authorization"
+downstream_effect:
+  - "ACR-005 is an accepted architectural direction and may be used by later authorized Work Items."
+  - "Concrete schema/API changes require an implementation Work Item and repository-local authorization."
+resolved_by: null

@@ -1,11 +1,11 @@
 # ADCOS Current State
 
-**Persistent Architect snapshot — updated after PR #60 merge.**
+**Persistent Architect snapshot — updated after ACR-005/ACR-006 proposal merge.**
 
 ## Repository
 
 - Repository: `github.com/pectoraux/ADCOS`
-- Current `main`: `93efa54f1edc2ec3c0bb5646827719f92af06b86`
+- Current `main`: `8835309ad159df77a0f73bc07cff3450bab5c6cb`
 - Architecture version: `1.0` (`spec/architecture.md`)
 - Protocol version: `1.0` (`spec/schemas/protocol.json`)
 
@@ -44,9 +44,13 @@ A software rehearsal cannot close a physical criterion by inference.
 - `WORK-040`: correction cycle active; acceptance remains blocked pending Architect re-review.
 - `WORK-041+`: not yet part of the frozen backlog; blocked pending an accepted roadmap change.
 
-## Open ACRs
+## Architecture Change Requests
 
 - `ACR-004` — Connectivity Commerce Plane — `PROPOSED`, PR #49; not on main.
+- `ACR-005` — First-Class Network Path and Platform Boundary — **ACCEPTED**, DEC-0047, proposal merged by PR #64.
+- `ACR-006` — Event-Driven Platform Integration and Journal-First Recovery — **ACCEPTED**, DEC-0048, proposal merged by PR #64.
+
+ACR-005 and ACR-006 are accepted architectural direction. They do not themselves authorize implementation. Concrete schema/API changes require an authorized Work Item and must preserve existing frozen wire semantics and authority ownership.
 
 ## Open external evidence obligations
 
@@ -68,6 +72,10 @@ NOT-TESTABLE / OPEN; software PASS never silently becomes physical PASS):
 ## Persistent Architect package
 
 PR #60 (`governance: establish persistent Architect package`) merged as `93efa54f1edc2ec3c0bb5646827719f92af06b86`. PA-001 is authoritative on main: an `in-review` ledger entry is descriptive only and is never an implementation authorization. The execution ledger is formally reconciled to the post-merge mainline (LEDGER-RECON-001, recorded by DEC-0046) — no work-item history was rewritten.
+
+## Architectural improvement records
+
+ACR-005 and ACR-006 proposal artifacts were published by PR #64 at main `8835309ad159df77a0f73bc07cff3450bab5c6cb` and accepted by DEC-0047 and DEC-0048. The accepted records define reusable design requirements for path/platform separation and event-driven/journal-first runtime integration without silently authorizing implementation.
 
 ## Resume rule
 
