@@ -2397,6 +2397,11 @@ def case_44_pr_delta_shape(results: List[Result]) -> None:
         "tools/scale_selftest.py",
         "docs/WORK-039-handoff.md",
         "docs/WORK-039-evidence.md",
+        # DAG-sanctioned amendment (-> WORK-040): the pilot deployment
+        # battery extends this one (work-item order in CI).
+        "tools/pilot_selftest.py",
+        "docs/WORK-040-handoff.md",
+        "docs/WORK-040-evidence.md",
         # DAG-sanctioned allowlist amendment (W029 -> W038): the upgrade
         # battery's authority-boundary audit exempts the W038
         # future-IMT family as a DAG-sanctioned downstream consumer
@@ -2413,7 +2418,11 @@ def case_44_pr_delta_shape(results: List[Result]) -> None:
         c for c in changed
         if not c.startswith("mobile/") and not c.startswith("appliance/")
         and not c.startswith("interop/") and not c.startswith("imt/")
-        and not c.startswith("scale/")
+        and not c.startswith("scale/") and not c.startswith("pilot/")
+        # DAG-sanctioned amendment (-> WORK-040 correction cycle,
+        # WORK-040-CORRECTION-001): the pilot branch now carries its
+        # honest physical-attempt evidence artifacts.
+        and not c.startswith("evidence/work-040/")
         and c not in allowed_exact
         and not c.startswith(".github/")
     ]

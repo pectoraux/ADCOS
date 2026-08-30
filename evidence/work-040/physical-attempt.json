@@ -1,0 +1,493 @@
+{
+ "attempt": {
+  "attempt": {
+   "executed": true,
+   "physical_pilot_executed": false,
+   "reason": "no physical Android device is reachable from this execution host; the physical participation demonstration cannot be executed here and stays honestly unresolved"
+  },
+  "classification": {
+   "criterion_1_real_devices": "not-testable",
+   "criterion_2_5g": "not-testable",
+   "statement": "no physical Android device is reachable from this execution host; criterion 1 physical participation cannot be demonstrated here and stays honestly unresolved (PARTIAL overall per DEC-0046); criterion 2 5G is NOT-TESTABLE here"
+  },
+  "environment": {
+   "adb_binary": {
+    "detail": "no adb binary on PATH or in the known SDK locations",
+    "path": null,
+    "present": false
+   },
+   "adb_devices": {
+    "detail": "not executed (no adb binary)",
+    "executed": false,
+    "serials": []
+   },
+   "conclusion": "no physical Android device is reachable from this execution host; the physical participation demonstration cannot be executed here and stays honestly unresolved",
+   "device_attached": false,
+   "kind": "physical-environment-detection",
+   "tether_interfaces": {
+    "detail": "3 real interface(s); 0 USB-tether candidate(s)",
+    "observed": [
+     "dummy0",
+     "eth0",
+     "lo"
+    ],
+    "tether_candidates": []
+   },
+   "usb_bus": {
+    "detail": "USB bus present but no device attached",
+    "devices": [],
+    "present": true
+   }
+  },
+  "kind": "physical-environment-detection",
+  "schema_version": 1
+ },
+ "environment": {
+  "adb_binary": {
+   "detail": "no adb binary on PATH or in the known SDK locations",
+   "path": null,
+   "present": false
+  },
+  "adb_devices": {
+   "detail": "not executed (no adb binary)",
+   "executed": false,
+   "serials": []
+  },
+  "conclusion": "no physical Android device is reachable from this execution host; the physical participation demonstration cannot be executed here and stays honestly unresolved",
+  "device_attached": false,
+  "kind": "physical-environment-detection",
+  "tether_interfaces": {
+   "detail": "3 real interface(s); 0 USB-tether candidate(s)",
+   "observed": [
+    "dummy0",
+    "eth0",
+    "lo"
+   ],
+   "tether_candidates": []
+  },
+  "usb_bus": {
+   "detail": "USB bus present but no device attached",
+   "devices": [],
+   "present": true
+  }
+ },
+ "execution_sha": "6813af8ce4f7ed259a39c4024ee3a8564070d204",
+ "kind": "work-040-physical-attempt",
+ "rehearsal": {
+  "access_technology": {
+   "is_5g": false,
+   "observation_source": "none (rehearsal: no handset present)",
+   "technology": ""
+  },
+  "access_technology_post": {
+   "is_5g": false,
+   "observation_source": "none (rehearsal: no handset present)",
+   "technology": ""
+  },
+  "adcos": {
+   "access_classification": "direct access point (rehearsal loopback carriage; software-class verification of the chain)",
+   "bind_event": {
+    "adapter_id": "adcos:adapter:access.generic.experimental:d7a098382cbfeee4",
+    "carriage": "physical-access",
+    "session_id": "sha256:e57584ada6c5bfb5790c234285aa07bfb68523953ff741ca4ab995a4f368145e"
+   },
+   "device_node_id": "adcos:node:identity.sha256-hmac-dev.v1:1ef424ea973d25dbddc8fe32c2221c26b3b14f8252edfe8b25e0bac1a8509423",
+   "receiver_result": {
+    "checks": [
+     {
+      "detail": "NetworkAppliance booted; fabric provisioned with 2 local services; ISOLATED upstream posture",
+      "label": "appliance-booted-and-provisioned",
+      "ok": true
+     },
+     {
+      "detail": "upstream egress probe stage=connect rehearsal=True",
+      "label": "appliance-upstream-probe-recorded",
+      "ok": true
+     },
+     {
+      "detail": "failure plan disarmed for this scenario (the physical participation demonstration; the failover demonstration is the main deployment's device-1 scenario)",
+      "label": "appliance-failure-plan-disarmed",
+      "ok": true
+     },
+     {
+      "detail": "all carriage handlers completed cleanly",
+      "label": "appliance-no-handler-errors",
+      "ok": true
+     }
+    ],
+    "events": [
+     {
+      "at_instant": "2026-08-01T04:00:00Z",
+      "kind": "pilot.node-booted",
+      "payload": {
+       "label": "appliance-1",
+       "node_id": "adcos:node:identity.sha256-hmac-dev.v1:25e6a039eb60278331de875ecc0eec57cafc65d2ea31d536fd37e4114e0269d8"
+      },
+      "sequence": 1
+     },
+     {
+      "at_instant": "2026-08-01T04:01:00Z",
+      "kind": "pilot.fabric-provisioned",
+      "payload": {
+       "services": 2,
+       "site": "pilot-village-box"
+      },
+      "sequence": 2
+     },
+     {
+      "at_instant": "2026-08-01T04:02:00Z",
+      "kind": "pilot.upstream-probed",
+      "payload": {
+       "kind": "egress-probe",
+       "reachable": true,
+       "rehearsal": true,
+       "stage": "connect"
+      },
+      "sequence": 3
+     },
+     {
+      "at_instant": "2026-08-01T04:03:00Z",
+      "kind": "pilot.discovery-announced",
+      "payload": {
+       "peer_label": "device-android"
+      },
+      "sequence": 4
+     },
+     {
+      "at_instant": "2026-08-01T04:04:00Z",
+      "kind": "pilot.discovery-received",
+      "payload": {
+       "access_point": "direct",
+       "peer_label": "device-android"
+      },
+      "sequence": 5
+     },
+     {
+      "at_instant": "2026-08-01T04:05:00Z",
+      "kind": "pilot.session-requested",
+      "payload": {
+       "carriage": "direct",
+       "peer": "device-android",
+       "session_id": "sha256:e57584ada6c5bfb5790c234285aa07bfb68523953ff741ca4ab995a4f368145e"
+      },
+      "sequence": 6
+     },
+     {
+      "at_instant": "2026-08-01T04:06:00Z",
+      "kind": "pilot.session-accepted",
+      "payload": {
+       "peer": "device-android",
+       "session_id": "sha256:e57584ada6c5bfb5790c234285aa07bfb68523953ff741ca4ab995a4f368145e"
+      },
+      "sequence": 7
+     },
+     {
+      "at_instant": "2026-08-01T04:07:00Z",
+      "kind": "pilot.session-finalized",
+      "payload": {
+       "peer": "device-android",
+       "session_id": "sha256:e57584ada6c5bfb5790c234285aa07bfb68523953ff741ca4ab995a4f368145e"
+      },
+      "sequence": 8
+     },
+     {
+      "at_instant": "2026-08-01T04:08:00Z",
+      "kind": "pilot.datagram-received",
+      "payload": {
+       "bytes": 22,
+       "carriage": "direct",
+       "peer": "device-android",
+       "session_id": "sha256:e57584ada6c5bfb5790c234285aa07bfb68523953ff741ca4ab995a4f368145e"
+      },
+      "sequence": 9
+     },
+     {
+      "at_instant": "2026-08-01T04:09:00Z",
+      "kind": "pilot.datagram-received",
+      "payload": {
+       "bytes": 22,
+       "carriage": "direct",
+       "peer": "device-android",
+       "session_id": "sha256:e57584ada6c5bfb5790c234285aa07bfb68523953ff741ca4ab995a4f368145e"
+      },
+      "sequence": 10
+     },
+     {
+      "at_instant": "2026-08-01T04:10:00Z",
+      "kind": "pilot.service-requested",
+      "payload": {
+       "peer": "device-android",
+       "service_ref": "services:service:054d6450e219984a22538e3682b154cf",
+       "verdict": "executed"
+      },
+      "sequence": 11
+     },
+     {
+      "at_instant": "2026-08-01T04:11:00Z",
+      "kind": "pilot.sabotage-injected",
+      "payload": {
+       "action": "direct-access-path-failure",
+       "mechanism": "direct listener closed + SO_LINGER(1,0) close on the direct connections",
+       "reset_connections": 0
+      },
+      "sequence": 12
+     },
+     {
+      "at_instant": "2026-08-01T04:12:00Z",
+      "kind": "pilot.node-shutdown",
+      "payload": {
+       "label": "appliance-1",
+       "sessions": 0
+      },
+      "sequence": 13
+     }
+    ],
+    "label": "appliance-1",
+    "node_id": "adcos:node:identity.sha256-hmac-dev.v1:25e6a039eb60278331de875ecc0eec57cafc65d2ea31d536fd37e4114e0269d8"
+   },
+   "sender_result": {
+    "checks": [
+     {
+      "detail": "the physical participant's session is ESTABLISHED over the physical-access carriage after 2 datagram exchanges",
+      "label": "device-android-physical-session-established",
+      "ok": true
+     },
+     {
+      "detail": "local service invocation verdict=executed response_matches=True",
+      "label": "device-android-service-executed",
+      "ok": true
+     },
+     {
+      "detail": "the participant's runtime observed its REAL interfaces through the production source: dummy0, eth0, lo",
+      "label": "device-android-real-interfaces-observed",
+      "ok": true
+     }
+    ],
+    "events": [
+     {
+      "at_instant": "2026-08-01T00:00:00Z",
+      "kind": "pilot.node-booted",
+      "payload": {
+       "label": "device-android",
+       "node_id": "adcos:node:identity.sha256-hmac-dev.v1:1ef424ea973d25dbddc8fe32c2221c26b3b14f8252edfe8b25e0bac1a8509423"
+      },
+      "sequence": 1
+     },
+     {
+      "at_instant": "2026-08-01T00:01:00Z",
+      "kind": "pilot.discovery-announced",
+      "payload": {
+       "peer_label": "appliance-1"
+      },
+      "sequence": 2
+     },
+     {
+      "at_instant": "2026-08-01T00:02:00Z",
+      "kind": "pilot.session-requested",
+      "payload": {
+       "peer": "appliance-1",
+       "session_id": "sha256:e57584ada6c5bfb5790c234285aa07bfb68523953ff741ca4ab995a4f368145e"
+      },
+      "sequence": 3
+     },
+     {
+      "at_instant": "2026-08-01T00:03:00Z",
+      "kind": "pilot.session-confirmed",
+      "payload": {
+       "session_id": "sha256:e57584ada6c5bfb5790c234285aa07bfb68523953ff741ca4ab995a4f368145e"
+      },
+      "sequence": 4
+     },
+     {
+      "at_instant": "2026-08-01T00:04:00Z",
+      "kind": "pilot.session-bound",
+      "payload": {
+       "adapter_id": "adcos:adapter:access.generic.experimental:d7a098382cbfeee4",
+       "carriage": "physical-access",
+       "session_id": "sha256:e57584ada6c5bfb5790c234285aa07bfb68523953ff741ca4ab995a4f368145e"
+      },
+      "sequence": 5
+     },
+     {
+      "at_instant": "2026-08-01T00:05:00Z",
+      "kind": "pilot.datagram-sent",
+      "payload": {
+       "bytes": 22,
+       "carriage": "physical-access",
+       "session_id": "sha256:e57584ada6c5bfb5790c234285aa07bfb68523953ff741ca4ab995a4f368145e"
+      },
+      "sequence": 6
+     },
+     {
+      "at_instant": "2026-08-01T00:06:00Z",
+      "kind": "pilot.datagram-received",
+      "payload": {
+       "bytes": 22,
+       "carriage": "physical-access",
+       "session_id": "sha256:e57584ada6c5bfb5790c234285aa07bfb68523953ff741ca4ab995a4f368145e"
+      },
+      "sequence": 7
+     },
+     {
+      "at_instant": "2026-08-01T00:07:00Z",
+      "kind": "pilot.datagram-sent",
+      "payload": {
+       "bytes": 22,
+       "carriage": "physical-access",
+       "session_id": "sha256:e57584ada6c5bfb5790c234285aa07bfb68523953ff741ca4ab995a4f368145e"
+      },
+      "sequence": 8
+     },
+     {
+      "at_instant": "2026-08-01T00:08:00Z",
+      "kind": "pilot.datagram-received",
+      "payload": {
+       "bytes": 22,
+       "carriage": "physical-access",
+       "session_id": "sha256:e57584ada6c5bfb5790c234285aa07bfb68523953ff741ca4ab995a4f368145e"
+      },
+      "sequence": 9
+     },
+     {
+      "at_instant": "2026-08-01T00:09:00Z",
+      "kind": "pilot.service-requested",
+      "payload": {
+       "service_ref": "services:service:054d6450e219984a22538e3682b154cf",
+       "session_id": "sha256:e57584ada6c5bfb5790c234285aa07bfb68523953ff741ca4ab995a4f368145e"
+      },
+      "sequence": 10
+     },
+     {
+      "at_instant": "2026-08-01T00:10:00Z",
+      "kind": "pilot.service-executed",
+      "payload": {
+       "service_ref": "services:service:054d6450e219984a22538e3682b154cf",
+       "verdict": "executed"
+      },
+      "sequence": 11
+     },
+     {
+      "at_instant": "2026-08-01T00:11:00Z",
+      "kind": "pilot.demonstration-completed",
+      "payload": {
+       "demonstration": "physical-participation",
+       "device": "device-android"
+      },
+      "sequence": 12
+     },
+     {
+      "at_instant": "2026-08-01T00:12:00Z",
+      "kind": "pilot.node-shutdown",
+      "payload": {
+       "label": "device-android"
+      },
+      "sequence": 13
+     }
+    ],
+    "label": "device-android",
+    "node_id": "adcos:node:identity.sha256-hmac-dev.v1:1ef424ea973d25dbddc8fe32c2221c26b3b14f8252edfe8b25e0bac1a8509423",
+    "observations": {
+     "carriage": {
+      "kind": "physical-access",
+      "note": "direct connection to the appliance access point; on a handset this is the real USB (adb reverse) or Wi-Fi carriage, on a rehearsal host the loopback"
+     },
+     "interfaces_observed": [
+      "dummy0",
+      "eth0",
+      "lo"
+     ],
+     "service": {
+      "reason": "",
+      "request_digest": "sha256:691ac1696529a8b91dc393033e7e5067f7fbd7d47319e2f1c99161c61f91aa01",
+      "response_digest": "sha256:691ac1696529a8b91dc393033e7e5067f7fbd7d47319e2f1c99161c61f91aa01",
+      "response_matches": true,
+      "verdict": "executed"
+     },
+     "session": {
+      "record_digest": "sha256:f6d2c8c3e6907ea7e3810085ebec3c662eced8924f34b44293bf6217f951ce3b",
+      "session_id": "sha256:e57584ada6c5bfb5790c234285aa07bfb68523953ff741ca4ab995a4f368145e",
+      "state": "ESTABLISHED"
+     }
+    },
+    "role": "device"
+   },
+   "session_id": "sha256:e57584ada6c5bfb5790c234285aa07bfb68523953ff741ca4ab995a4f368145e"
+  },
+  "attempt": {
+   "executed": true,
+   "physical_pilot_executed": false,
+   "reason": "software-class rehearsal completed; the physical demonstration requires the handset attached to a host with adb (the runbook in docs/WORK-040-handoff.md)"
+  },
+  "carriage": {
+   "adcos_access_classification": "direct access point (rehearsal loopback carriage; software-class verification of the chain)",
+   "detail": "the device-android node ran as a HOST process over the loopback carriage: the same identity, config, and production chain, honestly NOT a physical handset",
+   "mode": "loopback-rehearsal"
+  },
+  "classification": {
+   "criterion_1_real_devices": "partial",
+   "criterion_2_5g": "not-testable",
+   "validation_ok": true,
+   "validation_problems": []
+  },
+  "device_identity": {
+   "android_release": "",
+   "brand": "",
+   "model": "",
+   "observation_source": "none (rehearsal: no handset present)",
+   "serial": ""
+  },
+  "device_launch": {
+   "returncode": 0,
+   "stderr_tail": ""
+  },
+  "honest_absences": [
+   "device_identity.model",
+   "device_identity.brand",
+   "device_identity.serial",
+   "device_identity.android_release",
+   "device_identity.observation_source",
+   "access_technology.technology",
+   "access_technology.observation_source",
+   "host.interface_identity",
+   "access_technology_post"
+  ],
+  "host": {
+   "interface_identity": "",
+   "interfaces": [
+    "dummy0",
+    "eth0",
+    "lo"
+   ],
+   "post_transition_route": "default via 21.0.0.1 dev eth0 onlink",
+   "pre_transition_route": "default via 21.0.0.1 dev eth0 onlink"
+  },
+  "is_physical": false,
+  "kind": "physical-participation-evidence",
+  "rehearsal": true,
+  "schema_version": 1,
+  "traffic_verification": {},
+  "verification": {
+   "artifact_hashes": [
+    [
+     "device-result",
+     "sha256:09eb4cf8901128cef520e4a7f5f03af00fa3ca0424a3f105120d338eac472df2"
+    ],
+    [
+     "appliance-result",
+     "sha256:c427a048c7196821419cf4d7a3183ff0e29abcbe869eb3d949d184a7898775eb"
+    ],
+    [
+     "environment-detection",
+     "sha256:4b7ebbb8bc453d332751c4db740380a12fefacdc2eb326633e9b6a0484a7e779"
+    ]
+   ],
+   "validator_sha": "sha256:fb83d0ed3cf1957aa5831fba7e864460c622dd6c14b109f22e448fa0514e9383"
+  }
+ },
+ "schema_version": 1,
+ "summary": {
+  "criterion_1_real_devices": "partial",
+  "criterion_2_5g": "not-testable",
+  "statement": "the physical-device participation path is implemented and software-verified (rehearsal); no physical handset is reachable from this execution host, so the physical demonstration stays honestly unresolved and criterion 2 stays NOT-TESTABLE"
+ }
+}

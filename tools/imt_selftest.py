@@ -1781,6 +1781,11 @@ def case_33_pr_delta_shape(results: List[Result]) -> None:
         "tools/scale_selftest.py",
         "docs/WORK-039-handoff.md",
         "docs/WORK-039-evidence.md",
+        # DAG-sanctioned amendment (-> WORK-040): the pilot deployment
+        # battery extends this one (work-item order in CI).
+        "tools/pilot_selftest.py",
+        "docs/WORK-040-handoff.md",
+        "docs/WORK-040-evidence.md",
         # the Architect's own branch anchors (validated by _spec_delta_clean):
         _ARCHITECT_HANDOFF,
         _SUCCESSOR_HANDOFF,
@@ -1788,6 +1793,11 @@ def case_33_pr_delta_shape(results: List[Result]) -> None:
     unexpected = [
         c for c in changed
         if not c.startswith("imt/") and not c.startswith("scale/")
+        and not c.startswith("pilot/")
+        # DAG-sanctioned amendment (-> WORK-040 correction cycle,
+        # WORK-040-CORRECTION-001): the pilot branch now carries its
+        # honest physical-attempt evidence artifacts.
+        and not c.startswith("evidence/work-040/")
         and c not in allowed_exact
         and not c.startswith(".github/")
     ]
@@ -1798,8 +1808,17 @@ def case_33_pr_delta_shape(results: List[Result]) -> None:
         ["git", "diff", "origin/main", "--", ".github/"],
         capture_output=True, text=True, cwd=str(REPO_ROOT),
     )
-    if "imt_selftest.py" not in workflow_delta.stdout:
-        results.append(fail(name, ".github delta does not include the future-profile CI step"))
+    # Successor-step discipline (the agent case_40 / W039-era oran
+    # case_35 pattern): a later work item may append its own CI step
+    # further down the workflow WITHOUT the future-profile step
+    # appearing inside the diff context -- the wiring change must only
+    # never weaken or drop the future-profile step itself.
+    removed_imt_step = any(
+        line.startswith("-") and "imt_selftest.py" in line
+        for line in workflow_delta.stdout.splitlines()
+    )
+    if removed_imt_step or "python3 tools/imt_selftest.py" not in workflow:
+        results.append(fail(name, ".github delta weakens or drops the future-profile CI step"))
         return
     results.append(ok(
         name, "PR delta exactly: imt/ + imt battery + agent/edge/mobile/"

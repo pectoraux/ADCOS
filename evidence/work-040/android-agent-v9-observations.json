@@ -1,0 +1,74 @@
+{
+ "apk_provenance": {
+  "note": "the v9 harness IS an APK-backed Android app (unlike the W040 pilot's pure-stdlib design); the digest is the agent's own declared APK provenance",
+  "package": "com.example.w035harness",
+  "sha256": "sha256:dc334bf1885e91467e7126af79919b187366adbfd1b2ebd6c4c172f7e69dbbda",
+  "version": "1.0"
+ },
+ "classification": {
+  "evidence_class": "EXTERNAL-PHYSICAL",
+  "statement": "the W035 v9 chain is authoritative Android-side physical evidence of a REAL handover on a REAL handset (TECNO KL4, Android 14) through production ADCOS classes (a real MobileAgent session, a real Wi-Fi->USB-tether default-route transition, a real datagram over the tether with the agent's receiver-side VERIFIED claim). It was produced by the W035 validation harness -- NOT the W040 pilot harness -- so it is integrated as external physical evidence and never promoted: W040 criterion 1 stays PARTIAL (the W040-harness physical run, handoff section 8, remains the step that would close it) and criterion 2 stays NOT-TESTABLE (the transition is generic cellular; NO NR report exists anywhere in the v9 set)",
+  "w040_criterion_1_real_devices": "partial",
+  "w040_criterion_2_5g": "not-testable"
+ },
+ "device_identity": {
+  "android_version": "14",
+  "build_fingerprint": "TECNO/KL4-EEA/TECNO-KL4:14/UKQ1.231003.002/240523V547:user/release-keys",
+  "model": "TECNO KL4",
+  "observation_source": "the Android agent's device_manifest.json (authoritative device report)"
+ },
+ "execution_sha": "a8f0b39a298d9e364e6cc35479b2405226067c7c",
+ "handover_observation": {
+  "baseline_default_route": "wlp3s0",
+  "datagram_received": "receiver: peer-node; status: VERIFIED",
+  "datagram_sent": "payload: ADCOS-Physical-Tether-v8",
+  "post_handover_default_route": "enx0e523cbd6b00",
+  "receiver_verification_claim": "PASS (FULL PRODUCTION PATH VALIDATED WITH RECEIVER-SIDE PROOF)",
+  "route_transition_recorded": true,
+  "session_id": "sha256:cb354fc72a87070a017201160...",
+  "transition": "wifi -> cellular",
+  "trigger": "Wi-Fi disabled on the handset (the v9 runbook's physical trigger), recorded by the agent's harness"
+ },
+ "kind": "android-agent-v9-integration",
+ "origin": {
+  "hash_cross_corroboration": "every evidence_manifest.json-declared SHA-256 was verified against the actual preserved bytes (all match)",
+  "note": "the Android Studio/Gemini agent pushed the W035 v9 physical-validation artifact set to this branch (d014425); CI rejected the out-of-scope harness files (ARCH-08), the raw harness was reverted with history preserved, and the five observation artifacts were integrated here under the authorized W040 evidence directory",
+  "preservation": "the five observation artifacts are preserved byte-identically under the authorized W040 evidence directory (evidence/work-040/android-agent-v9/); the raw harness (android/ project + validator tools) was reverted from this branch as outside the WORK-040-CORRECTION-001 scope (ARCH-08 fails closed on those paths) and remains in the d014425 commit for the Architect's disposition",
+  "source_push": "d0144252e91f8739fa221b62ad732481cbc52e05 ('WORK-035/W040: physical handover validator v10 - definitive')"
+ },
+ "schema_version": 1,
+ "validation": {
+  "ok": true,
+  "problems": [],
+  "validator_sha": "sha256:02918d8f46d1ff5368df647d6f82e0945094dd1e33986194483a9dc4c07212a2"
+ },
+ "validator_provenance": {
+  "declared_validator": "ADCOS W035 Physical Validation Agent (v9 - Definitive/Production-Only)",
+  "declared_validator_sha": "68c8c52200428f5f514d8149a246255886be0792",
+  "harness_discrepancy": "the pushed harness code (titled v10) is NOT the byte-exact validator that produced this v9 record (declared validator_sha '68c8c52200428f5f514d8149a246255886be0792'); the v10 IF_MAP also names a different tether interface than the recorded observation -- recorded honestly, not resolved; the raw harness is not on this branch"
+ },
+ "verification": {
+  "artifact_hashes": [
+   [
+    "android-agent-v9/device_manifest.json",
+    "sha256:a3b629e498e89e3e28d7ca9d197bbc096a69289803be8119ba09f5ebad2405bb"
+   ],
+   [
+    "android-agent-v9/evidence_manifest.json",
+    "sha256:63db0d959ca4514e9ad4f38496174f52094b213cfcf90bbb2876981ac4cec556"
+   ],
+   [
+    "android-agent-v9/linux_network_observations.jsonl",
+    "sha256:81905db1d6644b78ca2cf20397916dfe605083e108ee7033cb590e76a2843421"
+   ],
+   [
+    "android-agent-v9/protocol_reactions.jsonl",
+    "sha256:eb5ee2028a38c3bab0c4ec0049d78bc0c6886816e783104967faa1d097e10b74"
+   ],
+   [
+    "android-agent-v9/test_matrix.md",
+    "sha256:f5ab27f2033acb3f11fb027afafd059778dba66ce312d8e18f5be854b6e30553"
+   ]
+  ]
+ }
+}

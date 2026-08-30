@@ -158,6 +158,9 @@ jobs:
       - name: Run federation-at-scale tests
         run: python3 tools/scale_selftest.py
 
+      - name: Run WORK-040 pilot deployment tests
+        run: python3 tools/pilot_selftest.py
+
       # Persistent Architect package: authorization provenance for pull
       # requests. Runs LAST on purpose: the frozen-surface batteries above
       # detect the origin/main ref to choose their strict context, and this

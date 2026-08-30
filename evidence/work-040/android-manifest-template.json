@@ -1,0 +1,93 @@
+{
+ "cellular": {
+  "active": true,
+  "observation_source": "adb shell dumpsys telephony.registry / connectivity (the framework's own data-network state)"
+ },
+ "device_identity": {
+  "android_release": "EXAMPLE-RELEASE-REPLACE (getprop ro.build.version.release)",
+  "brand": "EXAMPLE-BRAND-REPLACE (getprop ro.product.brand)",
+  "model": "EXAMPLE-MODEL-REPLACE (getprop ro.product.model)",
+  "observation_source": "adb shell getprop (authoritative device report)",
+  "serial": "EXAMPLE-SERIAL-REPLACE"
+ },
+ "kind": "android-agent-observation-manifest",
+ "metered": {
+  "observation_source": "the framework's metering report (ConnectivityManager isActiveNetworkMetered / the connectivity dump)",
+  "post": true,
+  "pre": false
+ },
+ "network_identity": {
+  "observation_source": "adb shell dumpsys connectivity (the framework's own network identity report)",
+  "post": "EXAMPLE-REPLACE: the framework's own identity for the post-trigger network (e.g. netId 101)",
+  "pre": "EXAMPLE-REPLACE: the framework's own identity for the pre-trigger network (e.g. netId 100 / the network handle from dumpsys connectivity)"
+ },
+ "network_technology": {
+  "is_5g": true,
+  "nr_state": "connected",
+  "observation_source": "adb shell dumpsys telephony.registry (the Android framework's own report)",
+  "post": "nr",
+  "pre": "none"
+ },
+ "platform_events": [
+  {
+   "instant": "2025-01-01T00:00:00Z-EXAMPLE-REPLACE (the event's own observation instant, RFC 3339)",
+   "kind": "EXAMPLE-EVENT-REPLACE (e.g. connectivity-callback-on-available)",
+   "observation": {
+    "active_network": "wifi (netId 100)",
+    "mDataNetworkType": "none",
+    "note": "EXAMPLE-REPLACE: the authoritative framework data carried by THIS event (the observation that caused it -- never a later re-read); mDataNetworkType=none means no mobile data in use (Wi-Fi is the active network)"
+   },
+   "source": "EXAMPLE-REPLACE: the authoritative framework signal that caused the event (e.g. the ConnectivityManager NetworkCallback / the framework's connectivity report)"
+  },
+  {
+   "instant": "2025-01-01T00:01:00Z-EXAMPLE-REPLACE",
+   "kind": "EXAMPLE-EVENT-REPLACE (e.g. wifi-disabled-trigger)",
+   "observation": {
+    "note": "EXAMPLE-REPLACE: the trigger observation",
+    "wifi_enabled": false
+   },
+   "source": "EXAMPLE-REPLACE: the framework's connectivity reports + the agent's own trigger record"
+  },
+  {
+   "instant": "2025-01-01T00:01:05Z-EXAMPLE-REPLACE",
+   "kind": "EXAMPLE-EVENT-REPLACE (e.g. connectivity-callback-on-available)",
+   "observation": {
+    "active_network": "cellular (netId 101)",
+    "mDataNetworkType": "nr",
+    "mNrState": "connected",
+    "note": "EXAMPLE-REPLACE: the post-trigger framework data carried by THIS event"
+   },
+   "source": "EXAMPLE-REPLACE: the framework's connectivity report after the trigger"
+  }
+ ],
+ "produced_by": "EXAMPLE-REPLACE: the Android agent's identity string (e.g. the Android Studio / Gemini agent build + device label)",
+ "raw_observations": {
+  "dumpsys_connectivity_excerpt": "EXAMPLE-REPLACE: the raw tethering/network-id state lines",
+  "dumpsys_telephony_registry_excerpt": "EXAMPLE-REPLACE: the raw mDataNetworkType/mNrState lines",
+  "getprop_ro_build_version_release": "EXAMPLE-REPLACE: the raw getprop output line",
+  "getprop_ro_product_brand": "EXAMPLE-REPLACE: the raw getprop output line",
+  "getprop_ro_product_model": "EXAMPLE-REPLACE: the raw getprop output line"
+ },
+ "schema_version": 2,
+ "snapshot_basis": {
+  "post": {
+   "detail": "EXAMPLE-REPLACE: which platform event produced the POST-trigger snapshot (network_technology.post MUST derive from this event's observation)",
+   "event_index": 2
+  },
+  "pre": {
+   "detail": "EXAMPLE-REPLACE: which platform event produced the PRE-trigger snapshot (network_technology.pre MUST derive from this event's observation)",
+   "event_index": 0
+  }
+ },
+ "template": true,
+ "trigger": {
+  "description": "EXAMPLE-REPLACE: Wi-Fi disabled on the handset at the marked runbook step (the settings toggle or 'svc wifi disable'), observed and timestamped by the agent",
+  "observation_source": "the Android framework's connectivity reports + the agent's own trigger record (never ADCOS re-derivation)"
+ },
+ "usage": "TEMPLATE -- copy this file, replace EVERY EXAMPLE value with the real framework observation, then REMOVE the 'template' and 'usage' fields. Every observation_source must be the Android framework's own report (adb shell getprop / dumpsys or the framework's own callbacks), never an ADCOS re-derivation. platform_events must be the ORDERED authoritative platform events (non-decreasing instants); snapshot_basis names which event produced each pre/post snapshot (the snapshots must genuinely derive from the recorded events' observations). The optional apk block {name, sha256} is deliberately absent: the current design is pure-stdlib Python on the handset with NO APK; record its absence honestly rather than fabricating provenance.",
+ "usb_tether": {
+  "backed_by_cellular": true,
+  "enabled": true,
+  "observation_source": "adb shell dumpsys connectivity (the framework's own tethering state)"
+ }
+}
