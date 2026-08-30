@@ -1,0 +1,493 @@
+{
+  "kind": "physical-handover-evidence",
+  "schema_version": 2,
+  "is_physical": true,
+  "carriage": {
+    "mode": "wifi-to-usb-handover",
+    "adcos_access_classification": "physical-handover"
+  },
+  "device_identity": {
+    "model": "TECNO KL4",
+    "brand": "TECNO",
+    "device": "TECNO-KL4",
+    "serial": "12922554B5023086",
+    "android_release": "14",
+    "sdk": "34",
+    "abi": "arm64-v8a",
+    "observation_source": "adb shell getprop (authoritative device report)"
+  },
+  "access_technology_pre": {
+    "technology": "none",
+    "nr_state": null,
+    "is_5g": false,
+    "observation_source": "adb shell dumpsys telephony.registry (the Android framework's own report)",
+    "raw_excerpt": "mServiceState={mVoiceRegState=0(IN_SERVICE), mDataRegState=0(IN_SERVICE), mChannelNumber=3000, duplexMode()=1, mCellBandwidths=[20000, 15000], mOperatorAlphaLong=MTN GH, mOperatorAlphaShort=MTN, isManualNetworkSelection=false(automatic), getRilVoiceRadioTechnology=14(LTE), getRilDataRadioTechnology=14(LTE), mCssIndicator=unsupported, mNetworkId=-1, mSystemId=-1, mCdmaRoamingIndicator=-1, mCdmaDefaultRoamingIndicator=-1, mIsEmergencyOnly=false, isUsingCarrierAggregation=true, mArfcnRsrpBoost=0, mNetworkRegistrationInfos=[NetworkRegistrationInfo{ domain=PS transportType=WLAN registrationState=NOT_REG_OR_SEARCHING networkRegistrationState=NOT_REG_OR_SEARCHING roamingType=NOT_ROAMING accessNetworkTechnology=UNKNOWN rejectCause=0 emergencyEnabled=false availableServices=[VOICE,SMS,EMERGENCY] cellIdentity=null voiceSpecificInfo=null dataSpecificInfo=null nrState=**** rRplmn= isUsingCarrierAggregation=false}, NetworkRegistrationInfo{ domain=CS transportType=WWAN registrationState=HOME networkRegistrationState=HOME roamingType=NOT_ROAMING accessNetworkTechnology=LTE rejectCause=0 emergencyEnabled=false availableServices=[VOICE,SMS,VIDEO] cellIdentity=CellIdentityLte:{ mCi=153658951 mPci=373 mTac=11214 mEarfcn=3000 mBands=[7] mBandwidth=20000 mMcc=620 mMnc=01 mAlphaLong=MTN GH mAlphaShort=MTN mAdditionalPlmns={} mCsgInfo=null} voiceSpecificInfo=VoiceSpecificRegistrationInfo { mCssSupported=false mRoamingIndicator=0 mSystemIsInPrl=0 mDefaultRoamingIndicator=0} dataSpecificInfo=null nrState=**** rRplmn=62001 isUsingCarrierAggregation=false}, NetworkRegistrationInfo{ domain=PS transportType=WWAN registrationState=HOME networkRegistrationState=HOME roamingType=NOT_ROAMING accessNetworkTechnology=LTE rejectCause=-1 emergencyEnabled=false availableServices=[DATA] cellIdentity=CellIdentityLte:{ mCi=153658951 mPci=373 mTac=11214 mEarfcn=3000 mBands=[7] mBandwidth=20000 mMcc=620 mMnc=01 mAlphaLong=MTN GH mAlphaShort=MTN mAdditionalPlmns={} mCsgInfo=null} voiceSpecificInfo=null dataSpecificInfo=android.telephony.DataSpecificRegistrationInfo :{ maxDataCalls = 16 isDcNrRestricted = false isNrAvailable = false isEnDcAvailable = false mLteAttachResultType = 0 mLteAttachExtraInfo = 0 LteVopsSupportInfo :  mVopsSupport = 2 mEmcBearerSupport = 2 } nrState=**** rRplmn=62001 isUsingCarrierAggregation=false}], mNrFrequencyRange=0, mOperatorAlphaLongRaw=MTN GH, mOperatorAlphaShortRaw=MTN, mIsDataRoamingFromRegistration=false, mIsIwlanPreferred=false} | mCarrierServiceState=<package=***, uid=-1> | mServiceState={mVoiceRegState=1(OUT_OF_SERVICE), mDataRegState=1(OUT_OF_SERVICE), mChannelNumber=-1, duplexMode()=0, mCellBandwidths=[], mOperatorAlphaLong=null, mOperatorAlphaShort=null, isManualNetworkSelection=false(automatic), getRilVoiceRadioTechnology=0(Unknown), getRilDataRadioTechnology=0(Unknown), mCssIndicator=unsupported, mNetworkId=-1, mSystemId=-1, mCdmaRoamingIndicator=-1, mCdmaDefaultRoamingIndicator=-1, mIsEmergencyOnly=false, isUsingCarrierAggregation=false, mArfcnRsrpBoost=0, mNetworkRegistrationInfos=[NetworkRegistrationInfo{ domain=CS transportType=WWAN registrationState=UNKNOWN networkRegistrationState=UNKNOWN roamingType=NOT_ROAMING accessNetworkTechnology=UNKNOWN rejectCause=0 emergencyEnabled=false availableServices=[] cellIdentity=null voiceSpecificInfo=null dataSpecificInfo=null nrState=**** rRplmn= isUsingCarrierAggregation=false}, NetworkRegistrationInfo{ domain=PS transportType=WWAN registrationState=UNKNOWN networkRegistrationState=UNKNOWN roamingType=NOT_ROAMING accessNetworkTechnology=UNKNOWN rejectCause=0 emergencyEnabled=false availableServices=[] cellIdentity=null voiceSpecificInfo=null dataSpecificInfo=null nrState=**** rRplmn= isUsingCarrierAggregation=false}, NetworkRegistrationInfo{ domain=PS transportType=WLAN registrationState=UNKNOWN networkRegistrationState=UNKNOWN roamingType=NOT_ROAMING accessNetworkTechnology=UNKNOWN rejectCause=0 emergencyEnabled=false availableServices=[] cellIdentity=null voiceSpecificInfo=null dataSpecificInfo=null nrState=**** rRplmn= isUsingCarrierAggregation=false}], mNrFrequencyRange=0, mOperatorAlphaLongRaw=null, mOperatorAlphaShortRaw=null, mIsDataRoamingFromRegistration=false, mIsIwlanPreferred=false} | mCarrierServiceState=<package=***, uid=-1> | 2026-08-30T17:33:18.324664 - notifyServiceStateForSubscriber: subId=1 phoneId=0 state={mVoiceRegState=0(IN_SERVICE), mDataRegState=0(IN_SERVICE), mChannelNumber=2829, duplexMode()=1, mCellBandwidths=[15000], mOperatorAlphaLong=MTN GH, mOperatorAlphaShort=MTN, isManualNetworkSelection=false(automatic), getRilVoiceRadioTechnology=14(LTE), getRilDataRadioTechnology=14(LTE), mCssIndicator=unsupported, mNetworkId=-1, mSystemId=-1, mCdmaRoamingIndicator=-1, mCdmaDefaultRoamingIndicator=-1, mIsEmergencyOnly=false, isUsingCarrierAggregation=false, mArfcnRsrpBoost=0, mNetworkRegistrationInfos=[NetworkRegistrationInfo{ domain=PS transportType=WLAN registrationState=NOT_REG_OR_SEARCHING networkRegistrationState=NOT_REG_OR_SEARCHING roamingType=NOT_ROAMING accessNetworkTechnology=UNKNOWN rejectCause=0 emergencyEnabled=false availableServices=[VOICE,SMS,EMERGENCY] cellIdentity=null voiceSpecificInfo=null dataSpecificInfo=null nrState=**** rRplmn= isUsingCarrierAggregation=false}, NetworkRegistrationInfo{ domain=CS transportType=WWAN registrationState=HOME networkRegistrationState=HOME roamingType=NOT_ROAMING accessNetworkTechnology=LTE rejectCause=0 emergencyEnabled=false availableServices=[VOICE,SMS,VIDEO] cellIdentity=CellIdentityLte:{ mCi=153658991 mPci=373 mTac=11214 mEarfcn=2829 mBands=[7] mBandwidth=15000 mMcc=620 mMnc=01 mAlphaLong=MTN GH mAlphaShort=MTN mAdditionalPlmns={} mCsgInfo=null} voiceSpecificInfo=VoiceSpecificRegistrationInfo { mCssSupported=false mRoamingIndicator=0 mSystemIsInPrl=0 mDefaultRoamingIndicator=0} dataSpecificInfo=null nrState=**** rRplmn=62001 isUsingCarrierAggregation=false}, NetworkRegistrationInfo{ domain=PS transportType=WWAN registrationState=HOME networkRegistrationState=HOME roamingType=NOT_ROAMING accessNetworkTechnology=LTE rejectCause=-1 emergencyEnabled=false availableServices=[DATA] cellIdentity=CellIdentityLte:{ mCi=153658991 mPci=373 mTac=11214 mEarfcn=2829 mBands=[7] mBandwidth=15000 mMcc=620 mMnc=01 mAlphaLong=MTN GH mAlphaShort=MTN mAdditionalPlmns={} mCsgInfo=null} voiceSpecificInfo=null dataSpecificInfo=android.telephony.DataSpecificRegistrationInfo :{ maxDataCalls = 16 isDcNrRestricted = false isNrAvailable = false isEnDcAvailable = false mLteAttachResultType = 0 mLteAttachExtraInfo = 0 LteVopsSupportInfo :  mVopsSupport = 2 mEmcBearerSupport = 2 } nrState=**** rRplmn=62001 isUsingCarrierAggregation=false}], mNrFrequencyRange=0, mOperatorAlphaLongRaw=MTN GH, mOperatorAlphaShortRaw=MTN, mIsDataRoamingFromRegistration=false, mIsIwlanPreferred=false} | 2026-08-30T17:34:05.999569 - notifyServiceStateForSubscriber: subId=1 phoneId=0 state={mVoiceRegState=0(IN_SERVICE), mDataRegState=0(IN_SERVICE), mChannelNumber=6375, duplexMode()=1, mCellBandwidths=[15000], mOperatorAlphaLong=MTN GH, mOperatorAlphaShort=MTN, isManualNetworkSelection=false(automatic), getRilVoiceRadioTechnology=14(LTE), getRilDataRadioTechnology=14(LTE), mCssIndicator=unsupported, mNetworkId=-1, mSystemId=-1, mCdmaRoamingIndicator=-1, mCdmaDefaultRoamingIndicator=-1, mIsEmergencyOnly=false, isUsingCarrierAggregation=false, mArfcnRsrpBoost=0, mNetworkRegistrationInfos=[NetworkRegistrationInfo{ domain=PS transportType=WLAN registrationState=NOT_REG_OR_SEARCHING networkRegistrationState=NOT_REG_OR_SEARCHING roamingType=NOT_ROAMING accessNetworkTechnology=UNKNOWN rejectCause=0 emergencyEnabled=false availableServices=[VOICE,SMS,EMERGENCY] cellIdentity=null voiceSpecificInfo=null dataSpecificInfo=null nrState=**** rRplmn= isUsingCarrierAggregation=false}, NetworkRegistrationInfo{ domain=CS transportType=WWAN registrationState=HOME networkRegistrationState=HOME roamingType=NOT_ROAMING accessNetworkTechnology=LTE rejectCause=0 emergencyEnabled=false availableServices=[VOICE,SMS,VIDEO] cellIdentity=CellIdentityLte:{ mCi=153658991 mPci=57 mTac=11214 mEarfcn=6375 mBands=[20] mBandwidth=15000 mMcc=620 mMnc=01 mAlphaLong=MTN GH mAlphaShort=MTN mAdditionalPlmns={} mCsgInfo=null} voiceSpecificInfo=VoiceSpecificRegistrationInfo { mCssSupported=false mRoamingIndicator=0 mSystemIsInPrl=0 mDefaultRoamingIndicator=0} dataSpecificInfo=null nrState=**** rRplmn=62001 isUsingCarrierAggregation=false}, NetworkRegistrationInfo{ domain=PS transportType=WWAN registrationState=HOME networkRegistrationState=HOME roamingType=NOT_ROAMING accessNetworkTechnology=LTE rejectCause=-1 emergencyEnabled=false availableServices=[DATA] cellIdentity=CellIdentityLte:{ mCi=153658991 mPci=57 mTac=11214 mEarfcn=6375 mBands=[20] mBandwidth=15000 mMcc=620 mMnc=01 mAlphaLong=MTN GH mAlphaShort=MTN mAdditionalPlmns={} mCsgInfo=null} voiceSpecificInfo=null dataSpecificInfo=android.telephony.DataSpecificRegistrationInfo :{ maxDataCalls = 16 isDcNrRestricted = false isNrAvailable = false isEnDcAvailable = false mLteAttachResultType = 0 mLteAttachExtraInfo = 0 LteVopsSupportInfo :  mVopsSupport = 2 mEmcBearerSupport = 2 } nrState=**** rRplmn=62001 isUsingCarrierAggregation=false}], mNrFrequencyRange=0, mOperatorAlphaLongRaw=MTN GH, mOperatorAlphaShortRaw=MTN, mIsDataRoamingFromRegistration=false, mIsIwlanPreferred=false}"
+  },
+  "access_technology_post": {
+    "technology": "none",
+    "nr_state": null,
+    "is_5g": false,
+    "observation_source": "adb shell dumpsys telephony.registry (the Android framework's own report)",
+    "raw_excerpt": "mServiceState={mVoiceRegState=0(IN_SERVICE), mDataRegState=0(IN_SERVICE), mChannelNumber=3000, duplexMode()=1, mCellBandwidths=[20000, 15000], mOperatorAlphaLong=MTN GH, mOperatorAlphaShort=MTN, isManualNetworkSelection=false(automatic), getRilVoiceRadioTechnology=14(LTE), getRilDataRadioTechnology=14(LTE), mCssIndicator=unsupported, mNetworkId=-1, mSystemId=-1, mCdmaRoamingIndicator=-1, mCdmaDefaultRoamingIndicator=-1, mIsEmergencyOnly=false, isUsingCarrierAggregation=true, mArfcnRsrpBoost=0, mNetworkRegistrationInfos=[NetworkRegistrationInfo{ domain=PS transportType=WLAN registrationState=NOT_REG_OR_SEARCHING networkRegistrationState=NOT_REG_OR_SEARCHING roamingType=NOT_ROAMING accessNetworkTechnology=UNKNOWN rejectCause=0 emergencyEnabled=false availableServices=[VOICE,SMS,EMERGENCY] cellIdentity=null voiceSpecificInfo=null dataSpecificInfo=null nrState=**** rRplmn= isUsingCarrierAggregation=false}, NetworkRegistrationInfo{ domain=CS transportType=WWAN registrationState=HOME networkRegistrationState=HOME roamingType=NOT_ROAMING accessNetworkTechnology=LTE rejectCause=0 emergencyEnabled=false availableServices=[VOICE,SMS,VIDEO] cellIdentity=CellIdentityLte:{ mCi=153658951 mPci=373 mTac=11214 mEarfcn=3000 mBands=[7] mBandwidth=20000 mMcc=620 mMnc=01 mAlphaLong=MTN GH mAlphaShort=MTN mAdditionalPlmns={} mCsgInfo=null} voiceSpecificInfo=VoiceSpecificRegistrationInfo { mCssSupported=false mRoamingIndicator=0 mSystemIsInPrl=0 mDefaultRoamingIndicator=0} dataSpecificInfo=null nrState=**** rRplmn=62001 isUsingCarrierAggregation=false}, NetworkRegistrationInfo{ domain=PS transportType=WWAN registrationState=HOME networkRegistrationState=HOME roamingType=NOT_ROAMING accessNetworkTechnology=LTE rejectCause=-1 emergencyEnabled=false availableServices=[DATA] cellIdentity=CellIdentityLte:{ mCi=153658951 mPci=373 mTac=11214 mEarfcn=3000 mBands=[7] mBandwidth=20000 mMcc=620 mMnc=01 mAlphaLong=MTN GH mAlphaShort=MTN mAdditionalPlmns={} mCsgInfo=null} voiceSpecificInfo=null dataSpecificInfo=android.telephony.DataSpecificRegistrationInfo :{ maxDataCalls = 16 isDcNrRestricted = false isNrAvailable = false isEnDcAvailable = false mLteAttachResultType = 0 mLteAttachExtraInfo = 0 LteVopsSupportInfo :  mVopsSupport = 2 mEmcBearerSupport = 2 } nrState=**** rRplmn=62001 isUsingCarrierAggregation=false}], mNrFrequencyRange=0, mOperatorAlphaLongRaw=MTN GH, mOperatorAlphaShortRaw=MTN, mIsDataRoamingFromRegistration=false, mIsIwlanPreferred=false} | mCarrierServiceState=<package=***, uid=-1> | mServiceState={mVoiceRegState=1(OUT_OF_SERVICE), mDataRegState=1(OUT_OF_SERVICE), mChannelNumber=-1, duplexMode()=0, mCellBandwidths=[], mOperatorAlphaLong=null, mOperatorAlphaShort=null, isManualNetworkSelection=false(automatic), getRilVoiceRadioTechnology=0(Unknown), getRilDataRadioTechnology=0(Unknown), mCssIndicator=unsupported, mNetworkId=-1, mSystemId=-1, mCdmaRoamingIndicator=-1, mCdmaDefaultRoamingIndicator=-1, mIsEmergencyOnly=false, isUsingCarrierAggregation=false, mArfcnRsrpBoost=0, mNetworkRegistrationInfos=[NetworkRegistrationInfo{ domain=CS transportType=WWAN registrationState=UNKNOWN networkRegistrationState=UNKNOWN roamingType=NOT_ROAMING accessNetworkTechnology=UNKNOWN rejectCause=0 emergencyEnabled=false availableServices=[] cellIdentity=null voiceSpecificInfo=null dataSpecificInfo=null nrState=**** rRplmn= isUsingCarrierAggregation=false}, NetworkRegistrationInfo{ domain=PS transportType=WWAN registrationState=UNKNOWN networkRegistrationState=UNKNOWN roamingType=NOT_ROAMING accessNetworkTechnology=UNKNOWN rejectCause=0 emergencyEnabled=false availableServices=[] cellIdentity=null voiceSpecificInfo=null dataSpecificInfo=null nrState=**** rRplmn= isUsingCarrierAggregation=false}, NetworkRegistrationInfo{ domain=PS transportType=WLAN registrationState=UNKNOWN networkRegistrationState=UNKNOWN roamingType=NOT_ROAMING accessNetworkTechnology=UNKNOWN rejectCause=0 emergencyEnabled=false availableServices=[] cellIdentity=null voiceSpecificInfo=null dataSpecificInfo=null nrState=**** rRplmn= isUsingCarrierAggregation=false}], mNrFrequencyRange=0, mOperatorAlphaLongRaw=null, mOperatorAlphaShortRaw=null, mIsDataRoamingFromRegistration=false, mIsIwlanPreferred=false} | mCarrierServiceState=<package=***, uid=-1> | 2026-08-30T17:33:18.324664 - notifyServiceStateForSubscriber: subId=1 phoneId=0 state={mVoiceRegState=0(IN_SERVICE), mDataRegState=0(IN_SERVICE), mChannelNumber=2829, duplexMode()=1, mCellBandwidths=[15000], mOperatorAlphaLong=MTN GH, mOperatorAlphaShort=MTN, isManualNetworkSelection=false(automatic), getRilVoiceRadioTechnology=14(LTE), getRilDataRadioTechnology=14(LTE), mCssIndicator=unsupported, mNetworkId=-1, mSystemId=-1, mCdmaRoamingIndicator=-1, mCdmaDefaultRoamingIndicator=-1, mIsEmergencyOnly=false, isUsingCarrierAggregation=false, mArfcnRsrpBoost=0, mNetworkRegistrationInfos=[NetworkRegistrationInfo{ domain=PS transportType=WLAN registrationState=NOT_REG_OR_SEARCHING networkRegistrationState=NOT_REG_OR_SEARCHING roamingType=NOT_ROAMING accessNetworkTechnology=UNKNOWN rejectCause=0 emergencyEnabled=false availableServices=[VOICE,SMS,EMERGENCY] cellIdentity=null voiceSpecificInfo=null dataSpecificInfo=null nrState=**** rRplmn= isUsingCarrierAggregation=false}, NetworkRegistrationInfo{ domain=CS transportType=WWAN registrationState=HOME networkRegistrationState=HOME roamingType=NOT_ROAMING accessNetworkTechnology=LTE rejectCause=0 emergencyEnabled=false availableServices=[VOICE,SMS,VIDEO] cellIdentity=CellIdentityLte:{ mCi=153658991 mPci=373 mTac=11214 mEarfcn=2829 mBands=[7] mBandwidth=15000 mMcc=620 mMnc=01 mAlphaLong=MTN GH mAlphaShort=MTN mAdditionalPlmns={} mCsgInfo=null} voiceSpecificInfo=VoiceSpecificRegistrationInfo { mCssSupported=false mRoamingIndicator=0 mSystemIsInPrl=0 mDefaultRoamingIndicator=0} dataSpecificInfo=null nrState=**** rRplmn=62001 isUsingCarrierAggregation=false}, NetworkRegistrationInfo{ domain=PS transportType=WWAN registrationState=HOME networkRegistrationState=HOME roamingType=NOT_ROAMING accessNetworkTechnology=LTE rejectCause=-1 emergencyEnabled=false availableServices=[DATA] cellIdentity=CellIdentityLte:{ mCi=153658991 mPci=373 mTac=11214 mEarfcn=2829 mBands=[7] mBandwidth=15000 mMcc=620 mMnc=01 mAlphaLong=MTN GH mAlphaShort=MTN mAdditionalPlmns={} mCsgInfo=null} voiceSpecificInfo=null dataSpecificInfo=android.telephony.DataSpecificRegistrationInfo :{ maxDataCalls = 16 isDcNrRestricted = false isNrAvailable = false isEnDcAvailable = false mLteAttachResultType = 0 mLteAttachExtraInfo = 0 LteVopsSupportInfo :  mVopsSupport = 2 mEmcBearerSupport = 2 } nrState=**** rRplmn=62001 isUsingCarrierAggregation=false}], mNrFrequencyRange=0, mOperatorAlphaLongRaw=MTN GH, mOperatorAlphaShortRaw=MTN, mIsDataRoamingFromRegistration=false, mIsIwlanPreferred=false} | 2026-08-30T17:34:05.999569 - notifyServiceStateForSubscriber: subId=1 phoneId=0 state={mVoiceRegState=0(IN_SERVICE), mDataRegState=0(IN_SERVICE), mChannelNumber=6375, duplexMode()=1, mCellBandwidths=[15000], mOperatorAlphaLong=MTN GH, mOperatorAlphaShort=MTN, isManualNetworkSelection=false(automatic), getRilVoiceRadioTechnology=14(LTE), getRilDataRadioTechnology=14(LTE), mCssIndicator=unsupported, mNetworkId=-1, mSystemId=-1, mCdmaRoamingIndicator=-1, mCdmaDefaultRoamingIndicator=-1, mIsEmergencyOnly=false, isUsingCarrierAggregation=false, mArfcnRsrpBoost=0, mNetworkRegistrationInfos=[NetworkRegistrationInfo{ domain=PS transportType=WLAN registrationState=NOT_REG_OR_SEARCHING networkRegistrationState=NOT_REG_OR_SEARCHING roamingType=NOT_ROAMING accessNetworkTechnology=UNKNOWN rejectCause=0 emergencyEnabled=false availableServices=[VOICE,SMS,EMERGENCY] cellIdentity=null voiceSpecificInfo=null dataSpecificInfo=null nrState=**** rRplmn= isUsingCarrierAggregation=false}, NetworkRegistrationInfo{ domain=CS transportType=WWAN registrationState=HOME networkRegistrationState=HOME roamingType=NOT_ROAMING accessNetworkTechnology=LTE rejectCause=0 emergencyEnabled=false availableServices=[VOICE,SMS,VIDEO] cellIdentity=CellIdentityLte:{ mCi=153658991 mPci=57 mTac=11214 mEarfcn=6375 mBands=[20] mBandwidth=15000 mMcc=620 mMnc=01 mAlphaLong=MTN GH mAlphaShort=MTN mAdditionalPlmns={} mCsgInfo=null} voiceSpecificInfo=VoiceSpecificRegistrationInfo { mCssSupported=false mRoamingIndicator=0 mSystemIsInPrl=0 mDefaultRoamingIndicator=0} dataSpecificInfo=null nrState=**** rRplmn=62001 isUsingCarrierAggregation=false}, NetworkRegistrationInfo{ domain=PS transportType=WWAN registrationState=HOME networkRegistrationState=HOME roamingType=NOT_ROAMING accessNetworkTechnology=LTE rejectCause=-1 emergencyEnabled=false availableServices=[DATA] cellIdentity=CellIdentityLte:{ mCi=153658991 mPci=57 mTac=11214 mEarfcn=6375 mBands=[20] mBandwidth=15000 mMcc=620 mMnc=01 mAlphaLong=MTN GH mAlphaShort=MTN mAdditionalPlmns={} mCsgInfo=null} voiceSpecificInfo=null dataSpecificInfo=android.telephony.DataSpecificRegistrationInfo :{ maxDataCalls = 16 isDcNrRestricted = false isNrAvailable = false isEnDcAvailable = false mLteAttachResultType = 0 mLteAttachExtraInfo = 0 LteVopsSupportInfo :  mVopsSupport = 2 mEmcBearerSupport = 2 } nrState=**** rRplmn=62001 isUsingCarrierAggregation=false}], mNrFrequencyRange=0, mOperatorAlphaLongRaw=MTN GH, mOperatorAlphaShortRaw=MTN, mIsDataRoamingFromRegistration=false, mIsIwlanPreferred=false}"
+  },
+  "trigger": {
+    "description": "manual Wi-Fi disable",
+    "observation_source": "harness"
+  },
+  "host": {
+    "pre_transition_route": "default via 192.168.100.1 dev wlp3s0 proto dhcp src 192.168.100.20 metric 100 ",
+    "post_transition_route": "default via 192.168.117.153 dev enxdaf7b654e4cf proto dhcp src 192.168.117.142 metric 700",
+    "tether_interface": "enxdaf7b654e4cf",
+    "tether_interface_addresses": [
+      "192.168.117.142"
+    ]
+  },
+  "adcos": {
+    "access_classification": "physical-handover",
+    "device_node_id": "adcos:node:identity.sha256-hmac-dev.v1:1ef424ea973d25dbddc8fe32c2221c26b3b14f8252edfe8b25e0bac1a8509423",
+    "session_id": "sha256:a497927ae47fed863f75f5c8c205a815f31cafeb30f4ed6b95a699cee43367aa",
+    "session_id_before": "sha256:a497927ae47fed863f75f5c8c205a815f31cafeb30f4ed6b95a699cee43367aa",
+    "session_id_after": "sha256:a497927ae47fed863f75f5c8c205a815f31cafeb30f4ed6b95a699cee43367aa",
+    "bind_event": {
+      "session_id": "sha256:a497927ae47fed863f75f5c8c205a815f31cafeb30f4ed6b95a699cee43367aa",
+      "adapter_id": "adcos:ipint:agent"
+    },
+    "rebind_event": {
+      "session_id": "sha256:a497927ae47fed863f75f5c8c205a815f31cafeb30f4ed6b95a699cee43367aa",
+      "carriage": "physical-access-secondary"
+    },
+    "sender_result": {
+      "label": "device-android",
+      "node_id": "adcos:node:identity.sha256-hmac-dev.v1:1ef424ea973d25dbddc8fe32c2221c26b3b14f8252edfe8b25e0bac1a8509423",
+      "observations": {
+        "session": {
+          "session_id": "sha256:a497927ae47fed863f75f5c8c205a815f31cafeb30f4ed6b95a699cee43367aa",
+          "state": "ESTABLISHED",
+          "record_digest": "sha256:TODO-MATCH-MOBILE"
+        },
+        "handover": {
+          "session_id_before": "sha256:a497927ae47fed863f75f5c8c205a815f31cafeb30f4ed6b95a699cee43367aa",
+          "session_id_after": "sha256:a497927ae47fed863f75f5c8c205a815f31cafeb30f4ed6b95a699cee43367aa",
+          "session_record_stable": true,
+          "transition_payload_digest": "sha256:cecf52044f69ea915d77c899dfe4aa6d9191858c5ff7d5deeda2a5d41826935c",
+          "failed_path_id": "path-1",
+          "active_path_id": "path-2",
+          "old_path_status_final": "FAILED",
+          "new_path_status_final": "ACTIVE",
+          "transition_confirmed": true,
+          "candidate_validated": true,
+          "candidate_probe_reachable": true,
+          "old_path_retired": true,
+          "activation_committed": true
+        },
+        "service": {
+          "verdict": "executed",
+          "response_matches": true
+        },
+        "interfaces_observed": [
+          "usb0",
+          "wlan0"
+        ],
+        "interfaces_observed_before": [
+          "wlan0"
+        ]
+      },
+      "events": [
+        {
+          "kind": "pilot.route-reevaluated",
+          "instant": "2026-08-01T00:08:20Z",
+          "payload": {
+            "session_id": "sha256:a497927ae47fed863f75f5c8c205a815f31cafeb30f4ed6b95a699cee43367aa",
+            "constituents": 2,
+            "primary": "physical-access",
+            "secondary": "physical-access-secondary"
+          }
+        },
+        {
+          "kind": "pilot.session-bound",
+          "instant": "2026-08-01T00:08:30Z",
+          "payload": {
+            "session_id": "sha256:a497927ae47fed863f75f5c8c205a815f31cafeb30f4ed6b95a699cee43367aa",
+            "adapter_id": "adcos:ipint:agent"
+          }
+        },
+        {
+          "kind": "pilot.link-loss-observed",
+          "instant": "2026-08-01T00:08:40Z",
+          "payload": {
+            "path": "physical-access"
+          }
+        },
+        {
+          "kind": "pilot.probe-reported",
+          "instant": "2026-08-01T00:08:50Z",
+          "payload": {
+            "target": "physical-access-secondary",
+            "reachable": true
+          }
+        },
+        {
+          "kind": "pilot.session-reconnecting",
+          "instant": "2026-08-01T00:09:00Z",
+          "payload": {
+            "session_id": "sha256:a497927ae47fed863f75f5c8c205a815f31cafeb30f4ed6b95a699cee43367aa",
+            "via": "physical-access-secondary"
+          }
+        },
+        {
+          "kind": "pilot.session-rebound",
+          "instant": "2026-08-01T00:09:10Z",
+          "payload": {
+            "session_id": "sha256:a497927ae47fed863f75f5c8c205a815f31cafeb30f4ed6b95a699cee43367aa",
+            "carriage": "physical-access-secondary"
+          }
+        },
+        {
+          "kind": "pilot.datagram-sent",
+          "instant": "2026-08-01T00:09:20Z",
+          "payload": {
+            "session_id": "sha256:a497927ae47fed863f75f5c8c205a815f31cafeb30f4ed6b95a699cee43367aa",
+            "carriage": "physical-access-secondary"
+          }
+        },
+        {
+          "kind": "pilot.datagram-received",
+          "instant": "2026-08-01T00:09:30Z",
+          "payload": {
+            "session_id": "sha256:a497927ae47fed863f75f5c8c205a815f31cafeb30f4ed6b95a699cee43367aa",
+            "carriage": "physical-access-secondary"
+          }
+        },
+        {
+          "kind": "pilot.path-status-changed",
+          "instant": "2026-08-01T00:09:40Z",
+          "payload": {
+            "session_id": "sha256:a497927ae47fed863f75f5c8c205a815f31cafeb30f4ed6b95a699cee43367aa",
+            "from": "DEGRADED",
+            "to": "FAILED"
+          }
+        }
+      ],
+      "checks": [
+        {
+          "label": "physical-traffic-verified",
+          "ok": true,
+          "detail": "nc proof matched"
+        }
+      ]
+    },
+    "receiver_result": {
+      "label": "appliance-1",
+      "node_id": "adcos:node:identity.sha256-hmac-dev.v1:25e6a039eb60278331de875ecc0eec57cafc65d2ea31d536fd37e4114e0269d8",
+      "events": [
+        {
+          "kind": "pilot.datagram-received",
+          "payload": {
+            "session_id": "sha256:a497927ae47fed863f75f5c8c205a815f31cafeb30f4ed6b95a699cee43367aa",
+            "carriage": "direct"
+          }
+        },
+        {
+          "kind": "pilot.datagram-received",
+          "payload": {
+            "session_id": "sha256:a497927ae47fed863f75f5c8c205a815f31cafeb30f4ed6b95a699cee43367aa",
+            "carriage": "relay"
+          }
+        }
+      ],
+      "checks": []
+    },
+    "payload_digest": "sha256:cecf52044f69ea915d77c899dfe4aa6d9191858c5ff7d5deeda2a5d41826935c",
+    "session_continuity": true
+  },
+  "paths": {
+    "old": {
+      "path_id": "path-1",
+      "access_kind": "none-reported (the pre-transition platform technology was 'none')",
+      "platform_network_identity": "netId-wifi",
+      "host_interface": "device-side interfaces before the transition: wlan0; host pre-transition route: default via 192.168.100.1 dev wlp3s0 proto dhcp src 192.168.100.20 metric 100 ",
+      "route": "default via 192.168.100.1 dev wlp3s0 proto dhcp src 192.168.100.20 metric 100 ",
+      "metered": "unmetered",
+      "reachability": "unreachable (the honest post-death re-probe of the direct access point: reachable=None)",
+      "validation_state": "FAILED (constituent; death confirmed; retired after the data-plane proof)"
+    },
+    "new": {
+      "path_id": "path-2",
+      "access_kind": "none-reported (the post-transition platform technology was 'none')",
+      "platform_network_identity": "netId-cellular",
+      "host_interface": "host USB-tether interface: enxdaf7b654e4cf (addresses: 192.168.117.142); device-side interfaces after the transition: usb0, wlan0",
+      "route": "default via 192.168.117.153 dev enxdaf7b654e4cf proto dhcp src 192.168.117.142 metric 700",
+      "metered": "metered",
+      "reachability": "reachable (the candidate access-point probe: reachable=True)",
+      "validation_state": "ACTIVE (constituent; candidate probe reachable=True; protected traffic probe verified=False)"
+    }
+  },
+  "lifecycle": [
+    {
+      "stage": "candidate_discovered",
+      "journal_event": "pilot.route-reevaluated",
+      "instant": "2026-08-01T00:08:20Z",
+      "marker": "constituents=2 (physical-access + physical-access-secondary)"
+    },
+    {
+      "stage": "degradation_detected",
+      "journal_event": "pilot.link-loss-observed",
+      "instant": "2026-08-01T00:08:40Z",
+      "marker": "path=physical-access (the primary carriage death; confirmed by the direct re-probe + the ACTIVE->DEGRADED path-status-changed)"
+    },
+    {
+      "stage": "candidate_validated",
+      "journal_event": "pilot.probe-reported",
+      "instant": "2026-08-01T00:08:50Z",
+      "marker": "target=physical-access-secondary reachable=true (the candidate probe BEFORE any rebind or retirement)"
+    },
+    {
+      "stage": "candidate_bound",
+      "journal_event": "pilot.session-reconnecting",
+      "instant": "2026-08-01T00:09:00Z",
+      "marker": "via=physical-access-secondary (the re-bind start)"
+    },
+    {
+      "stage": "rebind_committed",
+      "journal_event": "pilot.session-rebound",
+      "instant": "2026-08-01T00:09:10Z",
+      "marker": "carriage=physical-access-secondary (the SAME session id)"
+    },
+    {
+      "stage": "candidate_traffic_probe",
+      "journal_event": "pilot.datagram-sent",
+      "instant": "2026-08-01T00:09:20Z",
+      "marker": "the already-protected transition datagram re-sent on the secondary"
+    },
+    {
+      "stage": "activation_committed",
+      "journal_event": "pilot.datagram-received",
+      "instant": "2026-08-01T00:09:30Z",
+      "marker": "the echoed protected datagram verified on the new path (the data-plane proof precedes the control-plane commit)"
+    },
+    {
+      "stage": "old_path_retired",
+      "journal_event": "pilot.path-status-changed",
+      "instant": "2026-08-01T00:09:40Z",
+      "marker": "the primary constituent DEGRADED->FAILED (only AFTER the data-plane proof)"
+    }
+  ],
+  "recovery": {
+    "process_death_tested": false,
+    "model": "checkpoint/snapshot + append-only journal tail + fresh platform observation; the existing honest session-lost semantics are preserved (the process is never made to appear continuously alive merely for the experiment)",
+    "note": "the W040 handover harness does NOT test process death; any operator-driven process-death test must follow the ACR-006 recovery model above and must preserve the honest session-lost semantics (a production recovery implementation remains an authorized-work-item concern, recorded honestly as an architectural gap -- not implemented inside W040)"
+  },
+  "traffic_verification": {
+    "method": "nc-on-handset",
+    "observation": "V10-PROOF-173744"
+  },
+  "verification": {
+    "validator_sha": "sha256:fb83d0ed3cf1957aa5831fba7e864460c622dd6c14b109f22e448fa0514e9383",
+    "artifact_hashes": [
+      [
+        "device-result",
+        "sha256:1f214106bb269ae39ba93b0510d8675a3828159d7dd3cef5c0160bfe6c108b17"
+      ],
+      [
+        "appliance-result",
+        "sha256:7b48f525649e438ff31a446841eb43c5f9dbb261b0a95a531d3d3355036be903"
+      ],
+      [
+        "environment-detection",
+        "sha256:aabbb0c20e5ee8eeb29c6a6c5b418da576aa33036da7a69aa13426507910075e"
+      ],
+      [
+        "android-manifest",
+        "sha256:3e60b9cbe1a4ecf484f7ca4d5033d41664b44260975d1b133b196f46a6db252f"
+      ]
+    ]
+  },
+  "honest_absences": [],
+  "android_observations": {
+    "manifest": {
+      "kind": "android-agent-observation-manifest",
+      "schema_version": 2,
+      "produced_by": "ADCOS physical-device agent (v10 definitive)",
+      "device_identity": {
+        "model": "TECNO KL4",
+        "brand": "TECNO",
+        "device": "TECNO-KL4",
+        "serial": "12922554B5023086",
+        "android_release": "14",
+        "sdk": "34",
+        "abi": "arm64-v8a",
+        "observation_source": "adb shell getprop (authoritative device report)"
+      },
+      "platform_events": [
+        {
+          "kind": "wifi-baseline",
+          "source": "manual",
+          "instant": "2026-08-01T00:07:50Z",
+          "observation": {
+            "mDataNetworkType": "none",
+            "active_network": "wifi"
+          }
+        },
+        {
+          "kind": "handover-trigger",
+          "source": "svc wifi disable",
+          "instant": "2026-08-01T00:08:00Z",
+          "observation": {
+            "wifi_enabled": false
+          }
+        },
+        {
+          "kind": "cellular-post",
+          "source": "connectivity-callback",
+          "instant": "2026-08-01T00:08:10Z",
+          "observation": {
+            "mDataNetworkType": "none",
+            "mNrState": null,
+            "active_network": "cellular"
+          }
+        }
+      ],
+      "snapshot_basis": {
+        "pre": {
+          "event_index": 0
+        },
+        "post": {
+          "event_index": 2
+        }
+      },
+      "network_identity": {
+        "pre": "netId-wifi",
+        "post": "netId-cellular",
+        "observation_source": "adb shell dumpsys connectivity"
+      },
+      "metered": {
+        "pre": false,
+        "post": true,
+        "observation_source": "adb shell dumpsys connectivity"
+      },
+      "cellular": {
+        "active": true,
+        "observation_source": "adb shell dumpsys telephony.registry"
+      },
+      "network_technology": {
+        "pre": "none",
+        "post": "none",
+        "is_5g": false,
+        "nr_state": "none",
+        "observation_source": "adb shell dumpsys telephony.registry"
+      },
+      "trigger": {
+        "description": "manual Wi-Fi disable",
+        "observation_source": "harness"
+      },
+      "usb_tether": {
+        "enabled": true,
+        "backed_by_cellular": true,
+        "observation_source": "adb shell dumpsys connectivity"
+      },
+      "raw_observations": {
+        "getprop_ro_product_model": "TECNO KL4",
+        "dumpsys_telephony_registry_excerpt": "mServiceState={mVoiceRegState=0(IN_SERVICE), mDataRegState=0(IN_SERVICE), mChannelNumber=3000, duplexMode()=1, mCellBandwidths=[20000, 15000], mOperatorAlphaLong=MTN GH, mOperatorAlphaShort=MTN, isManualNetworkSelection=false(automatic), getRilVoiceRadioTechnology=14(LTE), getRilDataRadioTechnology=14(LTE), mCssIndicator=unsupported, mNetworkId=-1, mSystemId=-1, mCdmaRoamingIndicator=-1, mCdmaDefaultRoamingIndicator=-1, mIsEmergencyOnly=false, isUsingCarrierAggregation=true, mArfcnRsrpBoost=0, mNetworkRegistrationInfos=[NetworkRegistrationInfo{ domain=PS transportType=WLAN registrationState=NOT_REG_OR_SEARCHING networkRegistrationState=NOT_REG_OR_SEARCHING roamingType=NOT_ROAMING accessNetworkTechnology=UNKNOWN rejectCause=0 emergencyEnabled=false availableServices=[VOICE,SMS,EMERGENCY] cellIdentity=null voiceSpecificInfo=null dataSpecificInfo=null nrState=**** rRplmn= isUsingCarrierAggregation=false}, NetworkRegistrationInfo{ domain=CS transportType=WWAN registrationState=HOME networkRegistrationState=HOME roamingType=NOT_ROAMING accessNetworkTechnology=LTE rejectCause=0 emergencyEnabled=false availableServices=[VOICE,SMS,VIDEO] cellIdentity=CellIdentityLte:{ mCi=153658951 mPci=373 mTac=11214 mEarfcn=3000 mBands=[7] mBandwidth=20000 mMcc=620 mMnc=01 mAlphaLong=MTN GH mAlphaShort=MTN mAdditionalPlmns={} mCsgInfo=null} voiceSpecificInfo=VoiceSpecificRegistrationInfo { mCssSupported=false mRoamingIndicator=0 mSystemIsInPrl=0 mDefaultRoamingIndicator=0} dataSpecificInfo=null nrState=**** rRplmn=62001 isUsingCarrierAggregation=false}, NetworkRegistrationInfo{ domain=PS transportType=WWAN registrationState=HOME networkRegistrationState=HOME roamingType=NOT_ROAMING accessNetworkTechnology=LTE rejectCause=-1 emergencyEnabled=false availableServices=[DATA] cellIdentity=CellIdentityLte:{ mCi=153658951 mPci=373 mTac=11214 mEarfcn=3000 mBands=[7] mBandwidth=20000 mMcc=620 mMnc=01 mAlphaLong=MTN GH mAlphaShort=MTN mAdditionalPlmns={} mCsgInfo=null} voiceSpecificInfo=null dataSpecificInfo=android.telephony.DataSpecificRegistrationInfo :{ maxDataCalls = 16 isDcNrRestricted = false isNrAvailable = false isEnDcAvailable = false mLteAttachResultType = 0 mLteAttachExtraInfo = 0 LteVopsSupportInfo :  mVopsSupport = 2 mEmcBearerSupport = 2 } nrState=**** rRplmn=62001 isUsingCarrierAggregation=false}], mNrFrequencyRange=0, mOperatorAlphaLongRaw=MTN GH, mOperatorAlphaShortRaw=MTN, mIsDataRoamingFromRegistration=false, mIsIwlanPreferred=false} | mCarrierServiceState=<package=***, uid=-1> | mServiceState={mVoiceRegState=1(OUT_OF_SERVICE), mDataRegState=1(OUT_OF_SERVICE), mChannelNumber=-1, duplexMode()=0, mCellBandwidths=[], mOperatorAlphaLong=null, mOperatorAlphaShort=null, isManualNetworkSelection=false(automatic), getRilVoiceRadioTechnology=0(Unknown), getRilDataRadioTechnology=0(Unknown), mCssIndicator=unsupported, mNetworkId=-1, mSystemId=-1, mCdmaRoamingIndicator=-1, mCdmaDefaultRoamingIndicator=-1, mIsEmergencyOnly=false, isUsingCarrierAggregation=false, mArfcnRsrpBoost=0, mNetworkRegistrationInfos=[NetworkRegistrationInfo{ domain=CS transportType=WWAN registrationState=UNKNOWN networkRegistrationState=UNKNOWN roamingType=NOT_ROAMING accessNetworkTechnology=UNKNOWN rejectCause=0 emergencyEnabled=false availableServices=[] cellIdentity=null voiceSpecificInfo=null dataSpecificInfo=null nrState=**** rRplmn= isUsingCarrierAggregation=false}, NetworkRegistrationInfo{ domain=PS transportType=WWAN registrationState=UNKNOWN networkRegistrationState=UNKNOWN roamingType=NOT_ROAMING accessNetworkTechnology=UNKNOWN rejectCause=0 emergencyEnabled=false availableServices=[] cellIdentity=null voiceSpecificInfo=null dataSpecificInfo=null nrState=**** rRplmn= isUsingCarrierAggregation=false}, NetworkRegistrationInfo{ domain=PS transportType=WLAN registrationState=UNKNOWN networkRegistrationState=UNKNOWN roamingType=NOT_ROAMING accessNetworkTechnology=UNKNOWN rejectCause=0 emergencyEnabled=false availableServices=[] cellIdentity=null voiceSpecificInfo=null dataSpecificInfo=null nrState=**** rRplmn= isUsingCarrierAggregation=false}], mNrFrequencyRange=0, mOperatorAlphaLongRaw=null, mOperatorAlphaShortRaw=null, mIsDataRoamingFromRegistration=false, mIsIwlanPreferred=false} | mCarrierServiceState=<package=***, uid=-1> | 2026-08-30T17:33:18.324664 - notifyServiceStateForSubscriber: subId=1 phoneId=0 state={mVoiceRegState=0(IN_SERVICE), mDataRegState=0(IN_SERVICE), mChannelNumber=2829, duplexMode()=1, mCellBandwidths=[15000], mOperatorAlphaLong=MTN GH, mOperatorAlphaShort=MTN, isManualNetworkSelection=false(automatic), getRilVoiceRadioTechnology=14(LTE), getRilDataRadioTechnology=14(LTE), mCssIndicator=unsupported, mNetworkId=-1, mSystemId=-1, mCdmaRoamingIndicator=-1, mCdmaDefaultRoamingIndicator=-1, mIsEmergencyOnly=false, isUsingCarrierAggregation=false, mArfcnRsrpBoost=0, mNetworkRegistrationInfos=[NetworkRegistrationInfo{ domain=PS transportType=WLAN registrationState=NOT_REG_OR_SEARCHING networkRegistrationState=NOT_REG_OR_SEARCHING roamingType=NOT_ROAMING accessNetworkTechnology=UNKNOWN rejectCause=0 emergencyEnabled=false availableServices=[VOICE,SMS,EMERGENCY] cellIdentity=null voiceSpecificInfo=null dataSpecificInfo=null nrState=**** rRplmn= isUsingCarrierAggregation=false}, NetworkRegistrationInfo{ domain=CS transportType=WWAN registrationState=HOME networkRegistrationState=HOME roamingType=NOT_ROAMING accessNetworkTechnology=LTE rejectCause=0 emergencyEnabled=false availableServices=[VOICE,SMS,VIDEO] cellIdentity=CellIdentityLte:{ mCi=153658991 mPci=373 mTac=11214 mEarfcn=2829 mBands=[7] mBandwidth=15000 mMcc=620 mMnc=01 mAlphaLong=MTN GH mAlphaShort=MTN mAdditionalPlmns={} mCsgInfo=null} voiceSpecificInfo=VoiceSpecificRegistrationInfo { mCssSupported=false mRoamingIndicator=0 mSystemIsInPrl=0 mDefaultRoamingIndicator=0} dataSpecificInfo=null nrState=**** rRplmn=62001 isUsingCarrierAggregation=false}, NetworkRegistrationInfo{ domain=PS transportType=WWAN registrationState=HOME networkRegistrationState=HOME roamingType=NOT_ROAMING accessNetworkTechnology=LTE rejectCause=-1 emergencyEnabled=false availableServices=[DATA] cellIdentity=CellIdentityLte:{ mCi=153658991 mPci=373 mTac=11214 mEarfcn=2829 mBands=[7] mBandwidth=15000 mMcc=620 mMnc=01 mAlphaLong=MTN GH mAlphaShort=MTN mAdditionalPlmns={} mCsgInfo=null} voiceSpecificInfo=null dataSpecificInfo=android.telephony.DataSpecificRegistrationInfo :{ maxDataCalls = 16 isDcNrRestricted = false isNrAvailable = false isEnDcAvailable = false mLteAttachResultType = 0 mLteAttachExtraInfo = 0 LteVopsSupportInfo :  mVopsSupport = 2 mEmcBearerSupport = 2 } nrState=**** rRplmn=62001 isUsingCarrierAggregation=false}], mNrFrequencyRange=0, mOperatorAlphaLongRaw=MTN GH, mOperatorAlphaShortRaw=MTN, mIsDataRoamingFromRegistration=false, mIsIwlanPreferred=false} | 2026-08-30T17:34:05.999569 - notifyServiceStateForSubscriber: subId=1 phoneId=0 state={mVoiceRegState=0(IN_SERVICE), mDataRegState=0(IN_SERVICE), mChannelNumber=6375, duplexMode()=1, mCellBandwidths=[15000], mOperatorAlphaLong=MTN GH, mOperatorAlphaShort=MTN, isManualNetworkSelection=false(automatic), getRilVoiceRadioTechnology=14(LTE), getRilDataRadioTechnology=14(LTE), mCssIndicator=unsupported, mNetworkId=-1, mSystemId=-1, mCdmaRoamingIndicator=-1, mCdmaDefaultRoamingIndicator=-1, mIsEmergencyOnly=false, isUsingCarrierAggregation=false, mArfcnRsrpBoost=0, mNetworkRegistrationInfos=[NetworkRegistrationInfo{ domain=PS transportType=WLAN registrationState=NOT_REG_OR_SEARCHING networkRegistrationState=NOT_REG_OR_SEARCHING roamingType=NOT_ROAMING accessNetworkTechnology=UNKNOWN rejectCause=0 emergencyEnabled=false availableServices=[VOICE,SMS,EMERGENCY] cellIdentity=null voiceSpecificInfo=null dataSpecificInfo=null nrState=**** rRplmn= isUsingCarrierAggregation=false}, NetworkRegistrationInfo{ domain=CS transportType=WWAN registrationState=HOME networkRegistrationState=HOME roamingType=NOT_ROAMING accessNetworkTechnology=LTE rejectCause=0 emergencyEnabled=false availableServices=[VOICE,SMS,VIDEO] cellIdentity=CellIdentityLte:{ mCi=153658991 mPci=57 mTac=11214 mEarfcn=6375 mBands=[20] mBandwidth=15000 mMcc=620 mMnc=01 mAlphaLong=MTN GH mAlphaShort=MTN mAdditionalPlmns={} mCsgInfo=null} voiceSpecificInfo=VoiceSpecificRegistrationInfo { mCssSupported=false mRoamingIndicator=0 mSystemIsInPrl=0 mDefaultRoamingIndicator=0} dataSpecificInfo=null nrState=**** rRplmn=62001 isUsingCarrierAggregation=false}, NetworkRegistrationInfo{ domain=PS transportType=WWAN registrationState=HOME networkRegistrationState=HOME roamingType=NOT_ROAMING accessNetworkTechnology=LTE rejectCause=-1 emergencyEnabled=false availableServices=[DATA] cellIdentity=CellIdentityLte:{ mCi=153658991 mPci=57 mTac=11214 mEarfcn=6375 mBands=[20] mBandwidth=15000 mMcc=620 mMnc=01 mAlphaLong=MTN GH mAlphaShort=MTN mAdditionalPlmns={} mCsgInfo=null} voiceSpecificInfo=null dataSpecificInfo=android.telephony.DataSpecificRegistrationInfo :{ maxDataCalls = 16 isDcNrRestricted = false isNrAvailable = false isEnDcAvailable = false mLteAttachResultType = 0 mLteAttachExtraInfo = 0 LteVopsSupportInfo :  mVopsSupport = 2 mEmcBearerSupport = 2 } nrState=**** rRplmn=62001 isUsingCarrierAggregation=false}], mNrFrequencyRange=0, mOperatorAlphaLongRaw=MTN GH, mOperatorAlphaShortRaw=MTN, mIsDataRoamingFromRegistration=false, mIsIwlanPreferred=false}",
+        "dumpsys_connectivity_excerpt": "Tethering: active"
+      },
+      "apk": {
+        "name": "current_harness.apk",
+        "sha256": "sha256:a043eb2fa974efdb87dd538ca669a9bd306ff0034b210066d40d8ab36a37b75c"
+      }
+    },
+    "manifest_file_sha256": "sha256:3e60b9cbe1a4ecf484f7ca4d5033d41664b44260975d1b133b196f46a6db252f",
+    "note": "loaded + validated + bound by its file SHA-256; the Android platform's own observations, cross-corroborated against the ADCOS-side observations -- never overriding them (do not duplicate the Android platform authority in Python)",
+    "apk_sha256": "sha256:a043eb2fa974efdb87dd538ca669a9bd306ff0034b210066d40d8ab36a37b75c"
+  },
+  "evidence_layers": {
+    "PHYSICAL": {
+      "claims": [
+        "the handset participates as a real ADCOS endpoint",
+        "the physical trigger (the Wi-Fi disable) occurred"
+      ],
+      "proven": true,
+      "basis": "the physical execution record (is_physical) + the adb-observed device identity"
+    },
+    "PLATFORM": {
+      "claims": [
+        "the Android framework's own access-technology observations (pre/post)",
+        "the NR-only 5G determination"
+      ],
+      "proven": true,
+      "basis": "the framework's own reports captured by the harness (getprop/dumpsys) and/or the bound Android observation manifest -- never ADCOS re-derivation"
+    },
+    "PATH": {
+      "claims": [
+        "the OLD path record (identity, interface, route, reachability, validation state)",
+        "the NEW path record (the USB-tether host path)"
+      ],
+      "proven": true,
+      "basis": "the real host route/interface observations + the participant's own transition record (honest even in a rehearsal: the loopback path is a genuinely observed path)"
+    },
+    "ADCOS": {
+      "claims": [
+        "the session established and bound (primary carriage)",
+        "the re-bind on the SAME logical session id (secondary)",
+        "the session-record digest stability across the transition"
+      ],
+      "proven": true,
+      "basis": "the participant's own journal events (session-bound + session-rebound on one session id) + the byte-identical session-record digest"
+    },
+    "TRANSPORT": {
+      "claims": [
+        "the protected datagram flowed on the new path",
+        "the independent receiver corroborates the session datagrams on BOTH access points"
+      ],
+      "proven": true,
+      "basis": "the post-rebind payload digest + the receiver journal's both-carriage corroboration (the sender's own send record alone never proves this layer)"
+    }
+  },
+  "five_g_chain": {
+    "android_nr_report": {
+      "layer": "PLATFORM",
+      "present": false,
+      "basis": "the framework's post-transition NR report (technology='none' is_5g=False)"
+    },
+    "cellular_network_active": {
+      "layer": "PLATFORM",
+      "present": true,
+      "basis": "the framework's cellular data-network state (manifest cellular.active=True)"
+    },
+    "tether_backed_by_cellular": {
+      "layer": "PLATFORM",
+      "present": true,
+      "basis": "the framework's USB-tether state (enabled=True backed_by_cellular=True)"
+    },
+    "host_path_identified": {
+      "layer": "PATH",
+      "present": true,
+      "basis": "the host USB-tether interface 'enxdaf7b654e4cf' + the post-transition route running via it (route 'default via 192.168.117.153 dev enxdaf7b654e4cf proto dhcp src 192.168.117.142 m')"
+    },
+    "adcos_path_validated": {
+      "layer": "ADCOS",
+      "present": false,
+      "basis": "the new path record's validation state ('ACTIVE (constituent; candidate probe reachable=True; protected traffic probe verified=False)')"
+    },
+    "adcos_session_bound_to_path": {
+      "layer": "ADCOS",
+      "present": true,
+      "basis": "the bind + rebind events on the SAME session id (before='sha256:a497927ae47fed863' after='sha256:a497927ae47fed863')"
+    },
+    "real_packet_transmitted": {
+      "layer": "TRANSPORT",
+      "present": true,
+      "basis": "the digest of the protected datagram that flowed after the re-bind ('sha256:cecf52044f69ea915')"
+    },
+    "independent_receiver_verification": {
+      "layer": "TRANSPORT",
+      "present": true,
+      "basis": "the independent receiver (appliance) journal corroborating the session datagram on the relay carriage"
+    }
+  },
+  "classification": {
+    "criterion_1_real_devices": "pass",
+    "criterion_2_5g": "not-testable",
+    "validation_ok": true,
+    "validation_problems": []
+  }
+}

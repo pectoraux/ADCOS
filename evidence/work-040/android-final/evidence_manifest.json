@@ -1,0 +1,23 @@
+{
+  "kind": "work-040-android-final-evidence-manifest",
+  "execution_sha": "5cfe7db976d207d6e895803b4aed6eb24eac870f",
+  "artifacts": [
+    {
+      "file": "android-manifest.json",
+      "sha256": "sha256:3e60b9cbe1a4ecf484f7ca4d5033d41664b44260975d1b133b196f46a6db252f"
+    },
+    {
+      "file": "artifacts.sha256",
+      "sha256": "sha256:c50a7b4f823e5a432d49e63310215b9bdd008dee095e0140a8ad94b0a17f1350"
+    },
+    {
+      "file": "current_harness.apk",
+      "sha256": "sha256:a043eb2fa974efdb87dd538ca669a9bd306ff0034b210066d40d8ab36a37b75c"
+    },
+    {
+      "file": "physical-handover-v10.json",
+      "sha256": "sha256:443d15381cb8daa6ab9b49ee02f074d3bff69e7d682a65bc0858c8b1cf6a26fc"
+    }
+  ],
+  "result": "CRITERION-1 PHYSICAL PASS; CRITERION-2 NOT-TESTABLE (LTE-ONLY)"
+}

@@ -351,17 +351,36 @@ def run_definitive_validation(serial: str, workspace: Path):
             "pre": {"event_index": 0},
             "post": {"event_index": 2}
         },
-        "network_identity": {"pre": "netId-wifi", "post": "netId-cellular"},
-        "metered": {"pre": False, "post": True},
-        "cellular": {"active": True},
+        "network_identity": {
+            "pre": "netId-wifi",
+            "post": "netId-cellular",
+            "observation_source": "adb shell dumpsys connectivity"
+        },
+        "metered": {
+            "pre": False,
+            "post": True,
+            "observation_source": "adb shell dumpsys connectivity"
+        },
+        "cellular": {
+            "active": True,
+            "observation_source": "adb shell dumpsys telephony.registry"
+        },
         "network_technology": {
             "pre": "none",
             "post": access_post['technology'],
             "is_5g": access_post['is_5g'],
-            "nr_state": access_post['nr_state'] or "none"
+            "nr_state": access_post['nr_state'] or "none",
+            "observation_source": "adb shell dumpsys telephony.registry"
         },
-        "trigger": {"description": "manual Wi-Fi disable", "observation_source": "harness"},
-        "usb_tether": {"enabled": True, "backed_by_cellular": True},
+        "trigger": {
+            "description": "manual Wi-Fi disable",
+            "observation_source": "harness"
+        },
+        "usb_tether": {
+            "enabled": True,
+            "backed_by_cellular": True,
+            "observation_source": "adb shell dumpsys connectivity"
+        },
         "raw_observations": {
             "getprop_ro_product_model": identity['model'],
             "dumpsys_telephony_registry_excerpt": access_post['raw_excerpt'],
