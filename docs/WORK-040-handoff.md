@@ -1,9 +1,18 @@
 # WORK-040 — Pilot Deployment: Implementation Handoff
 
 **Work item:** WORK-040 — Pilot deployment
-**Branch:** `work-040-pilot-deployment` (anchored on `main@1669ae9a`, the WORK-039 merge)
-**Package:** `pilot/` (10 modules) + `tools/pilot_selftest.py` (20-case battery)
+**Branch:** `work-040-pilot-deployment` (originally anchored on `main@1669ae9a`; synchronized with `main@4efcc8c` for the correction cycle)
+**Package:** `pilot/` (11 modules) + `tools/pilot_selftest.py` (25-case battery)
 **CI step:** "Run WORK-040 pilot deployment tests" (after the federation-at-scale step)
+**Correction cycle:** WORK-040-CORRECTION-001 (DEC-0046) — repository-local authority; correction-only scope
+
+> **Correction cycle (§7 below).** The DEC-0046 correction adds the
+> physical-device participation path (`pilot/physical.py`, the declared
+> `device-android` participant, the `--physical` device mode, battery cases
+> 21–25, the honest attempt artifact `evidence/work-040/`, and the physical
+> runbook). The delivered pilot is preserved exactly: the default
+> deployment's semantic run record is byte-identical before/after the
+> correction (measured at the same commit).
 
 ## Objective (frozen)
 
@@ -25,11 +34,12 @@ accepted production families exclusively through their public contracts:
 | `pilot/marshal.py` | cross-process marshalling of the WORK-033 session artifacts (9 artifact pairs) + the WORK-004 credential record — serialization through each production object's own `to_dict`, reconstruction through each production validating constructor |
 | `pilot/wire.py` | real TCP carriage: length-prefixed frames of genuine WORK-003 envelopes (production codec, production `accept` receipts under `FORWARD_OPAQUE` — LOCK-014) |
 | `pilot/platform.py` | honest deployment reconnaissance through the production seams (`agent.LinuxInterfaceSource`, `edge.LinuxHardwareSource`, the W019/W020/W037 environment probes, the W037 profile-lab gate and runbook) |
-| `pilot/topology.py` | the deployment topology (2 devices, 1 relay, 1 appliance; 4 carriage paths), node identities via the real WORK-004 machinery, the device/appliance agent configs (the accepted battery recipe) |
+| `pilot/topology.py` | the deployment topology (2 devices, 1 relay, 1 appliance; 4 carriage paths + the physical-access extension), node identities via the real WORK-004 machinery, the device/appliance agent configs (the accepted battery recipe) |
 | `pilot/fabric.py` | the appliance's provisioned local fabric (2 local services; the manifest validated by the production `validate_manifest`) |
 | `pilot/deployment.py` | the conductor + the three node role implementations (real OS processes; real sockets; the declared failure plan) |
 | `pilot/node.py` | the per-process entrypoint (`python3 -m pilot.node --role ...`) |
 | `pilot/evidence.py` | the honest three-class evidence model with the anti-promotion authority |
+| `pilot/physical.py` | **(correction)** the physical-device participation harness: honest environment detection, adb device/access observations (NR-only 5G rule), the physical pilot orchestration, the evidence assembly, the pure independent validator, the derived never-promoting classification |
 
 **The deployment topology** (the smallest genuine shape):
 
@@ -152,3 +162,102 @@ CI wiring/ordering; py_compile.
    declared order so the journal is a deployment fact rather than a
    thread-scheduling artifact. Each device's chain is fully genuine; only the
    interleaving of the two devices is declared.
+
+---
+
+## 7. The correction cycle (WORK-040-CORRECTION-001, DEC-0046)
+
+**Authority:** `spec/architect/authorizations/WORK-040.yaml` —
+WORK-040-CORRECTION-001, correction-only, baseline `93efa54f` (inherited
+byte-identically from `main@4efcc8c` after the PR #61 merge; ARCH-08
+verified: the implementation delta is covered by the active authorization).
+The branch is synchronized with `main@4efcc8c`; the delivered pilot
+implementation is preserved (the merge commit only resolves the CI-wiring
+conflict and brings the persistent Architect package).
+
+**What the correction delivered:**
+
+1. **The physical-device participation path** — `pilot/physical.py` and the
+   declared `device-android` participant (§"What was built" above): an
+   ACTUAL physical handset can now participate as a real ADCOS endpoint
+   through the production chain (the handset runs the same `pilot.node`
+   entrypoint, reads its REAL interfaces through the production
+   `LinuxInterfaceSource`, and drives the same session/service chain over a
+   real physical carriage). No private W035 method, no synthetic interface,
+   no monkeypatched runtime, no protocol re-implementation anywhere.
+2. **The genuine attempt + honest artifact** — `evidence/work-040/
+   physical-attempt.json`: the exhaustive environment detection on this
+   execution host (no adb binary; USB bus present, no device; no
+   USB-tether interface), the fail-closed attempt record, and the
+   full-chain rehearsal. The physical demonstration is honestly
+   UNRESOLVED here — the W035 handset capability lives on the Architect's
+   workstation, not on this host. Criterion 1 stays PARTIAL; criterion 2
+   stays NOT-TESTABLE. Nothing is fabricated.
+3. **The preserved pilot** — the default four-process deployment's semantic
+   run record is byte-identical before/after the correction (measured with
+   and without the correction at the same commit:
+   `sha256:1f0bebf81a0339dc20a21e9901ff8df048cacff64c8c2db0818d3f36ada1ba94`).
+   Criteria 3–6 PASS evidence unchanged; re-verified at the correction
+   execution SHA (battery 25/25).
+4. **The frozen evidence templates + validator** — 17 required
+   participation fields + 6 5G-only fields (NR-only rule, route
+   transition, independent traffic verification); the pure validator
+   rejects rehearsal evidence relabeled as physical, LTE relabeled as 5G,
+   5G PASS without route/traffic evidence, forged identities, one-sided
+   evidence, and malformed digests. Classification is DERIVED from the
+   document's facts, never caller-asserted.
+
+**The physical runbook** (the exact external step that remains — run on a
+host with the W035 handset attached and `adb` on PATH):
+
+```bash
+# 0) prerequisites: the handset attached (USB debugging on), adb on PATH,
+#    and a Python 3.11+ runtime ON the handset (Termux's python works:
+#    the whole ADCOS stack is pure stdlib).
+adb devices -l                       # exactly one device must be listed
+
+# 1) put this repository on the handset (any path; /data/local/tmp/adcos
+#    is the default the harness expects):
+git archive --format=tar HEAD | adb shell 'mkdir -p /data/local/tmp/adcos && tar -x -C /data/local/tmp/adcos'
+
+# 2) run the physical pilot from the repository root ON THE HOST:
+python3 -c "from pilot.physical import run_physical_pilot; \
+            import json; \
+            print(json.dumps(run_physical_pilot(), indent=1))" \
+     > physical-run.json
+# The harness: captures the device identity (getprop) and the framework
+# access technology (dumpsys; NR-only 5G rule); starts the appliance with
+# an externally reachable access point; sets up `adb reverse` (the real
+# USB carriage); launches the device node ON the handset; pulls both
+# result documents; captures the post-transition route; assembles,
+# validates, and honestly classifies the evidence document.
+
+# 3) the classification in physical-run.json is DERIVED: criterion 1 PASS
+#    requires is_physical + the corroborated chain + the executed service;
+#    criterion 2 PASS additionally requires the NR observation, the route
+#    transition onto the 5G-backed host path, and the independent traffic
+#    verification. LTE is never 5G; a rehearsal is never physical.
+```
+
+For a Wi-Fi carriage instead of USB, run the appliance with
+`--bind-host 0.0.0.0` (or the host's LAN address) and point the device
+node's `--direct-host` at the host's LAN address (the harness's
+`device_command` parameter records whatever command actually ran).
+
+**Battery (25 cases):** the delivered 20 + the correction's 21–25 (the
+extension topology; the honest environment detection; the frozen evidence
+template; the anti-promotion negatives; the full-chain rehearsal).
+
+**Honest evidence position after the correction:**
+
+| Criterion | Status | Why |
+|---|---|---|
+| 1. real users/devices | **PARTIAL** (explicitly unresolved) | the physical participation path is implemented and software-verified end-to-end; no handset is reachable from this execution host, so the physical demonstration is not performed (never fabricated) |
+| 2. 5G access path | **NOT-TESTABLE** | no 5G infrastructure here; the NR-only rule and the full evidence template are enforced in code for when the environment provides one |
+| 3–6 | **PASS** (preserved) | unchanged delivered evidence, re-verified at the correction execution SHA |
+
+**W040 acceptance remains blocked** pending: the physical pilot run on a
+host with the handset attached (criterion 1 → PASS evidence), the 5G
+demonstration where the infrastructure genuinely exists (criterion 2), and
+the Architect's re-review (DEC-0046's acceptance gate). The frozen
+acceptance criteria are NOT redefined by this correction.
