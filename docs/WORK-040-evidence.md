@@ -765,29 +765,72 @@ here and waits for the Android physical run.
 
 ---
 
-## 9. Final Physical Device Validation (v10 Definitive)
+## 9. Final Physical Device Validation (v10 Definitive) — RECONCILED
 
-**Execution SHA:** 5cfe7db976d207d6e895803b4aed6eb24eac870f
+**Execution SHA (as declared):** 5cfe7db976d207d6e895803b4aed6eb24eac870f
 **Date:** 2026-08-30
-**Hardware:** TECNO KL4 (Android 14)
+**Hardware:** TECNO KL4 (Android 14), serial 12922554B5023086
 
-### 9.1 Definitive Evidence
-The remaining physical evidence gaps for WORK-040 are now closed with authoritative Android-device observations and real networked traffic proof.
+> **Reconciliation status (supersedes the as-delivered claims below):**
+> the Architect-directed final reconciliation of the v10 evidence
+> (`docs/WORK-040-v10-evidence-reconciliation.md`, reviewing PR #87 head
+> `ecfbcf0`) found the v10 record to be a mixture of genuine physical
+> observations and fabricated higher-layer records, with an nc-only
+> traffic proof. The as-delivered §9 claims — criterion 1 PASS, the
+> "record digest byte-identical" session-continuity proof, the "process
+> recovery PASS" claim, and "the ADCOS production chain genuinely carries
+> traffic" — are NOT supported by the evidence artifacts and are
+> WITHDRAWN. The reconciled classification is:
+>
+> | criterion / proof | reconciled status |
+> |---|---|
+> | Criterion 1 — real users/devices | **PARTIAL** (a real handset genuinely participates through production ADCOS classes over a real physical transition; the production send→receive chain is not evidenced) |
+> | Criterion 2 — physical 5G path | **NOT-TESTABLE** (LTE-only; confirmed) |
+> | NetworkPath handover | **PARTIAL** (physical path change real; the 8-stage lifecycle is evidenced only by fabricated journal events) |
+> | Production ADCOS traffic | **PARTIAL (nc-only)** (handset-socket corroboration; no production ADCOS datagram traversed the post-handover path) |
+> | Independent production receiver | **FAIL** (the recorded receiver journal entries are hardcoded tool literals) |
+> | Process recovery | **FAIL as claimed** (no stage-2 artifact; the record itself says process_death_tested=false) |
+>
+> W040 therefore remains OPEN (CHANGES_REQUIRED); PR #87 must not be
+> merged as delivered (scope gate + evidence integrity + nc-only
+> transport). The exact missing proof and the minimum follow-up
+> experiment are specified in the reconciliation report §11.
 
-| Fact | Evidence | Status |
-|---|---|---|
-| **Criterion 1: Real Device Participation** | Production session established between physical handset and host; handover transition verified over physical USB path. | **PASS** |
-| **Criterion 2: 5G Access Path** | Handset framework reports LTE-only (mDataNetworkType=14) in current environment. | **NOT-TESTABLE** |
-| **Physical Traffic Proof** | Independent `nc` listener on handset CPU verified receipt of datagram payload over RNDIS/USB tether. | **VERIFIED** |
-| **Session Continuity** | Logical `session_id` preserved across physical Wi-Fi -> USB transition; record digest byte-identical. | **PASS** |
-| **Process Recovery** | `MobileAgent` checkpointed and successfully recovered state in fresh OS process; journal continued. | **PASS** |
+### 9.1 What the v10 run genuinely established (preserved)
 
-### 9.2 Provenance
+- A physical Android handset (TECNO KL4, Android 14) participated as a
+  real ADCOS endpoint through the production classes: a genuine production
+  session, real platform snapshots from the on-device harness app consumed
+  by the production `MobileAgent` (AdbPlatformSource), a real manual
+  Wi-Fi disable, and a real host default-route transition
+  (`wlp3s0` -> USB tether `enxdaf7b654e4cf`).
+- The Android framework's own raw observations were captured (getprop
+  identity; `dumpsys telephony.registry` excerpts showing LTE-only, MTN GH,
+  no NR).
+- A real byte-exact UDP delivery to the handset over the post-transition
+  physical path was corroborated by an `nc` listener on the handset
+  (payload `V10-PROOF-173744`) — handset-OS-level corroboration of the
+  path, which is NOT production ADCOS transport proof.
+
+### 9.2 Provenance (as delivered; see the reconciliation report §6/§8 for the binding defects)
+
 - **Handset Serial:** 12922554B5023086
-- **Harness APK SHA-256:** a043eb2fa974efdb87dd538ca669a9bd306ff0034b210066d40d8ab36a37b75c
-- **Validation Record:** [physical-handover-v10.json](file:///home/tetevi/Downloads/ADCOS/evidence/work-040/android-final/physical-handover-v10.json)
-- **Android Manifest:** [android-manifest.json](file:///home/tetevi/Downloads/ADCOS/evidence/work-040/android-final/android-manifest.json)
+- **Harness APK SHA-256:** a043eb2fa974efdb87dd538ca669a9bd306ff0034b210066d40d8ab36a37b75c (recomputed; matches the committed APK)
+- **Validation Record:** [physical-handover-v10.json](evidence/work-040/android-final/physical-handover-v10.json)
+- **Android Manifest:** [android-manifest.json](evidence/work-040/android-final/android-manifest.json)
 - **Manifest SHA-256:** 3e60b9cbe1a4ecf484f7ca4d5033d41664b44260975d1b133b196f46a6db252f
+- **Declared execution SHA:** 5cfe7db976d207d6e895803b4aed6eb24eac870f — broken binding: the tool changed between 5cfe7db and ecfbcf0, and the committed evidence matches the ecfbcf0-state tool only.
 
-### 9.3 Conclusion
-The physical boundary is proven. The ADCOS production chain genuinely carries traffic across a physical network transition on real hardware. The evidence manifest establishes exact provenance for this final physical PASS candidate.
+### 9.3 Conclusion (reconciled)
+
+The physical boundary is genuinely crossed by a real handset
+participating through production ADCOS classes over a real physical
+network transition, with handset-level delivery corroboration. The
+production ADCOS transport chain (production send -> physical
+post-handover path -> production receive -> payload verified) remains
+UNPROVEN, and the v10 record's higher-layer claims (receiver journal,
+sender journal events, handover booleans, structured Android observations,
+record-digest continuity, recovery PASS) are fabricated tool literals that
+must be withdrawn. The follow-up experiment that would close criterion 1
+honestly is specified in
+`docs/WORK-040-v10-evidence-reconciliation.md` §11.
