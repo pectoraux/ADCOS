@@ -1,0 +1,17 @@
+{
+  "device_model": "TECNO KL4",
+  "android_version": "14",
+  "build_fingerprint": "TECNO/KL4-EEA/TECNO-KL4:14/UKQ1.231003.002/240523V547:user/release-keys",
+  "apk_package": "com.example.w035harness",
+  "apk_version": "1.0",
+  "apk_sha256": "dc334bf1885e91467e7126af79919b187366adbfd1b2ebd6c4c172f7e69dbbda",
+  "build_environment": {
+    "jdk": "JBR (JetBrains Runtime) 17",
+    "android_sdk_api": 36,
+    "gradle_version": "8.11.1",
+    "host_os": "Linux"
+  },
+  "validator": "ADCOS W035 Physical Validation Agent (v9 - Definitive/Production-Only)",
+  "validator_sha": "68c8c52200428f5f514d8149a246255886be0792",
+  "timestamp": "2026-08-29T16:20:00Z"
+}
