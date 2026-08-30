@@ -13,7 +13,7 @@ identity/session/routing/policy/federation authority exists here, and
 no simulated evidence is ever promoted to a physical claim.
 """
 
-from . import deployment, evidence, fabric, marshal, platform, topology, wire
+from . import deployment, evidence, fabric, marshal, physical, platform, topology, wire
 from .deployment import (
     NodeJournal,
     run_appliance_node,
@@ -73,6 +73,7 @@ __all__ = [
     "platform",
     "deployment",
     "evidence",
+    "physical",
     # deployment
     "run_pilot_deployment",
     "run_appliance_node",

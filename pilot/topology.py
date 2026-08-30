@@ -34,6 +34,7 @@ from agent import (
     AgentIdentitySpec,
     InterfaceSnapshot,
     LinkMetricSpec,
+    LinuxInterfaceSource,
     StaticInterfaceSource,
 )
 from appliance import ApplianceCommand, ApplianceCommandKind, UpstreamMode
@@ -54,9 +55,17 @@ __all__ = [
     "PILOT_NODES",
     "PILOT_PATHS",
     "PILOT_NODE_BY_LABEL",
+    "PHYSICAL_DEVICE_LABEL",
+    "PHYSICAL_EXTENSION_NODES",
+    "PHYSICAL_EXTENSION_PATHS",
+    "PARTICIPANT_NODE_BY_LABEL",
+    "participant_spec_for",
     "node_identity_for",
     "node_ids",
+    "participant_ids",
     "device_config",
+    "physical_device_topology_claims",
+    "physical_device_link_metrics",
     "appliance_access_plan",
     "appliance_commands",
     "appliance_hardware_source",
@@ -107,6 +116,9 @@ _PILOT_KEYS: Dict[str, bytes] = {
     "device-2": b"pilot-deploy-key-device-2-0002",
     "relay-1": b"pilot-deploy-key-relay-1-00003",
     "appliance-1": b"pilot-deploy-key-appliance-1-04",
+    # WORK-040 correction cycle (WORK-040-CORRECTION-001): the declared
+    # identity material of the PHYSICAL Android participant.
+    "device-android": b"pilot-deploy-key-device-android1",
 }
 
 _PILOT_SECRETS: Dict[str, bytes] = {
@@ -114,6 +126,7 @@ _PILOT_SECRETS: Dict[str, bytes] = {
     "device-2": b"pilot-deploy-secret-device-2-0002",
     "relay-1": b"pilot-deploy-secret-relay-1-00003",
     "appliance-1": b"pilot-deploy-secret-appliance-1-4",
+    "device-android": b"pilot-deploy-secret-device-andrd",
 }
 
 _PILOT_IDENTITY_CREATED_AT = "2026-07-01T00:00:00Z"
@@ -168,7 +181,7 @@ class PilotPathSpec:
     kind: str
 
     def __post_init__(self) -> None:
-        if self.kind not in ("direct", "relayed", "upstream"):
+        if self.kind not in ("direct", "relayed", "upstream", "physical"):
             raise PilotError(
                 PilotReasonCode.NODE_INVALID,
                 "unknown pilot path kind %r" % (self.kind,),
@@ -192,6 +205,41 @@ PILOT_NODES: Tuple[PilotNodeSpec, ...] = (
 PILOT_NODE_BY_LABEL: Dict[str, PilotNodeSpec] = {
     node.label: node for node in PILOT_NODES
 }
+
+#: The WORK-040 correction-cycle physical participant: an OPTIONAL
+#: fifth node whose participation runs ONLY in the physical pilot
+#: (never in the default four-process deployment rehearsal, whose
+#: journal/digest stay byte-identical to the delivered pilot).
+PHYSICAL_DEVICE_LABEL = "device-android"
+
+PHYSICAL_EXTENSION_NODES: Tuple[PilotNodeSpec, ...] = (
+    PilotNodeSpec(PHYSICAL_DEVICE_LABEL, PilotNodeRole.DEVICE),
+)
+
+#: The physical extension carriage path (real USB via adb reverse, or
+#: the handset's Wi-Fi to the host LAN -- recorded per run).
+PHYSICAL_EXTENSION_PATHS: Tuple[PilotPathSpec, ...] = (
+    PilotPathSpec(
+        "physical-access",
+        "device-android -> appliance-1 over a real physical carriage "
+        "(USB adb-reverse or device Wi-Fi to the host LAN; the handset "
+        "runs the production device node)",
+        (PHYSICAL_DEVICE_LABEL, "appliance-1"),
+        "physical",
+    ),
+)
+
+#: Every node that may legitimately announce to the appliance: the
+#: delivered core topology PLUS the declared physical participant.
+PARTICIPANT_NODE_BY_LABEL: Dict[str, PilotNodeSpec] = {
+    **PILOT_NODE_BY_LABEL,
+    PHYSICAL_DEVICE_LABEL: PHYSICAL_EXTENSION_NODES[0],
+}
+
+
+def participant_spec_for(label: str):
+    """The declared spec for any legitimate participant label."""
+    return PARTICIPANT_NODE_BY_LABEL.get(label)
 
 #: The frozen pilot carriage paths.
 PILOT_PATHS: Tuple[PilotPathSpec, ...] = (
@@ -234,13 +282,16 @@ def _profile_set() -> ProfileSet:
 
 
 def node_identity_for(label: str) -> NodeIdentity:
-    """The node's REAL WORK-004 identity (production constructor)."""
-    if label not in PILOT_NODE_BY_LABEL:
+    """The node's REAL WORK-004 identity (production constructor).
+
+    Accepts every declared participant: the delivered core topology
+    plus the correction-cycle physical participant."""
+    spec = PARTICIPANT_NODE_BY_LABEL.get(label)
+    if spec is None:
         raise PilotError(
             PilotReasonCode.NODE_INVALID,
             "unknown pilot node label %r" % (label,),
         )
-    spec = PILOT_NODE_BY_LABEL[label]
     profile = _profile_set().get(PILOT_PROFILE_ID)
     return NodeIdentity.create(
         profile,
@@ -250,9 +301,15 @@ def node_identity_for(label: str) -> NodeIdentity:
 
 
 def node_ids() -> Dict[str, str]:
-    """The deterministic node-id map for the whole topology."""
+    """The deterministic node-id map for the core topology."""
     return {node.label: node_identity_for(node.label).node_id.text
             for node in PILOT_NODES}
+
+
+def participant_ids() -> Dict[str, str]:
+    """The deterministic node-id map for every declared participant."""
+    return {label: node_identity_for(label).node_id.text
+            for label in PARTICIPANT_NODE_BY_LABEL}
 
 
 def _allow_session_rules(label: str) -> Tuple[PolicyRule, ...]:
@@ -383,6 +440,50 @@ def device_link_metrics(
     )
 
 
+def physical_device_topology_claims(
+    device_id: str, appliance_id: str
+) -> Tuple[TopologyClaim, ...]:
+    """The physical participant's topology view: ONLY what it
+    genuinely observes -- the direct physical adjacency to the
+    appliance and the appliance's reachability (no relay claims: the
+    physical pilot's carriage really is direct)."""
+    return (
+        TopologyClaim(
+            subject=make_link_subject(device_id, appliance_id),
+            reporter=device_id,
+            claim_type=ClaimType.LINK_STATE,
+            value="up",
+            source_class=SourceClass.DIRECT_OBSERVATION,
+            issued_at=PILOT_T0,
+            freshness_until=PILOT_FRESH,
+            sequence=1,
+        ),
+        TopologyClaim(
+            subject=appliance_id,
+            reporter=device_id,
+            claim_type=ClaimType.REACHABLE,
+            value="true",
+            source_class=SourceClass.DIRECT_OBSERVATION,
+            issued_at=PILOT_T0,
+            freshness_until=PILOT_FRESH,
+            sequence=1,
+        ),
+    )
+
+
+def physical_device_link_metrics(appliance_id: str) -> Tuple[LinkMetricSpec, ...]:
+    """The physical participant's declared link metric (USB/Wi-Fi
+    class latency toward the appliance access point)."""
+    return (
+        LinkMetricSpec(
+            peer_node_id=appliance_id,
+            latency_ms=15,
+            observed_at=PILOT_T0,
+            freshness_until=PILOT_FRESH,
+        ),
+    )
+
+
 def device_config(
     device_label: str,
     *,
@@ -390,9 +491,17 @@ def device_config(
     appliance_id: str,
 ) -> AgentConfig:
     """The device's REAL WORK-033 agent config (the battery recipe)."""
-    spec = PILOT_NODE_BY_LABEL[device_label]
+    spec = PARTICIPANT_NODE_BY_LABEL[device_label]
     identity = node_identity_for(device_label)
     device_id = identity.node_id.text
+    if device_label == PHYSICAL_DEVICE_LABEL:
+        claims = physical_device_topology_claims(device_id, appliance_id)
+        metrics = physical_device_link_metrics(appliance_id)
+    else:
+        claims = device_topology_claims(
+            device_label, device_id, relay_id, appliance_id
+        )
+        metrics = device_link_metrics(device_id, relay_id, appliance_id)
     return AgentConfig(
         agent_label=device_label,
         identity=AgentIdentitySpec(
@@ -401,21 +510,23 @@ def device_config(
             created_at=_PILOT_IDENTITY_CREATED_AT,
         ),
         policy_rules=_allow_session_rules(device_label),
-        topology_claims=device_topology_claims(
-            device_label, device_id, relay_id, appliance_id
-        ),
-        link_metrics=device_link_metrics(device_id, relay_id, appliance_id),
+        topology_claims=claims,
+        link_metrics=metrics,
         offer_expiry_seconds=DEVICE_OFFER_EXPIRY_SECONDS,
     )
 
 
-def device_interface_source(device_label: str) -> StaticInterfaceSource:
-    """The device's declared interface view (deployment DATA).
+def device_interface_source(device_label: str):
+    """The device's interface view.
 
-    Honest labeling: these are the deployment-declared virtual access
-    interfaces of the device roles -- the pilot never claims a radio.
+    Honest labeling: the delivered devices use their declared virtual
+    access interfaces (the pilot never claims a radio for them); the
+    PHYSICAL participant reads its REAL interfaces through the
+    production ``LinuxInterfaceSource`` -- on the handset that is the
+    genuine wlan0/rmnet observation of the device it runs on.
     """
-    del device_label
+    if device_label == PHYSICAL_DEVICE_LABEL:
+        return LinuxInterfaceSource()
     return StaticInterfaceSource(
         (
             InterfaceSnapshot(
@@ -507,7 +618,10 @@ def appliance_upstream_mode() -> UpstreamMode:
 def validate_topology() -> Dict[str, Any]:
     """Fail-closed structural validation of the pilot topology.
 
-    Returns the canonical topology document (report DATA).
+    Returns the canonical topology document (report DATA).  The core
+    shape is EXACTLY the delivered four-node deployment; the physical
+    extension (the optional handset participant) is validated
+    alongside but never participates in the core counts.
     """
     labels = [node.label for node in PILOT_NODES]
     if len(set(labels)) != len(labels):
@@ -544,6 +658,40 @@ def validate_topology() -> Dict[str, Any]:
                     PilotReasonCode.NODE_INVALID,
                     "path %r references unknown node %r" % (path.path_label, hop),
                 )
+    # -- the physical extension (correction cycle) --------------------
+    for node in PHYSICAL_EXTENSION_NODES:
+        if node.label in PILOT_NODE_BY_LABEL:
+            raise PilotError(
+                PilotReasonCode.NODE_INVALID,
+                "physical extension label %r collides with the core "
+                "topology" % (node.label,),
+            )
+        if node.role != PilotNodeRole.DEVICE:
+            raise PilotError(
+                PilotReasonCode.NODE_INVALID,
+                "the physical extension must be a device-class participant",
+            )
+    all_ids = participant_ids()
+    if len(set(all_ids.values())) != len(all_ids):
+        raise PilotError(
+            PilotReasonCode.NODE_INVALID,
+            "participant identities collided (physical extension keys "
+            "must be distinct from the core)",
+        )
+    for path in PHYSICAL_EXTENSION_PATHS:
+        if path.kind != "physical":
+            raise PilotError(
+                PilotReasonCode.NODE_INVALID,
+                "physical extension path %r must be kind 'physical'"
+                % (path.path_label,),
+            )
+        for hop in path.hops:
+            if hop not in all_ids:
+                raise PilotError(
+                    PilotReasonCode.NODE_INVALID,
+                    "physical path %r references unknown node %r"
+                    % (path.path_label, hop),
+                )
     return topology_document()
 
 
@@ -576,4 +724,32 @@ def topology_document() -> Dict[str, Any]:
             "material (the accepted batteries' standard); no production "
             "credential exists in this repository."
         ),
+        "physical_extension": {
+            "nodes": [
+                {
+                    "label": node.label,
+                    "role": node.role,
+                    "node_id": node_identity_for(node.label).node_id.text,
+                    "participation": "physical pilot only (never in the "
+                                     "default four-process rehearsal)",
+                }
+                for node in PHYSICAL_EXTENSION_NODES
+            ],
+            "paths": [
+                {
+                    "path_label": path.path_label,
+                    "carriage": path.carriage,
+                    "hops": list(path.hops),
+                    "kind": path.kind,
+                }
+                for path in PHYSICAL_EXTENSION_PATHS
+            ],
+            "disclosure": (
+                "The WORK-040 correction-cycle physical participant: an "
+                "actual Android handset running the production device "
+                "node over a real physical carriage. The extension is "
+                "declared so the appliance can legitimately accept its "
+                "announce; it never joins the default deployment run."
+            ),
+        },
     }

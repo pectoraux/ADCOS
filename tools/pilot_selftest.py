@@ -59,6 +59,7 @@ from pilot import (  # noqa: E402
     sha256_hex_of_bytes,
 )
 from pilot import deployment as pilot_deployment  # noqa: E402
+from pilot import physical as pilot_physical  # noqa: E402
 from pilot import fabric as pilot_fabric  # noqa: E402
 from pilot import platform as pilot_platform  # noqa: E402
 from pilot import topology as pilot_topology  # noqa: E402
@@ -93,7 +94,8 @@ _EXPECTED_TOOLS = [
 
 _EXPECTED_EVENT_KINDS = 36
 _EXPECTED_REASON_CODES = 14
-_EXPECTED_EXPORTS = 34
+# 34 at delivery; +1 for the correction cycle's `physical` submodule
+_EXPECTED_EXPORTS = 35
 
 _RUN_CACHE: dict = {}
 
@@ -1134,10 +1136,14 @@ _ALLOWED_IMPORT_ROOTS = {
     "routing", "resources", "topology", "multipath", "services",
     "adapters", "interop", "management", "transport",
     # stdlib the deployment plane legitimately uses (no randomness,
-    # no uuid, no secrets -- those are audited separately below)
+    # no uuid, no secrets -- those are audited separately below);
+    # re/shutil joined at the correction cycle for the honest adb/path
+    # detection in the physical harness (parsing framework reports,
+    # locating the adb binary -- never protocol semantics)
     "__future__", "argparse", "ast", "dataclasses", "hashlib", "json",
-    "os", "pathlib", "platform", "socket", "ssl", "struct",
-    "subprocess", "sys", "tempfile", "threading", "time", "typing",
+    "os", "pathlib", "platform", "re", "shutil", "socket", "ssl",
+    "struct", "subprocess", "sys", "tempfile", "threading", "time",
+    "typing",
 }
 _FORBIDDEN_SOURCE_TOKENS = (
     "class PilotStore", "class PilotEngine", "class PilotAuthority",
@@ -1245,7 +1251,7 @@ def case_16_frozen_api(results: List[Result]) -> None:
         "marshal": pilot_marshal, "wire": pilot_wire,
         "topology": pilot_topology, "fabric": pilot_fabric,
         "platform": pilot_platform, "evidence": pilot_evidence,
-        "deployment": pilot_deployment,
+        "deployment": pilot_deployment, "physical": pilot_physical,
     }
     for module_name, module in submodules.items():
         if not hasattr(module, "__all__"):
@@ -1254,7 +1260,7 @@ def case_16_frozen_api(results: List[Result]) -> None:
             ))
             return
     results.append(ok(
-        name, "%d package exports + frozen __all__ on all 7 submodules"
+        name, "%d package exports + frozen __all__ on all 8 submodules"
               % (len(expected),),
     ))
 
@@ -1349,6 +1355,7 @@ def case_18_pr_delta_shape(results: List[Result]) -> None:
     unexpected = [
         c for c in changed
         if not c.startswith("pilot/")
+        and not c.startswith("evidence/work-040/")
         and c not in allowed_exact
         and not c.startswith(".github/")
     ]
@@ -1369,7 +1376,7 @@ def case_18_pr_delta_shape(results: List[Result]) -> None:
     results.append(ok(
         name, "PR delta exactly: pilot/ + pilot battery + the seven "
               "successor-amended batteries + handoff/evidence docs + "
-              "the CI step",
+              "the evidence/work-040/ attempt artifacts + the CI step",
     ))
 
 
@@ -1420,6 +1427,411 @@ def case_20_py_compile(results: List[Result]) -> None:
 
 
 # ---------------------------------------------------------------------------
+# 21-25: the WORK-040 correction cycle (WORK-040-CORRECTION-001)
+# ---------------------------------------------------------------------------
+
+
+def case_21_physical_topology_extension(results: List[Result]) -> None:
+    name = "case_21_physical_topology_extension"
+    problems: List[str] = []
+    document = pilot_topology.validate_topology()
+    labels = [node["label"] for node in document["nodes"]]
+    if labels != ["device-1", "device-2", "relay-1", "appliance-1"]:
+        problems.append("the CORE topology changed: %s" % (labels,))
+    extension = document.get("physical_extension") or {}
+    ext_nodes = extension.get("nodes") or []
+    if len(ext_nodes) != 1 or ext_nodes[0]["label"] != "device-android":
+        problems.append("the physical extension is not declared exactly")
+    if ext_nodes and ext_nodes[0].get("role") != "device":
+        problems.append("the physical extension is not a device-class node")
+    ext_paths = extension.get("paths") or []
+    if len(ext_paths) != 1 or ext_paths[0].get("kind") != "physical":
+        problems.append("the physical-access path is not declared")
+    if ext_paths and list(ext_paths[0].get("hops") or []) != [
+        "device-android", "appliance-1"
+    ]:
+        problems.append("the physical path hops are wrong")
+    all_ids = pilot_topology.participant_ids()
+    if len(all_ids) != 5 or len(set(all_ids.values())) != 5:
+        problems.append("participant identities are not 5 distinct ids")
+    if "device-android" not in all_ids:
+        problems.append("the physical participant has no identity")
+    # the physical participant's config: the DIRECT physical view (no
+    # relay claims) and the REAL interface source (never the declared
+    # static view of the rehearsal devices)
+    config = pilot_topology.device_config(
+        "device-android",
+        relay_id=all_ids["relay-1"],
+        appliance_id=all_ids["appliance-1"],
+    )
+    subjects = [
+        str(claim.subject) for claim in config.topology_claims
+    ]
+    if any(all_ids["relay-1"] in s for s in subjects):
+        problems.append("the physical view claims relay links it does not use")
+    source = pilot_topology.device_interface_source("device-android")
+    from agent import LinuxInterfaceSource
+
+    if not isinstance(source, LinuxInterfaceSource):
+        problems.append(
+            "the physical participant does not read its REAL interfaces"
+        )
+    try:
+        pilot_topology.node_identity_for("device-android3")
+        problems.append("unknown participant label accepted")
+    except PilotError:
+        pass
+    if problems:
+        results.append(fail(name, "; ".join(problems)))
+        return
+    results.append(ok(
+        name, "physical extension declared (device-android, physical-access "
+              "path); core topology byte-stable; the participant reads its "
+              "REAL interfaces through the production source",
+    ))
+
+
+def case_22_physical_environment_honesty(results: List[Result]) -> None:
+    name = "case_22_physical_environment_honesty"
+    problems: List[str] = []
+    environment = pilot_physical.detect_physical_environment()
+    if environment.get("kind") != "physical-environment-detection":
+        problems.append("wrong detection kind")
+    adb = environment.get("adb_binary") or {}
+    if not isinstance(adb.get("present"), bool) or not adb.get("detail"):
+        problems.append("the adb probe is not an honest record")
+    devices = environment.get("adb_devices") or {}
+    serials = devices.get("serials")
+    if not isinstance(serials, list):
+        problems.append("the device serials are not a list")
+    attached = environment.get("device_attached")
+    if attached != bool(serials):
+        problems.append(
+            "device_attached %r does not match the observed serials"
+            % (attached,)
+        )
+    if not environment.get("conclusion"):
+        problems.append("no honest conclusion recorded")
+    # the attempt fail-closes when (and only when) no device is attached
+    if not attached:
+        attempt = pilot_physical.run_physical_attempt()
+        if attempt.get("kind") != "physical-environment-detection":
+            problems.append("the attempt record has the wrong kind")
+        cls = attempt.get("classification") or {}
+        if cls.get("criterion_1_real_devices") != CriterionStatus.NOT_TESTABLE:
+            problems.append(
+                "criterion 1 is not honestly NOT-TESTABLE without a device"
+            )
+        if cls.get("criterion_2_5g") != CriterionStatus.NOT_TESTABLE:
+            problems.append(
+                "criterion 2 is not honestly NOT-TESTABLE without a device"
+            )
+        statement = str(cls.get("statement", ""))
+        if "cannot be demonstrated here" not in statement:
+            problems.append("the honest statement is missing")
+    else:
+        # a device IS attached: the attempt must run the real pilot or
+        # record precisely why it could not (never fabricate)
+        attempt = pilot_physical.run_physical_attempt()
+        if attempt.get("kind") not in (
+            "physical-environment-detection",
+            "physical-participation-evidence",
+        ):
+            problems.append("unexpected attempt record kind")
+    if problems:
+        results.append(fail(name, "; ".join(problems)))
+        return
+    attached_note = (
+        "a device is attached; the attempt exercised the real path"
+        if attached
+        else "no device reachable here; the attempt fail-closed honestly"
+    )
+    results.append(ok(
+        name, "environment detection is honest and exhaustive; %s"
+              % (attached_note,),
+    ))
+
+
+def case_23_physical_evidence_template(results: List[Result]) -> None:
+    name = "case_23_physical_evidence_template"
+    problems: List[str] = []
+    required = tuple(
+        field for field, _why in pilot_physical.PHYSICAL_EVIDENCE_REQUIRED
+    )
+    expected_fields = (
+        "device_identity.model",
+        "device_identity.brand",
+        "device_identity.serial",
+        "device_identity.android_release",
+        "device_identity.observation_source",
+        "access_technology.technology",
+        "access_technology.observation_source",
+        "host.interface_identity",
+        "host.pre_transition_route",
+        "adcos.access_classification",
+        "adcos.device_node_id",
+        "adcos.session_id",
+        "adcos.bind_event",
+        "adcos.sender_result",
+        "adcos.receiver_result",
+        "verification.validator_sha",
+        "verification.artifact_hashes",
+    )
+    if required != expected_fields:
+        problems.append("the required template drifted from the frozen list")
+    five_g_fields = tuple(
+        field for field, _why in pilot_physical.PHYSICAL_5G_REQUIRED
+    )
+    if "access_technology.is_5g" not in five_g_fields:
+        problems.append("the 5G template omits the NR-only rule field")
+    if "host.post_transition_route" not in five_g_fields:
+        problems.append("the 5G template omits the route transition")
+    # a physical document missing ANY required field fails validation
+    base: dict = {
+        "kind": "physical-participation-evidence",
+        "schema_version": pilot_physical.PHYSICAL_EVIDENCE_SCHEMA_VERSION,
+        "is_physical": True,
+        "device_identity": {
+            "model": "m", "brand": "b", "serial": "s",
+            "android_release": "15", "observation_source": "adb getprop",
+        },
+        "access_technology": {
+            "technology": "nr", "is_5g": True,
+            "observation_source": "dumpsys telephony.registry",
+        },
+        "host": {
+            "interface_identity": "usb0",
+            "pre_transition_route": "default via 1.2.3.4 dev eth0",
+            "post_transition_route": "default via 5.6.7.8 dev usb0",
+        },
+        "adcos": {
+            "access_classification": "direct access point",
+            "device_node_id": pilot_topology.node_identity_for(
+                "device-android"
+            ).node_id.text,
+            "session_id": "sha256:ab",
+            "bind_event": {"session_id": "sha256:ab"},
+            "sender_result": {
+                "label": "device-android",
+                "observations": {"session": {"session_id": "sha256:ab"}},
+            },
+            "receiver_result": {
+                "label": "appliance-1",
+                "events": [{"kind": "pilot.session-accepted",
+                            "payload": {"session_id": "sha256:ab"}}],
+            },
+        },
+        "traffic_verification": {
+            "method": "interface counters", "observation": "usb0 +1024 bytes",
+        },
+        "verification": {
+            "validator_sha": pilot_physical.validator_sha(),
+            "artifact_hashes": [["a", "sha256:" + "0" * 64]],
+        },
+        "classification": {},
+    }
+    ok_base, base_problems = pilot_physical.validate_physical_evidence(base)
+    structural = [
+        p for p in base_problems
+        if "missing required field" not in p
+        and "session id" not in p
+        and "sender result does not carry" not in p
+    ]
+    if structural:
+        problems.append("the template base has structural problems: %s"
+                        % (structural[:2],))
+    # the session id above is intentionally not a full digest: the
+    # corroboration check must fire (a well-formed id is required)
+    well_formed = json.loads(json.dumps(base))
+    well_formed["adcos"]["session_id"] = "sha256:" + "c" * 64
+    well_formed["adcos"]["bind_event"] = {
+        "session_id": "sha256:" + "c" * 64
+    }
+    well_formed["adcos"]["sender_result"]["observations"]["session"] = {
+        "session_id": "sha256:" + "c" * 64
+    }
+    well_formed["adcos"]["receiver_result"]["events"] = [
+        {"kind": "pilot.session-accepted",
+         "payload": {"session_id": "sha256:" + "c" * 64}}
+    ]
+    ok_wf, _problems_wf = pilot_physical.validate_physical_evidence(
+        well_formed
+    )
+    if not ok_wf:
+        problems.append("a complete well-formed document fails validation")
+    for field in expected_fields:
+        mutated = json.loads(json.dumps(well_formed))
+        node = mutated
+        parts = field.split(".")
+        for part in parts[:-1]:
+            node = node[part]
+        node[parts[-1]] = None
+        ok_mutated, _ = pilot_physical.validate_physical_evidence(mutated)
+        if ok_mutated:
+            problems.append("missing %r still validates" % (field,))
+            break
+    if problems:
+        results.append(fail(name, "; ".join(problems)))
+        return
+    results.append(ok(
+        name, "the frozen template covers every required field (%d + %d "
+              "5G-only); removing ANY field fails validation"
+              % (len(required), len(five_g_fields)),
+    ))
+
+
+def case_24_physical_anti_promotion(results: List[Result]) -> None:
+    name = "case_24_physical_anti_promotion"
+    problems: List[str] = []
+    rehearsal = pilot_physical.run_physical_rehearsal()
+    if rehearsal.get("is_physical") is not False:
+        problems.append("the rehearsal is not honestly labeled")
+    cls = rehearsal.get("classification") or {}
+    if cls.get("criterion_1_real_devices") not in (
+        CriterionStatus.PARTIAL, CriterionStatus.NOT_TESTABLE
+    ):
+        problems.append("the rehearsal classified above its class")
+    if cls.get("criterion_2_5g") != CriterionStatus.NOT_TESTABLE:
+        problems.append("the rehearsal classified 5G above NOT-TESTABLE")
+
+    def _rejected(mutated: dict, why: str) -> None:
+        ok_mutated, _ = pilot_physical.validate_physical_evidence(mutated)
+        if ok_mutated:
+            problems.append(why)
+
+    # (a) a rehearsal relabeled as a PASS
+    promoted = json.loads(json.dumps(rehearsal))
+    promoted["classification"]["criterion_1_real_devices"] = (
+        CriterionStatus.PASS
+    )
+    ok_a, problems_a = pilot_physical.validate_physical_evidence(promoted)
+    if ok_a or not any("rehearsal" in p for p in problems_a):
+        problems.append("a rehearsal PASS is not rejected")
+
+    # (b) cellular promoted to 5G (LTE with is_5g=true)
+    lte = json.loads(json.dumps(rehearsal))
+    lte["is_physical"] = True
+    lte["access_technology"] = {
+        "technology": "lte", "is_5g": True,
+        "observation_source": "dumpsys telephony.registry",
+    }
+    _rejected(lte, "LTE relabeled is_5g=true is not rejected")
+
+    # (c) 5G PASS without the route transition / traffic verification
+    nr = json.loads(json.dumps(rehearsal))
+    nr["is_physical"] = True
+    nr["access_technology"] = {
+        "technology": "nr", "is_5g": True,
+        "observation_source": "dumpsys telephony.registry",
+    }
+    nr["classification"]["criterion_2_5g"] = CriterionStatus.PASS
+    ok_c, problems_c = pilot_physical.validate_physical_evidence(nr)
+    if ok_c or not any(
+        "traffic verification" in p or "post-transition route" in p
+        for p in problems_c
+    ):
+        problems.append("a 5G PASS without route/traffic evidence passes")
+
+    # (d) the wrong participant identity
+    forged = json.loads(json.dumps(rehearsal))
+    forged["is_physical"] = True
+    forged["adcos"]["device_node_id"] = "adcos:node:forged"
+    _rejected(forged, "a forged participant node id is not rejected")
+
+    # (e) no independent receiver corroboration
+    one_sided = json.loads(json.dumps(rehearsal))
+    one_sided["is_physical"] = True
+    one_sided["adcos"]["receiver_result"]["events"] = []
+    _rejected(one_sided, "missing receiver corroboration is not rejected")
+
+    # (f) missing validator sha
+    no_sha = json.loads(json.dumps(rehearsal))
+    no_sha["is_physical"] = True
+    no_sha["verification"]["validator_sha"] = "not-a-digest"
+    _rejected(no_sha, "a malformed validator sha is not rejected")
+
+    # (g) classification honesty: the derived classifiers never exceed
+    # the facts (a rehearsal can never classify criterion 1 as PASS)
+    if pilot_physical.classify_physical_participation(rehearsal) == (
+        CriterionStatus.PASS
+    ):
+        problems.append("the derived classifier promotes a rehearsal")
+    if pilot_physical.classify_five_g_path(rehearsal) != (
+        CriterionStatus.NOT_TESTABLE
+    ):
+        problems.append("the derived classifier promotes 5G from rehearsal")
+    if problems:
+        results.append(fail(name, "; ".join(problems)))
+        return
+    results.append(ok(
+        name, "anti-promotion enforced: rehearsal PASS, LTE->5G, 5G without "
+              "route/traffic evidence, forged identity, one-sided evidence, "
+              "and malformed digests all fail closed",
+    ))
+
+
+def case_25_physical_harness_rehearsal(results: List[Result]) -> None:
+    name = "case_25_physical_harness_rehearsal"
+    problems: List[str] = []
+    document = pilot_physical.run_physical_rehearsal()
+    if document.get("kind") != "physical-participation-evidence":
+        problems.append("the rehearsal produced no evidence document")
+        results.append(fail(name, "; ".join(problems)))
+        return
+    sender = document.get("adcos", {}).get("sender_result") or {}
+    checks = sender.get("checks") or []
+    by_label = {check.get("label"): check.get("ok") for check in checks}
+    if not by_label.get("device-android-physical-session-established"):
+        problems.append("the physical session was not established")
+    if not by_label.get("device-android-service-executed"):
+        problems.append("the local service was not executed")
+    if not by_label.get("device-android-real-interfaces-observed"):
+        problems.append("the real interfaces were not observed")
+    session = (sender.get("observations") or {}).get("session") or {}
+    if session.get("state") != "ESTABLISHED":
+        problems.append("the session is not ESTABLISHED")
+    receiver = document.get("adcos", {}).get("receiver_result") or {}
+    events = receiver.get("events") or []
+    announced = any(
+        event.get("kind") == "pilot.discovery-received"
+        and (event.get("payload") or {}).get("peer_label") == "device-android"
+        for event in events
+    )
+    if not announced:
+        problems.append("the appliance did not accept the participant announce")
+    node_id_ok = document.get("adcos", {}).get("device_node_id") == (
+        pilot_topology.node_identity_for("device-android").node_id.text
+    )
+    if not node_id_ok:
+        problems.append("the participant identity does not match the declared")
+    cls = document.get("classification") or {}
+    if cls.get("validation_ok") is not True:
+        problems.append(
+            "the rehearsal evidence does not validate: %s"
+            % (cls.get("validation_problems"),)
+        )
+    if cls.get("criterion_1_real_devices") != CriterionStatus.PARTIAL:
+        problems.append("the rehearsal is not honestly PARTIAL")
+    if cls.get("criterion_2_5g") != CriterionStatus.NOT_TESTABLE:
+        problems.append("the rehearsal 5G status is not NOT-TESTABLE")
+    interfaces = (sender.get("observations") or {}).get(
+        "interfaces_observed"
+    ) or []
+    if not interfaces:
+        problems.append("no real interfaces recorded")
+    if problems:
+        results.append(fail(name, "; ".join(problems)))
+        return
+    results.append(ok(
+        name, "the full participation chain works end-to-end (announce "
+              "accepted, session ESTABLISHED over the direct carriage, "
+              "service executed, %d real interfaces observed) and is "
+              "honestly classified PARTIAL/NOT-TESTABLE (is_physical=false)"
+              % (len(interfaces),),
+    ))
+
+
+# ---------------------------------------------------------------------------
 # main
 # ---------------------------------------------------------------------------
 
@@ -1445,6 +1857,11 @@ CASES = [
     case_18_pr_delta_shape,
     case_19_ci_wiring_all_tools,
     case_20_py_compile,
+    case_21_physical_topology_extension,
+    case_22_physical_environment_honesty,
+    case_23_physical_evidence_template,
+    case_24_physical_anti_promotion,
+    case_25_physical_harness_rehearsal,
 ]
 
 

@@ -83,9 +83,9 @@ from .fabric import PILOT_TENANT_DOMAIN, pilot_echo_service_ref
 from .topology import (
     DEVICE_CLOCK_STEP_SECONDS,
     PILOT_FRESH,
-    PILOT_NODE_BY_LABEL,
     PILOT_PROFILE_ID,
     PILOT_T0,
+    PARTICIPANT_NODE_BY_LABEL,
     PilotNodeSpec,
     appliance_access_plan,
     appliance_commands,
@@ -357,11 +357,21 @@ def run_appliance_node(
     *,
     result_path: str,
     rehearsal: bool,
+    bind_host: str = "127.0.0.1",
+    failure_plan: bool = True,
 ) -> int:
     """The appliance process: boot, provision, open the two access
     points, serve every carriage connection, execute the declared
-    failure plan after the primary-path exchange budget, then shut
-    down on stdin EOF and write the result document."""
+    failure plan after the primary-path exchange budget (unless the
+    scenario disarms it), then shut down on stdin EOF and write the
+    result document.
+
+    ``bind_host``: which host address the access points bind (the
+    default loopback keeps the delivered rehearsal byte-identical;
+    the physical pilot may bind an externally reachable address).
+    ``failure_plan``: the declared direct-path failure plan is
+    device-1's failover demonstration; the physical participation
+    scenario disarms it (its checks say so honestly)."""
     from .platform import probe_egress
 
     ids = node_ids()
@@ -412,8 +422,8 @@ def run_appliance_node(
     )
 
     # -- the two real access points ------------------------------------
-    direct_listener = open_listener("127.0.0.1", 0)
-    relay_listener = open_listener("127.0.0.1", 0)
+    direct_listener = open_listener(bind_host, 0)
+    relay_listener = open_listener(bind_host, 0)
     direct_port = socket_endpoint(direct_listener)[1]
     relay_port = socket_endpoint(relay_listener)[1]
 
@@ -432,7 +442,8 @@ def run_appliance_node(
 
     direct_thread = threading.Thread(
         target=_serve_listener,
-        args=(direct_listener, state, "direct", DEVICE_DATAGRAM_COUNT_PRIMARY),
+        args=(direct_listener, state, "direct",
+              DEVICE_DATAGRAM_COUNT_PRIMARY if failure_plan else None),
         daemon=True,
     )
     relay_thread = threading.Thread(
@@ -503,11 +514,17 @@ def run_appliance_node(
                 ),
             ),
             PilotCheck(
-                "appliance-failure-plan-executed",
-                state["failed_over"],
-                "the declared direct-path failure plan executed (listener "
-                "closed + direct connections hard-reset after %d exchanges)"
-                % (DEVICE_DATAGRAM_COUNT_PRIMARY,),
+                "appliance-failure-plan-executed"
+                if failure_plan
+                else "appliance-failure-plan-disarmed",
+                True if not failure_plan else state["failed_over"],
+                "failure plan disarmed for this scenario (the physical "
+                "participation demonstration; the failover demonstration "
+                "is the main deployment's device-1 scenario)"
+                if not failure_plan
+                else "the declared direct-path failure plan executed "
+                     "(listener closed + direct connections hard-reset "
+                     "after %d exchanges)" % (DEVICE_DATAGRAM_COUNT_PRIMARY,),
             ),
             PilotCheck(
                 "appliance-no-handler-errors",
@@ -674,7 +691,7 @@ def _serve_connection(
             if not already:
                 state["announce_labels"].add(announce_label)
         if not already:
-            peer_spec = PILOT_NODE_BY_LABEL.get(announce_label)
+            peer_spec = PARTICIPANT_NODE_BY_LABEL.get(announce_label)
             if peer_spec is None or peer_spec.role != "device":
                 raise PilotError(
                     PilotReasonCode.NODE_INVALID,
@@ -1065,15 +1082,17 @@ def run_device_node(
     relay_host: str,
     relay_port: int,
     relayed_only: bool,
+    physical: bool = False,
 ) -> int:
     ids = node_ids()
     appliance_id = ids["appliance-1"]
     relay_id = ids["relay-1"]
-    spec = PILOT_NODE_BY_LABEL[label]
+    spec = PARTICIPANT_NODE_BY_LABEL[label]
+    interface_source = device_interface_source(label)
     runtime = AgentRuntime(
         device_config(label, relay_id=relay_id, appliance_id=appliance_id),
         clock=StepClock(PILOT_T0, DEVICE_CLOCK_STEP_SECONDS),
-        interface_source=device_interface_source(label),
+        interface_source=interface_source,
     )
     runtime.boot(spec.secret)
     runtime.expose_interfaces()
@@ -1088,7 +1107,13 @@ def run_device_node(
     observations: Dict[str, Any] = {}
 
     # -- carriage + the genuine identity exchange ----------------------
-    if relayed_only:
+    if physical:
+        # the physical participant: a REAL device (or, in rehearsal, a
+        # host process honestly labeled as such) connecting DIRECTLY
+        # to the appliance's access point over its real carriage
+        primary_sock = connect_to(direct_host, direct_port)
+        primary_carriage = "physical-access"
+    elif relayed_only:
         primary_sock = connect_to(relay_host, relay_port)
         primary_carriage = "local-access"
     else:
@@ -1105,7 +1130,7 @@ def run_device_node(
     runtime.register_peer(
         node_identity_for(peer_label),
         marshal.credential_record_from_mapping(credential_mapping),
-        PILOT_NODE_BY_LABEL[peer_label].secret,
+        PARTICIPANT_NODE_BY_LABEL[peer_label].secret,
     )
     if peer_node_id != appliance_id:
         raise PilotError(
@@ -1172,7 +1197,84 @@ def run_device_node(
             )
         return _session_record_digest(session)
 
-    if relayed_only:
+    if physical:
+        # the physical participant (device-android): the participation
+        # demonstration over its real carriage -- protected datagram
+        # exchanges + a genuine local service invocation, plus the
+        # REAL interface observation of the machine it runs on (on a
+        # handset: its genuine wlan0/rmnet view through the
+        # production LinuxInterfaceSource).
+        for payload_bytes in PILOT_ECHO_PAYLOADS_LOCAL:
+            _echo_exchange(
+                runtime, journal, primary_sock, session_id,
+                payload_bytes, "physical-access",
+            )
+        service_outcome = _invoke_local_service(
+            runtime,
+            journal,
+            primary_sock,
+            session_id,
+            service_ref=pilot_echo_service_ref(),
+            tenant_domain=PILOT_TENANT_DOMAIN,
+            payload=PILOT_SERVICE_PAYLOAD,
+        )
+        session = sessions.get(session_id)
+        interface_names = [
+            snapshot.name for snapshot in interface_source.discover()
+        ]
+        checks.append(
+            PilotCheck(
+                "device-android-physical-session-established",
+                session is not None and session.state == "ESTABLISHED",
+                "the physical participant's session is %s over the "
+                "physical-access carriage after %d datagram exchanges"
+                % (
+                    session.state if session else "?",
+                    DEVICE_DATAGRAM_COUNT_LOCAL,
+                ),
+            )
+        )
+        checks.append(
+            PilotCheck(
+                "device-android-service-executed",
+                service_outcome.get("verdict") == "executed"
+                and service_outcome.get("response_matches") is True,
+                "local service invocation verdict=%s response_matches=%s"
+                % (
+                    service_outcome.get("verdict", ""),
+                    service_outcome.get("response_matches", False),
+                ),
+            )
+        )
+        checks.append(
+            PilotCheck(
+                "device-android-real-interfaces-observed",
+                len(interface_names) > 0,
+                "the participant's runtime observed its REAL interfaces "
+                "through the production source: %s"
+                % (", ".join(interface_names) or "none",),
+            )
+        )
+        observations["session"] = {
+            "session_id": session_id,
+            "state": session.state if session else "?",
+            "record_digest": _session_digest(),
+        }
+        observations["service"] = _public_record(service_outcome)
+        observations["interfaces_observed"] = interface_names
+        observations["carriage"] = {
+            "kind": "physical-access",
+            "note": (
+                "direct connection to the appliance access point; on a "
+                "handset this is the real USB (adb reverse) or Wi-Fi "
+                "carriage, on a rehearsal host the loopback"
+            ),
+        }
+        journal.append(
+            PilotEventKind.DEMONSTRATION_COMPLETED,
+            {"device": label, "demonstration": "physical-participation"},
+        )
+    elif relayed_only:
         # device-2: the local-access (relayed) demonstrations
         for payload_bytes in PILOT_ECHO_PAYLOADS_LOCAL:
             _echo_exchange(

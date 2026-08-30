@@ -5,6 +5,16 @@ Each pilot node runs as a REAL OS process (``python3 -m pilot.node
 declared role over real TCP carriages, and writes its honest result
 document on exit.  The conductor (``pilot.deployment``) spawns and
 coordinates these processes.
+
+The correction cycle (WORK-040-CORRECTION-001) adds:
+
+- ``--physical`` (device role): the participation demonstration of
+  the declared physical participant ``device-android`` -- the same
+  production chain as every pilot device, launched ON the actual
+  handset (or, honestly labeled, as a host-side rehearsal);
+- ``--bind-host`` / ``--no-failure-plan`` (appliance role): let the
+  physical pilot expose an externally reachable access point and
+  disarm device-1's failover plan for the participation scenario.
 """
 
 from __future__ import annotations
@@ -31,6 +41,16 @@ def main(argv: List[str]) -> int:
     parser.add_argument("--relayed-only", action="store_true")
     parser.add_argument("--rehearsal", action="store_true")
     parser.add_argument("--live", action="store_true")
+    parser.add_argument("--physical", action="store_true",
+                        help="the physical-participation demonstration "
+                             "(device-android)")
+    parser.add_argument("--bind-host", default="127.0.0.1",
+                        help="the address the appliance access points "
+                             "bind (default: loopback, the delivered "
+                             "rehearsal behavior)")
+    parser.add_argument("--no-failure-plan", action="store_true",
+                        help="disarm the declared direct-path failure "
+                             "plan (physical participation scenario)")
     args = parser.parse_args(argv)
 
     from .deployment import (
@@ -43,6 +63,8 @@ def main(argv: List[str]) -> int:
         return run_appliance_node(
             result_path=args.result_file,
             rehearsal=not args.live,
+            bind_host=args.bind_host,
+            failure_plan=not args.no_failure_plan,
         )
     if args.role == "relay":
         return run_relay_node(
@@ -60,6 +82,7 @@ def main(argv: List[str]) -> int:
         relay_host=args.relay_host,
         relay_port=args.relay_port,
         relayed_only=args.relayed_only,
+        physical=args.physical,
     )
     # unreachable
 
