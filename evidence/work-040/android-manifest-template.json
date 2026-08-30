@@ -1,0 +1,37 @@
+{
+ "device_identity": {
+  "android_release": "EXAMPLE-RELEASE-REPLACE (getprop ro.build.version.release)",
+  "brand": "EXAMPLE-BRAND-REPLACE (getprop ro.product.brand)",
+  "model": "EXAMPLE-MODEL-REPLACE (getprop ro.product.model)",
+  "observation_source": "adb shell getprop (authoritative device report)",
+  "serial": "EXAMPLE-SERIAL-REPLACE"
+ },
+ "kind": "android-agent-observation-manifest",
+ "network_technology": {
+  "is_5g": true,
+  "nr_state": "connected",
+  "observation_source": "adb shell dumpsys telephony.registry (the Android framework's own report)",
+  "post": "nr",
+  "pre": "none"
+ },
+ "produced_by": "EXAMPLE-REPLACE: the Android agent's identity string (e.g. the Android Studio / Gemini agent build + device label)",
+ "raw_observations": {
+  "dumpsys_connectivity_excerpt": "EXAMPLE-REPLACE: the raw tethering state lines",
+  "dumpsys_telephony_registry_excerpt": "EXAMPLE-REPLACE: the raw mDataNetworkType/mNrState lines",
+  "getprop_ro_build_version_release": "EXAMPLE-REPLACE: the raw getprop output line",
+  "getprop_ro_product_brand": "EXAMPLE-REPLACE: the raw getprop output line",
+  "getprop_ro_product_model": "EXAMPLE-REPLACE: the raw getprop output line"
+ },
+ "schema_version": 1,
+ "template": true,
+ "trigger": {
+  "description": "EXAMPLE-REPLACE: Wi-Fi disabled on the handset at the marked runbook step (the settings toggle or 'svc wifi disable'), observed and timestamped by the agent",
+  "observation_source": "the Android framework's connectivity reports + the agent's own trigger record (never ADCOS re-derivation)"
+ },
+ "usage": "TEMPLATE -- copy this file, replace EVERY EXAMPLE value with the real framework observation, then REMOVE the 'template' and 'usage' fields. Every observation_source must be the Android framework's own report (adb shell getprop / dumpsys), never an ADCOS re-derivation. The optional apk block {name, sha256} is deliberately absent: the current design is pure-stdlib Python on the handset with NO APK; record its absence honestly rather than fabricating provenance.",
+ "usb_tether": {
+  "backed_by_cellular": true,
+  "enabled": true,
+  "observation_source": "adb shell dumpsys connectivity (the framework's own tethering state)"
+ }
+}

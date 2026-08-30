@@ -71,10 +71,15 @@
    "present": true
   }
  },
- "execution_sha": "84a2f6b1a25232b4063eba4716d0f4a9c1dfceb5",
+ "execution_sha": "916f05594486b53dc0cb4627a4a3a5d605097815",
  "kind": "work-040-physical-attempt",
  "rehearsal": {
   "access_technology": {
+   "is_5g": false,
+   "observation_source": "none (rehearsal: no handset present)",
+   "technology": ""
+  },
+  "access_technology_post": {
    "is_5g": false,
    "observation_source": "none (rehearsal: no handset present)",
    "technology": ""
@@ -443,7 +448,8 @@
    "device_identity.observation_source",
    "access_technology.technology",
    "access_technology.observation_source",
-   "host.interface_identity"
+   "host.interface_identity",
+   "access_technology_post"
   ],
   "host": {
    "interface_identity": "",
@@ -468,14 +474,14 @@
     ],
     [
      "appliance-result",
-     "sha256:14bd7d62a8c60a96cc4881192bfca7d721856f1fbf107e0001cbb5257f0cccb7"
+     "sha256:0853b8dd0aeb0d5ed275aa45a43e900ad201f56d95445e46c8cf4ce6530d07bc"
     ],
     [
      "environment-detection",
      "sha256:4b7ebbb8bc453d332751c4db740380a12fefacdc2eb326633e9b6a0484a7e779"
     ]
    ],
-   "validator_sha": "sha256:778ca45d260d3738141329e749606410914fde9a58e74afa43fe8993917951ca"
+   "validator_sha": "sha256:5cc1728582772212b7a26be788114c176618e7550f5822dcc2c2899f3a9bea63"
   }
  },
  "schema_version": 1,

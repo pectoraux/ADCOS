@@ -314,3 +314,203 @@ statement; the validator enforces the template in code).
    (the handset run; real 5G where obtainable). The frozen acceptance
    criteria are NOT redefined: PASS requires the physical evidence, and
    this correction claims none of it.
+
+---
+
+## 7. The correction cycle's second round: the physical HANDOVER
+experiment + the Android-agent artifact interface
+
+**Execution SHA for every measurement in this section:**
+`916f05594486b53dc0cb4627a4a3a5d605097815` (the correction-2
+implementation commit on `work-040-pilot-deployment`, base `1760fc6`
+which carries WORK-040-CORRECTION-001 reconciled to `main@3810da99`
+by LEDGER-RECON-002; ARCH-08 verified: the implementation delta is
+covered by the active authorization inherited from the base).
+
+**Default deployment at this SHA:** 28/28 battery cases (25 + the new
+26–28); 109 journal events; 10/10 deployment checks; run digest
+`sha256:bd62053036a2a4ba917b9cfa459a8e48c7a38a90c6747fd4b3d91fa28dc494d0`.
+**Regression proof:** the default four-process deployment's run digest
+is byte-identical WITH and WITHOUT the correction-2 changes at the same
+baseline HEAD (`git stash` measurement, both
+`sha256:5b648b26dd9a23f09ef16b6b317319cb1056903a63c65162c773272b10ba74a3`;
+the committed-HEAD digest differs only because the run digest embeds
+the execution SHA through the execution records' `commit_sha`).
+
+### 7.1 What correction 2 adds
+
+The Architect's handover target chain — Wi-Fi active → ADCOS session
+established → USB tether available → Wi-Fi physically disabled on the
+handset → Android reports cellular/5G → host Wi-Fi route disappears →
+USB tether becomes the active path → ADCOS detects the new path →
+production bind/rebind → SAME logical session → real datagram →
+independent receiver verifies — is now fully implemented and
+software-verified end-to-end:
+
+- **`--handover` device mode** (`pilot/deployment.py`): the
+  device-android participant drives the full production chain over the
+  PRIMARY (Wi-Fi) physical carriage (announce → session chain → bind →
+  2 protected exchanges), then a bounded transition-attempt phase
+  attempts the transition datagram until the primary REALLY dies (in
+  the rehearsal the appliance's declared failure plan closes the direct
+  listener and hard-resets the connections; in the physical run the
+  operator disabling Wi-Fi on the handset does — a hard socket failure
+  is an observed death, a response timeout is only a SUSPECTED death
+  confirmed by the honest `probe_tcp_path` re-probe), then mirrors
+  device-1's delivered failover exactly — `pilot.link-loss-observed` →
+  `pilot.probe-reported` → the REAL WORK-018
+  `multipath.change_path_status(..., FAILED, "pilot.primary-path-loss")`
+  → `pilot.path-status-changed` + `pilot.session-reconnecting` → the
+  connect + re-announce on the secondary (USB-tether relayed) carriage
+  → `pilot.session-rebound {session_id, carriage:
+  "physical-access-secondary"}` → the RE-SEND of the already-protected
+  transition datagram on the SAME logical session → one more exchange →
+  the genuine local service invocation ON THE SECONDARY → the interface
+  re-observation → the session-record-digest continuity check →
+  `pilot.failover-completed`. Only existing journal kinds are used.
+- **The second topology path** (`pilot/topology.py`):
+  `physical-access-secondary` (device-android → relay-1 → appliance-1,
+  kind `physical`) plus the `handover=True` device-config view that
+  declares the relay leg the scenario genuinely uses; the core
+  four-node topology and the original `physical-access` path stay
+  byte-stable; the plain `device_config("device-android")` still claims
+  NO relay links (case_21's honesty assertion).
+- **The frozen handover evidence template + validator + classifiers**
+  (`pilot/physical.py`): the 27-field `HANDOVER_EVIDENCE_REQUIRED`, the
+  PURE `validate_handover_evidence` (completeness when physical /
+  honest absences when a rehearsal; the declared-identity match; the
+  session id cross-corroborated in the sender observations AND the
+  receiver journal WITH datagrams corroborated on BOTH access points
+  (direct AND relay); the rebind event on the SAME session id; session
+  continuity MUST be proven; a well-formed post-rebind payload digest;
+  the NR-only rule on the post-transition technology; anti-promotion
+  classification consistency), and the derived never-promoting
+  `classify_handover_participation` / `classify_handover_five_g` (a
+  rehearsal can structurally never classify above PARTIAL /
+  NOT-TESTABLE).
+- **The Android-agent observation manifest interface**
+  (`pilot/physical.py`): `ANDROID_MANIFEST_REQUIRED` (19 required
+  fields + the optional `apk` block), the PURE
+  `validate_android_manifest`, `load_android_manifest`, and
+  `android_manifest_template`. ADCOS only LOADS, VALIDATES, BINDS (by
+  file SHA-256 into `verification.artifact_hashes`), and
+  CROSS-CORROBORATES the Android platform's own observations — the
+  manifest's `device_identity.serial` must EQUAL the ADCOS-side
+  observed serial, and its `network_technology.post` must AGREE with
+  the ADCOS-side post observation (disagreement fails — honesty over
+  convenience). The manifest is recorded under `android_observations`
+  and NEVER overrides ADCOS-side observations; the Android platform
+  authority is never duplicated in Python.
+- **The `access_technology_post` fix**: `run_physical_pilot` captured
+  but DISCARDED the post-transition framework observation; it is now an
+  additive field of the assembled document (with the honest rehearsal
+  absence recorded), the NR-only rule applies to it, and the frozen
+  `PHYSICAL_EVIDENCE_REQUIRED` / `PHYSICAL_5G_REQUIRED` tuples are
+  byte-identical (battery case_23 asserts them exactly).
+- **Battery cases 26–28** (`tools/pilot_selftest.py`): the handover
+  rehearsal end-to-end; the frozen handover template + the
+  anti-promotion negatives; the manifest interface including the
+  binding and the serial cross-corroboration negatives.
+
+### 7.2 The handover rehearsal (what the software class proves)
+
+Recorded verbatim in `evidence/work-040/physical-handover-attempt.json`
+(three REAL processes: the appliance with the declared failure plan
+ENABLED, relay-1, and the device-android node in
+`--physical --handover` mode over loopback — honestly
+`is_physical: false`):
+
+| Fact | Value |
+|---|---|
+| session id | `sha256:bad27642e5ec59c40d8efcb7c917bb472d1435f4f00d6166b48d4862749ca4e6` |
+| session-record digest | **byte-identical before/after the transition** (the continuity proof) |
+| primary path death | REAL — a hard socket failure at the transition attempt (`pilot.link-loss-observed`, stage `carriage-send`); the dead access point re-probed **unreachable** |
+| production re-bind | `pilot.session-rebound` on the SAME session id over `physical-access-secondary` (the relayed USB-tether-class leg), primary constituent FAILED / secondary ACTIVE through the REAL WORK-018 authority |
+| post-rebind datagram | the already-protected transition datagram re-sent on the SAME session (payload digest `sha256:7c44e43f48f1db96944d62f1176fc7c154c2b20676d69beef7d3a53d945f505c`), echoed intact |
+| service on the secondary | verdict **executed**, response matched (the full production chain on the new path) |
+| both-carriage corroboration | the appliance journal corroborates the session datagrams on the DIRECT **and** RELAY access points (announces accepted on both) |
+| relay carriage | 8 frames transited verbatim (every frame a production `FORWARD_OPAQUE` receipt; the WORK-039 discipline) |
+| validation | **ok, zero problems**; classification honestly **PARTIAL / NOT-TESTABLE** (a rehearsal can never close a physical criterion — validator-enforced) |
+
+The rehearsal's artificial trigger is honestly declared: the appliance
+journal's `pilot.sabotage-injected` event (the declared failure plan),
+never presented as a physical Wi-Fi disable.
+
+### 7.3 The genuine handover attempt on this host
+
+`run_physical_handover()` was executed at the execution SHA above; the
+environment detection is unchanged from §6.2 (no adb binary, no
+attached device, no USB-tether interface) and the attempt fails closed
+honestly — kind `work-040-physical-handover-attempt`, attempt record
+"no physical Android device is reachable from this execution host",
+classification NOT-TESTABLE / NOT-TESTABLE with the honest statement.
+Nothing is fabricated; the physical handover demonstration requires the
+handset attached to a host with adb (the runbook, handoff §8).
+
+### 7.4 The criterion-by-criterion bookkeeping (correction 2)
+
+| # | Criterion | Status | Class | Execution SHA | Artifact | Environment / observation / reaction / verification |
+|---|---|---|---|---|---|---|
+| 1 | real users/devices | **PARTIAL** (explicitly unresolved) | physical (demonstrated: operational) | `916f0559` | handover attempt `sha256:4a48e276…` | env: this host (no handset reachable; §6.2's detection evidence). reaction: the full handover transition chain works end-to-end over three real processes (§7.2: real socket death, production re-bind, same logical session, both-carriage receiver corroboration, service on the secondary). verification: battery 28/28 incl. the anti-promotion negatives; the physical demonstration requires the handset attached to a host with adb (the runbook, handoff §8) |
+| 2 | 5G access path | **NOT-TESTABLE** | physical | `916f0559` | handover attempt `sha256:4a48e276…` | env: no 5G infrastructure AND no handset here. observation: the pre/post framework access-technology capture is implemented (the post observation is now actually RECORDED into the document; NR-only 5G rule; the manifest interface cross-corroborates the Android framework's own NR determination). verification: the 27-field handover template is frozen; criterion 2 PASS additionally requires the tether interface observation, the route transition onto the tether, and the independent traffic verification — all validator-enforced |
+| 3 | non-cellular path | **PASS** (preserved) | operational | `916f0559` | run digest `sha256:bd620530…` | unchanged from the delivery; re-verified at this SHA (10/10 checks); byte-identical before/after the correction-2 changes at the same baseline HEAD |
+| 4 | relay/backhaul path | **PASS** (preserved) | operational | `916f0559` | run digest `sha256:bd620530…` | unchanged; re-verified (the handover rehearsal additionally exercised the relay leg as the secondary carriage, 8 more verbatim frames) |
+| 5 | resilience/failover | **PASS** (preserved) | operational | `916f0559` | run digest `sha256:bd620530…` | unchanged; re-verified (the handover rehearsal is a SECOND, independent proof of the same production failover discipline) |
+| 6 | operational evidence | **PASS** (preserved + extended) | operational | `916f0559` | run digest + the three artifacts below | unchanged core report + the correction-2 artifacts (this section) |
+
+**Validator SHA** (the exact validator code that validated the
+correction-2 evidence):
+`sha256:5cc1728582772212b7a26be788114c176618e7550f5822dcc2c2899f3a9bea63`
+
+**Correction-2 artifact SHA-256s:**
+
+| Artifact | SHA-256 |
+|---|---|
+| `evidence/work-040/physical-attempt.json` (regenerated at this SHA) | `sha256:f610bd4940c569858a3fe57fcbac0f7d025603114b439cecf1938228818823cd` |
+| `evidence/work-040/physical-handover-attempt.json` | `sha256:4a48e276c9dcf24928ea80990910d3d32931be8d95f8a005f5ab6d4d653daaee` |
+| `evidence/work-040/android-manifest-template.json` | `sha256:7e5dc1ffa60a47fe3d90b0748804742ab88e6d2b3ef4a915149c89660a663b34` |
+
+### 7.5 The Android-agent manifest interface (the contract)
+
+The Android Studio/Gemini agent produces the observation manifest
+(copy `evidence/work-040/android-manifest-template.json`, replace every
+EXAMPLE value with the real framework observation, remove the
+`template`/`usage` markers). The template is structurally valid; the
+raw template can never be mistaken for a real observation record
+(binding it fails the serial cross-corroboration against the
+placeholder serial). Required fields: `kind`
+(`android-agent-observation-manifest`), `schema_version` (1),
+`produced_by`, `device_identity` (model/brand/serial/android_release +
+observation_source), `network_technology` (pre/post data-network types,
+`is_5g` — true ONLY with a post-trigger NR report, never from LTE —
+`nr_state` + observation_source), `trigger` (description +
+observation_source), `usb_tether` (enabled/backed_by_cellular +
+observation_source), and `raw_observations` (the raw getprop/dumpsys
+outputs); the OPTIONAL `apk` block (name + sha256) is the only
+permitted absence — the current design is pure-stdlib Python on the
+handset with NO APK, so its absence is recorded honestly rather than
+fabricated. ADCOS binds the manifest by its file SHA-256 into
+`verification.artifact_hashes` as `("android-manifest", sha256:…)`,
+records the apk sha when present, and cross-corroborates; the manifest
+never overrides ADCOS-side observations, and every `observation_source`
+must be the Android framework's own report (never ADCOS
+re-derivation).
+
+### 7.6 The remaining limitations (honest, correction 2)
+
+1. **The physical handover demonstration remains undone here** — no
+   handset is reachable from this execution host (unchanged since
+   §6.2). Criterion 1 stays PARTIAL: the complete transition chain is
+   implemented and software-verified end-to-end; closing it requires
+   running the physical handover on a host with the handset attached
+   (the runbook, handoff §8) — an external step, exactly like the W037
+   lab obligation.
+2. **Criterion 2 stays NOT-TESTABLE** — even with the handset attached,
+   5G closes only if the Android framework itself reports NR after the
+   transition AND the host route demonstrably transitions onto the
+   USB-tether path with independent traffic verification (all
+   validator-enforced in code).
+3. **The frozen acceptance criteria are NOT redefined.** This
+   correction claims no physical PASS; W040 acceptance still requires
+   the physical runs where the handset/infrastructure genuinely exist
+   and the Architect's re-review (DEC-0046's acceptance gate).

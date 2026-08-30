@@ -1,8 +1,8 @@
 # WORK-040 — Pilot Deployment: Implementation Handoff
 
 **Work item:** WORK-040 — Pilot deployment
-**Branch:** `work-040-pilot-deployment` (originally anchored on `main@1669ae9a`; synchronized with `main@4efcc8c` for the correction cycle)
-**Package:** `pilot/` (11 modules) + `tools/pilot_selftest.py` (25-case battery)
+**Branch:** `work-040-pilot-deployment` (originally anchored on `main@1669ae9a`; synchronized with `main@4efcc8c` for the correction cycle; base `1760fc6` for correction cycle 2)
+**Package:** `pilot/` (11 modules) + `tools/pilot_selftest.py` (28-case battery)
 **CI step:** "Run WORK-040 pilot deployment tests" (after the federation-at-scale step)
 **Correction cycle:** WORK-040-CORRECTION-001 (DEC-0046) — repository-local authority; correction-only scope
 
@@ -13,6 +13,13 @@
 > runbook). The delivered pilot is preserved exactly: the default
 > deployment's semantic run record is byte-identical before/after the
 > correction (measured at the same commit).
+>
+> **Correction cycle 2 (§8 below).** Adds the physical HANDOVER experiment
+> (the `--handover` device mode, the second physical extension path, the
+> frozen 27-field handover evidence template + pure validator + derived
+> never-promoting classifiers, battery cases 26–28, the Android-agent
+> observation-manifest interface, and the physical handover runbook).
+> The default four-process deployment stays byte-identical (measured).
 
 ## Objective (frozen)
 
@@ -39,7 +46,7 @@ accepted production families exclusively through their public contracts:
 | `pilot/deployment.py` | the conductor + the three node role implementations (real OS processes; real sockets; the declared failure plan) |
 | `pilot/node.py` | the per-process entrypoint (`python3 -m pilot.node --role ...`) |
 | `pilot/evidence.py` | the honest three-class evidence model with the anti-promotion authority |
-| `pilot/physical.py` | **(correction)** the physical-device participation harness: honest environment detection, adb device/access observations (NR-only 5G rule), the physical pilot orchestration, the evidence assembly, the pure independent validator, the derived never-promoting classification |
+| `pilot/physical.py` | **(correction)** the physical-device participation harness: honest environment detection, adb device/access observations (NR-only 5G rule), the physical pilot orchestration, the evidence assembly, the pure independent validator, the derived never-promoting classification — **(correction 2)** plus the physical handover experiment (the frozen 27-field template, the pure validator, the derived classifiers, the rehearsal + physical orchestrators, the honest attempt writers) and the Android-agent observation-manifest interface (load/validate/bind/cross-corroborate — never duplicating the Android platform authority) |
 
 **The deployment topology** (the smallest genuine shape):
 
@@ -269,3 +276,158 @@ host with the handset attached (criterion 1 → PASS evidence), the 5G
 demonstration where the infrastructure genuinely exists (criterion 2), and
 the Architect's re-review (DEC-0046's acceptance gate). The frozen
 acceptance criteria are NOT redefined by this correction.
+
+---
+
+## 8. The physical HANDOVER runbook (correction cycle 2)
+
+The correction's second round implements the Architect's handover target
+chain — Wi-Fi active → ADCOS session established → USB tether available →
+Wi-Fi physically disabled on the handset → Android reports cellular/5G →
+host Wi-Fi route disappears → USB tether becomes the active path → ADCOS
+detects the new path → production bind/rebind → same logical session →
+real datagram → independent receiver verifies. The chain is implemented
+and software-verified end-to-end (battery case_26: the three-process
+rehearsal over loopback with the appliance's declared failure plan as the
+honest artificial trigger); the PHYSICAL run is the exact external step
+below. The default four-process deployment is preserved byte-identically
+(measured: the run digest with and without the correction at the same
+HEAD is `sha256:5b648b26…` both ways).
+
+### 8.1 Prerequisites
+
+1. The W035 handset attached over USB with USB debugging on, `adb` on the
+   host's PATH (`adb devices -l` lists exactly one device), and a Python
+   3.11+ runtime on the handset (Termux's python works: the whole ADCOS
+   stack is pure stdlib).
+2. **The handset's Wi-Fi connected to the host's network** (e.g. the
+   host's hotspot or the same LAN): the device node's PRIMARY carriage is
+   its Wi-Fi connection to the host appliance's access point. Note the
+   host's Wi-Fi address — `ip addr` (e.g. `192.168.x.x` on `wlan0`).
+3. **USB tethering ENABLED on the handset** (Settings → Hotspot &
+   tethering → USB tethering): the SECONDARY carriage is the delivered
+   relay leg entered via the USB tether (the harness sets up `adb reverse`
+   over the same USB cable; the host-side tether interface `usb0`/`rndis0`
+   and the route transition onto it are recorded as the host
+   observations). Note the tether interface name on the host — `ip addr`
+   (e.g. `usb0`).
+
+### 8.2 The run
+
+```bash
+# 0) verify the prerequisites (exactly one adb device; wlan + tether up)
+adb devices -l
+ip addr                          # note the host's wlan address + the usb tether iface
+
+# 1) put this repository on the handset (any path; /data/local/tmp/adcos
+#    is the default the harness expects):
+git archive --format=tar HEAD | adb shell 'mkdir -p /data/local/tmp/adcos && tar -x -C /data/local/tmp/adcos'
+
+# 2) (optional but recommended) have the Android agent produce the
+#    observation manifest per evidence/work-040/android-manifest-template.json
+#    (see §8.4) and stage it on the host, e.g. ./android-manifest.json
+
+# 3) run the physical handover from the repository root ON THE HOST
+#    (replace 192.168.1.20 with the host's Wi-Fi address from step 0):
+python3 -c "from pilot.physical import run_physical_handover; \
+            import json; \
+            print(json.dumps(run_physical_handover( \
+                wlan_host='192.168.1.20', \
+                android_manifest_path='./android-manifest.json', \
+                handover_wait_seconds=600), indent=1))" \
+     > physical-handover.json
+
+# 4) >>> THE MARKED OPERATOR STEP <<< — when the harness's bounded
+#    transition wait starts (the device node prints nothing; the wait is
+#    the --handover-wait-seconds window, default 600s), PHYSICALLY DISABLE
+#    WI-FI ON THE HANDSET (the quick-settings toggle, or have the Android
+#    agent execute `svc wifi disable` and record it in the manifest).
+#    The handset falls back to cellular; the host's Wi-Fi route to the
+#    handset dies; the ADCOS device node catches the REAL path death,
+#    fails the primary constituent through the production multipath
+#    authority, and re-binds the SAME logical session onto the relayed
+#    USB-tether carriage.
+
+# 5) the classification in physical-handover.json is DERIVED: criterion 1
+#    PASS requires is_physical + the corroborated transition chain
+#    (session continuity + both-carriage receiver corroboration + the
+#    executed service on the secondary); criterion 2 PASS additionally
+#    requires the framework's NR report after the transition, the
+#    USB-tether interface observation, the route transition onto the
+#    tether, and the independent traffic verification. LTE is never 5G;
+#    a rehearsal is never physical; a handover that broke the session is
+#    not a handover.
+```
+
+What the harness does (no operator action beyond step 4): captures the
+pre-transition observations (getprop identity, the framework access
+technology, the host route); starts the appliance with an externally
+reachable access point and NO failure plan (the real trigger is yours);
+starts relay-1 externally reachable (its upstream is the appliance's
+relay access point); sets up `adb reverse` for the relay port (the USB
+carriage); launches the device node ON THE HANDSET in
+`--physical --handover` mode (primary = the Wi-Fi carriage to
+`wlan_host`, secondary = the relayed USB-tether carriage); pulls the
+device result; captures the post-transition observations (the framework
+access technology — now actually recorded into the document — the host
+route, and the tether interface identity with its addresses); assembles,
+validates, and honestly classifies the 27-field handover evidence
+document. A bounded-wait timeout or an unconfirmed death produces an
+HONEST incomplete record (never a fabricated handover).
+
+### 8.3 The honest classification rules (handover)
+
+* Criterion 1 PASS: `is_physical` + validation ok + session-record
+  continuity + receiver corroboration on BOTH access points + the
+  service executed on the secondary. A rehearsal with the full chain is
+  PARTIAL; no device is NOT-TESTABLE.
+* Criterion 2 PASS: physical + the framework's NR report AFTER the
+  transition (`is_5g` true only for NR — never from LTE) + the
+  USB-tether interface observation + the post-transition route running
+  via the tether + independent traffic verification. NR observed but the
+  chain incomplete is PARTIAL; anything else is NOT-TESTABLE.
+* A rehearsal can structurally never classify above PARTIAL
+  (criterion 1) or NOT-TESTABLE (criterion 2) — enforced by the pure
+  validator, not by convention.
+
+### 8.4 The Android-agent coordination contract
+
+The Android Studio/Gemini agent is the AUTHORITY for the Android
+platform's own observations; ADCOS only loads, validates, binds, and
+corroborates them — **do not duplicate the Android platform authority in
+Python**. The agent provides:
+
+1. **The observation manifest** — a copy of
+   `evidence/work-040/android-manifest-template.json` with every
+   EXAMPLE value replaced by the real framework observation (and the
+   `template`/`usage` markers removed): `produced_by` (the agent
+   identity), `device_identity` (getprop), `network_technology` (the
+   pre/post data-network types with the framework's own 5G/NR
+   determination — `is_5g` true only for NR), `trigger` (the agent's
+   record of the Wi-Fi disable, e.g. its `svc wifi disable` execution),
+   `usb_tether` (the framework's tethering state), `raw_observations`
+   (the raw getprop/dumpsys outputs), and the OPTIONAL `apk` block
+   (name + sha256) — the current design is pure-stdlib Python on the
+   handset with NO APK, so the apk absence is honestly recorded rather
+   than fabricated.
+2. **Where it puts it:** the manifest file lands on the HOST at any path
+   (the runbook's `android_manifest_path` parameter) before the run's
+   post-transition phase; if an APK exists, its artifact is staged the
+   same way.
+3. **How ADCOS binds and corroborates it:** `load_android_manifest` +
+   `validate_android_manifest` (pure, fails closed), then
+   `run_physical_handover(android_manifest_path=...)` assembles the
+   handover evidence binding the manifest's FILE SHA-256 into
+   `verification.artifact_hashes` as `("android-manifest", sha256:…)`,
+   records the apk sha when present, and CROSS-CORROBORATES: the
+   manifest's `device_identity.serial` must EQUAL the ADCOS-side
+   adb-observed serial (mismatch fails), and its
+   `network_technology.post` must AGREE with the ADCOS-side post
+   observation (disagreement fails — honesty over convenience). The
+   manifest is recorded under `android_observations` and never overrides
+   the ADCOS-side observations.
+
+The handover evidence artifact for THIS host (no handset reachable — the
+honest fail-closed attempt + the software-verified rehearsal) is
+`evidence/work-040/physical-handover-attempt.json`; the full correction-2
+record is `docs/WORK-040-evidence.md` §7.
