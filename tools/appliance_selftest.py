@@ -2601,6 +2601,10 @@ def case_41_pr_delta_shape(results: List[Result]) -> None:
         if not c.startswith("appliance/") and not c.startswith("interop/")
         and not c.startswith("imt/") and not c.startswith("scale/")
         and not c.startswith("pilot/")
+        # DAG-sanctioned amendment (-> WORK-040 correction cycle,
+        # WORK-040-CORRECTION-001): the pilot branch now carries its
+        # honest physical-attempt evidence artifacts.
+        and not c.startswith("evidence/work-040/")
         and c not in allowed_exact
         and not c.startswith(".github/")
     ]

@@ -1816,6 +1816,10 @@ def case_37_pr_delta_shape(results: List[Result]) -> None:
     unexpected = [
         c for c in changed
         if not c.startswith("scale/") and not c.startswith("pilot/")
+        # DAG-sanctioned amendment (-> WORK-040 correction cycle,
+        # WORK-040-CORRECTION-001): the pilot branch now carries its
+        # honest physical-attempt evidence artifacts.
+        and not c.startswith("evidence/work-040/")
         and c not in allowed_exact
         and not c.startswith(".github/")
     ]
