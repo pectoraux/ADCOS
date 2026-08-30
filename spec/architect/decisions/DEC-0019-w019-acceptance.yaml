@@ -1,0 +1,29 @@
+# ADCOS Architect decision record.
+# schema: spec/architect/decision-record-template.md; verified by tools/spec_check.py (ARCH-04).
+
+decision_id: DEC-0019
+type: acceptance
+work_item: WORK-019
+acr: null
+pr: 20
+reviewed_sha: 9c8bba609d02d10d6f2f86bb5a8aae7a7d3edeee
+decision: ACCEPTED
+status: ACCEPTED
+reviewer: "Architect (pectoraux)"
+timestamp: 2026-08-26T06:20:36Z
+findings:
+  - "Definition of done satisfied for WORK-019 (5G Core integration adapter); chat-era item: no durable repository-local handoff prompt located (governance gap closed prospectively by this package); real Open5GS verification closed PASS (EVID-001)"
+  - "Migrated record: the repository-durable evidence of acceptance is the Architect merge of PR #20 (merge commit b0ce4e9684761e670bd10bf9357bd281a2e78483); chat-era review commentary is not restated here."
+blockers: []
+required_corrections: []
+evidence:
+  merge_sha: b0ce4e9684761e670bd10bf9357bd281a2e78483
+  ci_run: null
+  artifacts:
+    - "EVID-001 (PASS, closed)"
+accepted_scope:
+  - "The WORK-019 contract as frozen in spec/work-items.md (objective, acceptance criteria, definition of done)."
+rejected_scope: []
+downstream_effect:
+  - "Unblocks, per the frozen DAG: WORK-020, WORK-021, WORK-024, WORK-037"
+resolved_by: null

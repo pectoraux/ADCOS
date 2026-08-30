@@ -1,0 +1,28 @@
+# ADCOS Architect decision record.
+# schema: spec/architect/decision-record-template.md; verified by tools/spec_check.py (ARCH-04).
+
+decision_id: DEC-0023
+type: acceptance
+work_item: WORK-023
+acr: null
+pr: 24
+reviewed_sha: 9702dd03747761a4d0c43afaa0d7de5e22b7885a
+decision: ACCEPTED
+status: ACCEPTED
+reviewer: "Architect (pectoraux)"
+timestamp: 2026-08-27T01:53:22Z
+findings:
+  - "Definition of done satisfied for WORK-023 (Mesh, IAB, relay, and store-and-forward adapter family)."
+  - "Migrated record: the repository-durable evidence of acceptance is the Architect merge of PR #24 (merge commit 18c449bd27005cbb27f7bbffd13bc251906f4274); chat-era review commentary is not restated here."
+blockers: []
+required_corrections: []
+evidence:
+  merge_sha: 18c449bd27005cbb27f7bbffd13bc251906f4274
+  ci_run: null
+  artifacts: []
+accepted_scope:
+  - "The WORK-023 contract as frozen in spec/work-items.md (objective, acceptance criteria, definition of done)."
+rejected_scope: []
+downstream_effect:
+  - "Unblocks, per the frozen DAG: WORK-034"
+resolved_by: null

@@ -1,0 +1,740 @@
+# ADCOS execution ledger — machine-readable, persisted by the Architect.
+#
+# Lifecycle states are DISTINCT: implemented -> verified -> in-review ->
+# accepted-merged. A completed PR is not a satisfied dependency until the
+# Architect accepts the Work Item (spec/dependency-graph.md rule 1).
+#
+# Migration convention (chat era, WORK-001..WORK-039): fields whose exact
+# chat-era value is not durably recorded in the repository are null rather
+# than invented — baseline_sha (branch point), ci_run, and review_rounds,
+# except where durably documented; timestamps are the merge-commit times
+# (the repository-durable evidence of Architect acceptance), except where
+# an acceptance-comment time is durably recorded.
+#
+# schema: spec/architect/ (execution ledger v1); verified by tools/spec_check.py (ARCH-05).
+#
+# Reconciliation convention: the ledger snapshot baseline (main_sha) tracks
+# the mainline the persistent state is reconciled against. Reconciliations
+# are recorded formally in the `reconciliations` list below — history is
+# never silently rewritten.
+
+schema_version: 1
+main_sha: 93efa54f1edc2ec3c0bb5646827719f92af06b86
+last_updated: "2026-08-30"
+work_items:
+  - work_item: WORK-001
+    title: "Protocol specification/governance foundation"
+    phase: 0
+    branch: "work-001/spec-governance-foundation"
+    baseline_sha: null
+    pr: 1
+    pr_head: ec37c13de73f3ab9615b6f6fe690dbc3abae09bd
+    reviewed_sha: ec37c13de73f3ab9615b6f6fe690dbc3abae09bd
+    merge_sha: 670350fb89574a235eb37984dd24275c981001f5
+    merged_at: 2026-08-23T20:59:59Z
+    ci_run: null
+    review_rounds: 4
+    acceptance_decision: DEC-0001
+    correction_decisions: []
+    handoff: spec/prompts/WORK-001.md
+    handoff_required: false
+    lifecycle: accepted-merged
+    note: "three correction cycles durably documented (tools/spec_check_selftest.py header): the .gitignore regression restored; Architecture-Version declaration uniqueness enforced; checker hardening"
+  - work_item: WORK-002
+    title: "Core protocol vocabulary and registry model"
+    phase: 0
+    branch: "work-002/core-protocol-vocabulary-registry"
+    baseline_sha: null
+    pr: 2
+    pr_head: 57717050a61ff6090056a3a05eb34d15d0148eb0
+    reviewed_sha: 57717050a61ff6090056a3a05eb34d15d0148eb0
+    merge_sha: 7efee6c56a17663582dd329c89df22c0b32c83ee
+    merged_at: 2026-08-23T21:27:24Z
+    ci_run: null
+    review_rounds: null
+    acceptance_decision: DEC-0002
+    correction_decisions: []
+    handoff: spec/prompts/WORK-002.md
+    handoff_required: false
+    lifecycle: accepted-merged
+  - work_item: WORK-003
+    title: "Versioned protocol envelope and serialization"
+    phase: 0
+    branch: "work-003/versioned-envelope-serialization"
+    baseline_sha: null
+    pr: 3
+    pr_head: 0e4d74372b49c6b121f19405ea3d9cff0d46dd92
+    reviewed_sha: 0e4d74372b49c6b121f19405ea3d9cff0d46dd92
+    merge_sha: 6f57da69e13035cc019d2e081a8f393c5a33c14c
+    merged_at: 2026-08-23T22:57:42Z
+    ci_run: null
+    review_rounds: null
+    acceptance_decision: DEC-0003
+    correction_decisions: []
+    handoff: spec/prompts/WORK-003.md
+    handoff_required: false
+    lifecycle: accepted-merged
+    note: "two CHANGES REQUIRED review verdicts rendered before acceptance (PR #3 review chain, 2026-08-23)"
+  - work_item: WORK-004
+    title: "Cryptographic node identity and credential abstraction"
+    phase: 1
+    branch: "work-004/final-handoff-7"
+    baseline_sha: null
+    pr: 4
+    pr_head: 4f855c8c3330d37bb3f4579e4f1ae032adae396b
+    reviewed_sha: 4f855c8c3330d37bb3f4579e4f1ae032adae396b
+    merge_sha: 628e1bba3d2217a9166c0c0fff86e4b13291e7c7
+    merged_at: 2026-08-23T23:48:24Z
+    ci_run: null
+    review_rounds: null
+    acceptance_decision: DEC-0004
+    correction_decisions: []
+    handoff: spec/prompts/WORK-004.md
+    handoff_required: false
+    lifecycle: accepted-merged
+  - work_item: WORK-005
+    title: "Capability statements and negotiation"
+    phase: 1
+    branch: "work-005/v1-capability-statements-negotiation"
+    baseline_sha: null
+    pr: 5
+    pr_head: e63ba09befb413c18e6eeaed4bae663f84090031
+    reviewed_sha: e63ba09befb413c18e6eeaed4bae663f84090031
+    merge_sha: 91b90b92f9c377f46cac931df0de76c4788c6a34
+    merged_at: 2026-08-24T04:59:39Z
+    ci_run: null
+    review_rounds: null
+    acceptance_decision: DEC-0005
+    correction_decisions: []
+    handoff: spec/prompts/WORK-005.md
+    handoff_required: false
+    lifecycle: accepted-merged
+  - work_item: WORK-006
+    title: "Peer discovery"
+    phase: 1
+    branch: "work-006-peer-discovery"
+    baseline_sha: null
+    pr: 6
+    pr_head: 94763e7ba0e9c3c317640df4320b25ce1c47be90
+    reviewed_sha: 94763e7ba0e9c3c317640df4320b25ce1c47be90
+    merge_sha: 49752651da392cd2ea19652c1bf34258b32be7ef
+    merged_at: 2026-08-24T06:23:28Z
+    ci_run: null
+    review_rounds: null
+    acceptance_decision: DEC-0006
+    correction_decisions: []
+    handoff: spec/prompts/WORK-006.md
+    handoff_required: false
+    lifecycle: accepted-merged
+  - work_item: WORK-007
+    title: "Evidence-aware topology graph"
+    phase: 1
+    branch: "work-007/evidence-aware-topology"
+    baseline_sha: null
+    pr: 7
+    pr_head: a86620dd16668c2e721c845e29b1595c73660d8c
+    reviewed_sha: a86620dd16668c2e721c845e29b1595c73660d8c
+    merge_sha: f1dee71c0cae7a038fbf1e990e1b0b08ef018c52
+    merged_at: 2026-08-24T09:32:39Z
+    ci_run: null
+    review_rounds: null
+    acceptance_decision: DEC-0007
+    correction_decisions: []
+    handoff: spec/prompts/WORK-007.md
+    handoff_required: false
+    lifecycle: accepted-merged
+  - work_item: WORK-008
+    title: "Resource model and measurements"
+    phase: 1
+    branch: "work-008-resource-model-measurements"
+    baseline_sha: null
+    pr: 8
+    pr_head: 3d9dbe944ceb91ab67ca7605cb2842b3e2a5d37d
+    reviewed_sha: 3d9dbe944ceb91ab67ca7605cb2842b3e2a5d37d
+    merge_sha: 247257d746e40b82626c1e82b79d97b61fe8a682
+    merged_at: 2026-08-24T11:44:33Z
+    ci_run: null
+    review_rounds: null
+    acceptance_decision: DEC-0008
+    correction_decisions: []
+    handoff: spec/prompts/WORK-008.md
+    handoff_required: false
+    lifecycle: accepted-merged
+  - work_item: WORK-009
+    title: "Intent and QoS model"
+    phase: 1
+    branch: "work-009/intent-qos-model"
+    baseline_sha: null
+    pr: 9
+    pr_head: 65cb75bf80ee7d9608fe6eb28dbcba0084766e95
+    reviewed_sha: 65cb75bf80ee7d9608fe6eb28dbcba0084766e95
+    merge_sha: b3c17af90b971a82b888ccc2d59dfc7b66fc459a
+    merged_at: 2026-08-24T13:10:42Z
+    ci_run: null
+    review_rounds: null
+    acceptance_decision: DEC-0009
+    correction_decisions: []
+    handoff: spec/prompts/WORK-009.md
+    handoff_required: false
+    lifecycle: accepted-merged
+  - work_item: WORK-010
+    title: "Policy engine"
+    phase: 1
+    branch: "work-010-policy-engine"
+    baseline_sha: null
+    pr: 10
+    pr_head: 4b8086d9552ca5a29d7c33c97de76b1740d6ec81
+    reviewed_sha: 4b8086d9552ca5a29d7c33c97de76b1740d6ec81
+    merge_sha: 7870079fd1d583e109aec9443e4096e9db23f9bf
+    merged_at: 2026-08-24T14:39:43Z
+    ci_run: null
+    review_rounds: null
+    acceptance_decision: DEC-0010
+    correction_decisions: []
+    handoff: spec/prompts/WORK-010.md
+    handoff_required: false
+    lifecycle: accepted-merged
+  - work_item: WORK-011
+    title: "Path computation and routing engine"
+    phase: 2
+    branch: "work-011-path-computation"
+    baseline_sha: null
+    pr: 11
+    pr_head: b55cec8712b084063c775a6059fffa27d72c7ccd
+    reviewed_sha: b55cec8712b084063c775a6059fffa27d72c7ccd
+    merge_sha: 38a8f950252f16e86fa3e245e29c67ef21722b49
+    merged_at: 2026-08-24T16:46:50Z
+    ci_run: null
+    review_rounds: null
+    acceptance_decision: DEC-0011
+    correction_decisions: []
+    handoff: spec/prompts/WORK-011.md
+    handoff_required: false
+    lifecycle: accepted-merged
+  - work_item: WORK-012
+    title: "Logical sessions"
+    phase: 2
+    branch: "work-012-session-lifecycle"
+    baseline_sha: null
+    pr: 12
+    pr_head: c0140d7b3279e0afdc92100ad3b533d123bcc741
+    reviewed_sha: c0140d7b3279e0afdc92100ad3b533d123bcc741
+    merge_sha: 8ec6254caa35e2e60f58848b7ca09cb828426c4e
+    merged_at: 2026-08-24T17:47:03Z
+    ci_run: null
+    review_rounds: null
+    acceptance_decision: DEC-0012
+    correction_decisions: []
+    handoff: spec/prompts/WORK-012.md
+    handoff_required: false
+    lifecycle: accepted-merged
+  - work_item: WORK-013
+    title: "Multipath session manager"
+    phase: 2
+    branch: "work-013-multipath-sessions"
+    baseline_sha: null
+    pr: 13
+    pr_head: 3c3588535135e0a91172b162cfb9f848adb121f0
+    reviewed_sha: 3c3588535135e0a91172b162cfb9f848adb121f0
+    merge_sha: edb241ca03fbb2f91b0c89cf67cb17d85298575c
+    merged_at: 2026-08-25T04:44:12Z
+    ci_run: null
+    review_rounds: null
+    acceptance_decision: DEC-0013
+    correction_decisions: []
+    handoff: spec/prompts/WORK-013.md
+    handoff_required: false
+    lifecycle: accepted-merged
+  - work_item: WORK-014
+    title: "Mobility and handover manager"
+    phase: 2
+    branch: "work-014-mobility-handover"
+    baseline_sha: null
+    pr: 14
+    pr_head: 245689ae8101bb3109ea51422d5cc7d452e25087
+    reviewed_sha: 245689ae8101bb3109ea51422d5cc7d452e25087
+    merge_sha: bf881dd9f3d68ba982bbc40e3ac1e0f7cb35e7f8
+    merged_at: 2026-08-25T09:05:21Z
+    ci_run: null
+    review_rounds: null
+    acceptance_decision: DEC-0014
+    correction_decisions: []
+    handoff: spec/prompts/WORK-014.md
+    handoff_required: false
+    lifecycle: accepted-merged
+    note: "implemented under the ACR-001-corrected dependency declaration (WORK-017 removed from the declared dependencies)"
+  - work_item: WORK-015
+    title: "Federation protocol"
+    phase: 2
+    branch: "work-015-federation"
+    baseline_sha: null
+    pr: 15
+    pr_head: a6d5158669fa9bbdcda676662e2bcf2d0c6c1c8c
+    reviewed_sha: a6d5158669fa9bbdcda676662e2bcf2d0c6c1c8c
+    merge_sha: c611f78f9e5be492744087ee8ada9362131eb677
+    merged_at: 2026-08-25T11:41:31Z
+    ci_run: null
+    review_rounds: null
+    acceptance_decision: DEC-0015
+    correction_decisions: []
+    handoff: spec/prompts/WORK-015.md
+    handoff_required: false
+    lifecycle: accepted-merged
+    note: "review refinement durably recorded: the Status-line prose-reference classification (tools/spec_check.py, WORK-015 review direction)"
+  - work_item: WORK-016
+    title: "Adapter SDK/runtime"
+    phase: 3
+    branch: "work-016-adapter-sdk"
+    baseline_sha: null
+    pr: 16
+    pr_head: 2bb0f7617e471bab8b1c3889fd2fbc58adaaa1b0
+    reviewed_sha: 2bb0f7617e471bab8b1c3889fd2fbc58adaaa1b0
+    merge_sha: 554fa4b7e6fef36cb10ca3d15ffeb6d3637d9ac1
+    merged_at: 2026-08-25T12:57:48Z
+    ci_run: null
+    review_rounds: null
+    acceptance_decision: DEC-0016
+    correction_decisions: []
+    handoff: null
+    handoff_required: false
+    lifecycle: accepted-merged
+    note: "chat-era item: no durable repository-local handoff prompt located (governance gap closed prospectively by this package)"
+  - work_item: WORK-017
+    title: "Secure transport profiles"
+    phase: 3
+    branch: "work-017-final-acceptance"
+    baseline_sha: null
+    pr: 18
+    pr_head: 8b12d0bfbae446f648501b7412f4d896e888ce28
+    reviewed_sha: 8b12d0bfbae446f648501b7412f4d896e888ce28
+    merge_sha: 4d980db8eb3405cdcabe231474b44f2436fff027
+    merged_at: 2026-08-25T17:55:14Z
+    ci_run: null
+    review_rounds: 2
+    acceptance_decision: DEC-0017
+    correction_decisions: []
+    handoff: null
+    handoff_required: false
+    lifecycle: accepted-merged
+    note: "two-phase acceptance: PR #17 merged first, then PR #18 restored the Architect-corrected secure transport; the accepted reviewed head is PR #18 head 8b12d0bf"
+  - work_item: WORK-018
+    title: "IPv6 and IP integration boundary"
+    phase: 3
+    branch: "work-018-ipv6-ip-integration-v2"
+    baseline_sha: null
+    pr: 19
+    pr_head: 57628b7c26343666915bf6d7b755bb7ed09c951d
+    reviewed_sha: 57628b7c26343666915bf6d7b755bb7ed09c951d
+    merge_sha: 20bcebcef6967866039448377fb9b3d804d0cdd4
+    merged_at: 2026-08-25T19:46:34Z
+    ci_run: null
+    review_rounds: null
+    acceptance_decision: DEC-0018
+    correction_decisions: []
+    handoff: null
+    handoff_required: false
+    lifecycle: accepted-merged
+    note: "chat-era item: no durable repository-local handoff prompt located (governance gap closed prospectively by this package)"
+  - work_item: WORK-019
+    title: "5G Core integration adapter"
+    phase: 4
+    branch: "work-019-5gc-adapter"
+    baseline_sha: null
+    pr: 20
+    pr_head: 9c8bba609d02d10d6f2f86bb5a8aae7a7d3edeee
+    reviewed_sha: 9c8bba609d02d10d6f2f86bb5a8aae7a7d3edeee
+    merge_sha: b0ce4e9684761e670bd10bf9357bd281a2e78483
+    merged_at: 2026-08-26T06:20:36Z
+    ci_run: null
+    review_rounds: null
+    acceptance_decision: DEC-0019
+    correction_decisions: []
+    handoff: null
+    handoff_required: false
+    lifecycle: accepted-merged
+    evidence_obligations: "EVID-001 (PASS, closed)"
+    note: "chat-era item: no durable repository-local handoff prompt located (governance gap closed prospectively by this package); real Open5GS verification closed PASS (EVID-001)"
+  - work_item: WORK-020
+    title: "5G RAN/gNB adapter"
+    phase: 4
+    branch: "work-020-5g-ran-adapter"
+    baseline_sha: null
+    pr: 21
+    pr_head: 5dd9f0d9da511cad580c365200f6b58ea7075fa7
+    reviewed_sha: 5dd9f0d9da511cad580c365200f6b58ea7075fa7
+    merge_sha: ddc7787ca03ef1658997974ade9d81a6c04c9b3a
+    merged_at: 2026-08-28T13:50:50Z
+    ci_run: null
+    review_rounds: null
+    acceptance_decision: DEC-0020
+    correction_decisions: []
+    handoff: spec/prompts/WORK-020.md
+    handoff_required: false
+    lifecycle: accepted-merged
+    evidence_obligations: "EVID-002 (OPEN)"
+    note: "accepted with the external SDR evidence gate OPEN (EVID-002): architecture conformance PASS, automated verification PASS, physical SDR lab BLOCKED (docs/WORK-020-real-sdr-acceptance.md)"
+  - work_item: WORK-021
+    title: "Wi-Fi/non-3GPP access adapter"
+    phase: 4
+    branch: "work-021-wifi-non3gpp"
+    baseline_sha: null
+    pr: 22
+    pr_head: 04f803ed0c7ecaf2a5d197c663db7c37598ef5c7
+    reviewed_sha: 04f803ed0c7ecaf2a5d197c663db7c37598ef5c7
+    merge_sha: c25013d8d744c1d4464245f2aeb5044a86fe11da
+    merged_at: 2026-08-26T16:21:41Z
+    ci_run: null
+    review_rounds: null
+    acceptance_decision: DEC-0021
+    correction_decisions: []
+    handoff: spec/prompts/WORK-021.md
+    handoff_required: false
+    lifecycle: accepted-merged
+  - work_item: WORK-022
+    title: "Ethernet/fiber/microwave/satellite adapter family"
+    phase: 4
+    branch: "work-022-backhaul-adapters"
+    baseline_sha: null
+    pr: 23
+    pr_head: 54987bbe46e6d09c727ac721186b2bf8140461a0
+    reviewed_sha: 54987bbe46e6d09c727ac721186b2bf8140461a0
+    merge_sha: 283243544067ce7788b6531baeaeed8ebe42292e
+    merged_at: 2026-08-27T00:22:03Z
+    ci_run: null
+    review_rounds: null
+    acceptance_decision: DEC-0022
+    correction_decisions: []
+    handoff: spec/prompts/WORK-022.md
+    handoff_required: false
+    lifecycle: accepted-merged
+  - work_item: WORK-023
+    title: "Mesh, IAB, relay, and store-and-forward adapter family"
+    phase: 4
+    branch: "work-023-mesh-relay"
+    baseline_sha: null
+    pr: 24
+    pr_head: 9702dd03747761a4d0c43afaa0d7de5e22b7885a
+    reviewed_sha: 9702dd03747761a4d0c43afaa0d7de5e22b7885a
+    merge_sha: 18c449bd27005cbb27f7bbffd13bc251906f4274
+    merged_at: 2026-08-27T01:53:22Z
+    ci_run: null
+    review_rounds: null
+    acceptance_decision: DEC-0023
+    correction_decisions: []
+    handoff: docs/WORK-023-handoff.md
+    handoff_required: false
+    lifecycle: accepted-merged
+  - work_item: WORK-024
+    title: "Distributed core / local breakout / UPF integration"
+    phase: 4
+    branch: "work-024-distributed-core"
+    baseline_sha: null
+    pr: 25
+    pr_head: 87b028147c1487192ac08a702507a5bb06fdeadb
+    reviewed_sha: 87b028147c1487192ac08a702507a5bb06fdeadb
+    merge_sha: 6eb145ec51be9264d3a473724733cf1f6fdad918
+    merged_at: 2026-08-27T03:39:26Z
+    ci_run: null
+    review_rounds: null
+    acceptance_decision: DEC-0024
+    correction_decisions: []
+    handoff: docs/WORK-024-handoff.md
+    handoff_required: false
+    lifecycle: accepted-merged
+  - work_item: WORK-025
+    title: "Service registry and edge compute"
+    phase: 4
+    branch: "work-025-service-registry"
+    baseline_sha: null
+    pr: 26
+    pr_head: c7e59c50b528240cc1f8d242e99f866fa99f563b
+    reviewed_sha: c7e59c50b528240cc1f8d242e99f866fa99f563b
+    merge_sha: 18dbaed7748e3b53ba4d197e3619aab54a081292
+    merged_at: 2026-08-27T10:13:28Z
+    ci_run: null
+    review_rounds: null
+    acceptance_decision: DEC-0025
+    correction_decisions: []
+    handoff: docs/WORK-025-handoff.md
+    handoff_required: false
+    lifecycle: accepted-merged
+  - work_item: WORK-026
+    title: "Telemetry and observability"
+    phase: 5
+    branch: "work-026-telemetry-observability"
+    baseline_sha: null
+    pr: 27
+    pr_head: bc56e08bd42c620502230a9bd110b481fee47d37
+    reviewed_sha: bc56e08bd42c620502230a9bd110b481fee47d37
+    merge_sha: ec2ef93dd034e2e7db79284c421c5b490f7ce8f6
+    merged_at: 2026-08-27T12:56:16Z
+    ci_run: null
+    review_rounds: null
+    acceptance_decision: DEC-0026
+    correction_decisions: []
+    handoff: null
+    handoff_required: false
+    lifecycle: accepted-merged
+    note: "chat-era item: no durable repository-local handoff prompt located (governance gap closed prospectively by this package)"
+  - work_item: WORK-027
+    title: "Energy-aware control and resilience"
+    phase: 5
+    branch: "work-027-energy-resilience"
+    baseline_sha: null
+    pr: 28
+    pr_head: a4ed7c70e14bfbb474037597c643f30d87473a89
+    reviewed_sha: a4ed7c70e14bfbb474037597c643f30d87473a89
+    merge_sha: 1a8a2a3d4c8bcb1e2c6215cd4dbcde7fd799efd6
+    merged_at: 2026-08-27T18:25:12Z
+    ci_run: null
+    review_rounds: null
+    acceptance_decision: DEC-0027
+    correction_decisions: []
+    handoff: null
+    handoff_required: false
+    lifecycle: accepted-merged
+    note: "blockers B1-B3 corrected before acceptance (PR #28 review chain, 2026-08-27)"
+  - work_item: WORK-028
+    title: "Threat model and security hardening"
+    phase: 5
+    branch: "work-028-security-hardening"
+    baseline_sha: null
+    pr: 30
+    pr_head: 164394087fb1f3618b52bea8de16a9c20c43eb46
+    reviewed_sha: 164394087fb1f3618b52bea8de16a9c20c43eb46
+    merge_sha: d5002c4b2af30734f5bb42122e5c625076e946e2
+    merged_at: 2026-08-27T19:12:15Z
+    ci_run: null
+    review_rounds: null
+    acceptance_decision: DEC-0028
+    correction_decisions: []
+    handoff: docs/WORK-028-handoff.md
+    handoff_required: false
+    lifecycle: accepted-merged
+  - work_item: WORK-029
+    title: "Upgrade, rollback, and compatibility manager"
+    phase: 5
+    branch: "work-029-upgrade-compat"
+    baseline_sha: null
+    pr: 31
+    pr_head: b085b8ac86babf486d93ee71a04002f00ef6fdd8
+    reviewed_sha: b085b8ac86babf486d93ee71a04002f00ef6fdd8
+    merge_sha: 62f5b9d3075871a9f06d9806f51b37658a6995cc
+    merged_at: 2026-08-27T20:28:56Z
+    ci_run: null
+    review_rounds: null
+    acceptance_decision: DEC-0029
+    correction_decisions: []
+    handoff: docs/WORK-029-handoff.md
+    handoff_required: false
+    lifecycle: accepted-merged
+  - work_item: WORK-030
+    title: "Management API"
+    phase: 5
+    branch: "work-030-management-api"
+    baseline_sha: null
+    pr: 32
+    pr_head: 7cfe4fbd7094ca6ffe928873c637d0d4d0a1369d
+    reviewed_sha: 7cfe4fbd7094ca6ffe928873c637d0d4d0a1369d
+    merge_sha: bd775c5365b87a75f502be5a5ecb0d4f25eeee45
+    merged_at: 2026-08-28T04:02:15Z
+    ci_run: null
+    review_rounds: null
+    acceptance_decision: DEC-0030
+    correction_decisions: []
+    handoff: docs/WORK-030-handoff.md
+    handoff_required: false
+    lifecycle: accepted-merged
+  - work_item: WORK-031
+    title: "Network and behavior simulator"
+    phase: 6
+    branch: "work-031-network-behavior-simulator"
+    baseline_sha: null
+    pr: 34
+    pr_head: 4f80bdc246ede98d52b28ec2dd919ffda24d08ca
+    reviewed_sha: 4f80bdc246ede98d52b28ec2dd919ffda24d08ca
+    merge_sha: 4ee45e57559b03c7b0fa25df3af4825cec990c47
+    merged_at: 2026-08-28T06:51:45Z
+    ci_run: null
+    review_rounds: null
+    acceptance_decision: DEC-0031
+    correction_decisions: []
+    handoff: docs/WORK-031-handoff.md
+    handoff_required: false
+    lifecycle: accepted-merged
+  - work_item: WORK-032
+    title: "Conformance suite"
+    phase: 6
+    branch: "work-032-conformance-suite"
+    baseline_sha: null
+    pr: 37
+    pr_head: 3fa72674b8004e0b96faf60c9d927171af2549dc
+    reviewed_sha: 3fa72674b8004e0b96faf60c9d927171af2549dc
+    merge_sha: 44838d0d4c0b47ccb85b4061ec706ed3e59642d8
+    merged_at: 2026-08-28T09:41:01Z
+    ci_run: null
+    review_rounds: null
+    acceptance_decision: DEC-0032
+    correction_decisions: []
+    handoff: docs/WORK-032-handoff.md
+    handoff_required: false
+    lifecycle: accepted-merged
+    note: "implemented under the ACR-003-synchronized dependency declaration (W016 -> W032 added to the DAG)"
+  - work_item: WORK-033
+    title: "Linux Agent"
+    phase: 6
+    branch: "work-033-linux-agent"
+    baseline_sha: null
+    pr: 38
+    pr_head: 1a93d5cf0ab611cf6271cd63a9858298991a02af
+    reviewed_sha: 1a93d5cf0ab611cf6271cd63a9858298991a02af
+    merge_sha: b8d032875366a979cadfef5b10c22fa724942fe4
+    merged_at: 2026-08-28T12:16:16Z
+    ci_run: null
+    review_rounds: null
+    acceptance_decision: DEC-0033
+    correction_decisions: []
+    handoff: docs/WORK-033-handoff.md
+    handoff_required: false
+    lifecycle: accepted-merged
+  - work_item: WORK-034
+    title: "Raspberry Pi / low-power gateway"
+    phase: 7
+    branch: "work-034-raspberry-pi-gateway"
+    baseline_sha: ddc7787ca03ef1658997974ade9d81a6c04c9b3a
+    pr: 39
+    pr_head: a591ac6f1e085a37994e54af18a316a2943e3b31
+    reviewed_sha: a591ac6f1e085a37994e54af18a316a2943e3b31
+    merge_sha: 42253b43f6146f8acbe03cf370f094c17e514cf8
+    merged_at: 2026-08-28T15:41:25Z
+    ci_run: null
+    review_rounds: null
+    acceptance_decision: DEC-0034
+    correction_decisions: []
+    handoff: docs/WORK-034-handoff.md
+    handoff_required: false
+    lifecycle: accepted-merged
+    evidence_obligations: "EVID-003 (OPEN)"
+  - work_item: WORK-035
+    title: "Android/mobile Agent"
+    phase: 7
+    branch: "work-035-android-mobile-agent"
+    baseline_sha: d01628c3c437501931fafd98c09bd294c0e952a0
+    pr: 40
+    pr_head: f1a3ce83267f12eaa4e974a1200c8bf37e7a484a
+    reviewed_sha: f1a3ce83267f12eaa4e974a1200c8bf37e7a484a
+    merge_sha: cffbe01639eca7c67988e2df16a7641e145203c1
+    merged_at: 2026-08-28T16:43:48Z
+    ci_run: null
+    review_rounds: null
+    acceptance_decision: DEC-0035
+    correction_decisions: []
+    handoff: docs/WORK-035-handoff.md
+    handoff_required: false
+    lifecycle: accepted-merged
+    evidence_obligations: "EVID-004 (OPEN)"
+    note: "software implementation accepted; the physical device track remains OPEN (EVID-004; DEC-0040 through DEC-0042)"
+  - work_item: WORK-036
+    title: "Network-in-a-Box"
+    phase: 7
+    branch: "work-036-network-in-a-box"
+    baseline_sha: cffbe01639eca7c67988e2df16a7641e145203c1
+    pr: 41
+    pr_head: f8078db17fb9f0e2ae78f5bfe38538fef58c8dee
+    reviewed_sha: f8078db17fb9f0e2ae78f5bfe38538fef58c8dee
+    merge_sha: 481fc528639617eaa425dd4d1340bc57a1051425
+    merged_at: 2026-08-28T18:44:03Z
+    ci_run: null
+    review_rounds: null
+    acceptance_decision: DEC-0036
+    correction_decisions: []
+    handoff: docs/WORK-036-handoff.md
+    handoff_required: false
+    lifecycle: accepted-merged
+    evidence_obligations: "EVID-005 (OPEN)"
+    note: "software implementation accepted; the physical site deployment remains OPEN (EVID-005)"
+  - work_item: WORK-037
+    title: "Open RAN/Core interoperability profile"
+    phase: 7
+    branch: "work-037-open-ran-core"
+    baseline_sha: 518c07133b1e08792d09f28baaf7a671eeeb13f3
+    pr: 42
+    pr_head: 98c57eca368424b292d4f4ee956f303ea4e0ccee
+    reviewed_sha: 98c57eca368424b292d4f4ee956f303ea4e0ccee
+    merge_sha: cebe9f938d49f31b4c6fdd13e68f1e9075afc904
+    merged_at: 2026-08-28T19:46:07Z
+    ci_run: null
+    review_rounds: null
+    acceptance_decision: DEC-0037
+    correction_decisions: []
+    handoff: docs/WORK-037-handoff.md
+    handoff_required: false
+    lifecycle: accepted-merged
+    evidence_obligations: "EVID-006 (OPEN)"
+    note: "software implementation accepted; the real 5G lab class C remains OPEN (EVID-006)"
+  - work_item: WORK-038
+    title: "Future IMT / 6G adapter profile"
+    phase: 8
+    branch: "work-038-future-imt-6g"
+    baseline_sha: cebe9f938d49f31b4c6fdd13e68f1e9075afc904
+    pr: 43
+    pr_head: 6c809f95d49949281c5c184c0c10720e9c5509c9
+    reviewed_sha: 6c809f95d49949281c5c184c0c10720e9c5509c9
+    merge_sha: 06c445a19d04ce6f3642b9138d6ca3318b4e325d
+    merged_at: 2026-08-29T01:44:07Z
+    ci_run: null
+    review_rounds: null
+    acceptance_decision: DEC-0038
+    correction_decisions: []
+    handoff: docs/WORK-038-handoff.md
+    handoff_required: false
+    lifecycle: accepted-merged
+    note: "class C physical evidence not-applicable per the frozen handoff own class list (docs/WORK-038-evidence.md)"
+  - work_item: WORK-039
+    title: "Federation at scale"
+    phase: 8
+    branch: "work-039-federation-at-scale"
+    baseline_sha: 06c445a19d04ce6f3642b9138d6ca3318b4e325d
+    pr: 44
+    pr_head: c515231fa23bc168d603926a81b2c73654e3dfb4
+    reviewed_sha: c515231fa23bc168d603926a81b2c73654e3dfb4
+    merge_sha: 1669ae9a396838b72ba461c846b98e84478ab24f
+    merged_at: 2026-08-29T19:49:01Z
+    ci_run: null
+    review_rounds: 2
+    acceptance_decision: DEC-0039
+    correction_decisions:
+      - DEC-0043
+    handoff: docs/WORK-039-handoff.md
+    handoff_required: false
+    lifecycle: accepted-merged
+  - work_item: WORK-040
+    title: "Pilot deployment"
+    phase: 8
+    branch: "work-040-pilot-deployment"
+    baseline_sha: 1669ae9a396838b72ba461c846b98e84478ab24f
+    pr: 48
+    pr_head: ee9b356020b6450d85837f60e60c41d08f0ec09a
+    reviewed_sha: null
+    merge_sha: null
+    merged_at: null
+    ci_run: 33278751838
+    review_rounds: 1
+    acceptance_decision: null
+    correction_decisions:
+      - DEC-0046
+    handoff: docs/WORK-040-correction-handoff.md
+    handoff_required: true
+    lifecycle: in-review
+    areas:
+      - pilot/
+    note: "in review, round 1 verdict rendered: delivered on PR #48 (head ee9b356, CI run 33278751838 SUCCESS, delivery record posted 2026-08-29); DEC-0046 rules CHANGES_REQUIRED (criteria 1-2 open) and issues the repository-local correction authorization WORK-040-CORRECTION-001 (baseline 93efa54f); the chat-era designation remains deprecated provenance in authorizations/WORK-040.yaml; the correction-cycle handoff is docs/WORK-040-correction-handoff.md on main, while the implementation handoff still lives on the branch (docs/WORK-040-handoff.md) and in the PR #48 body; this in-review entry stays descriptive only and is never authorization (PA-001, DEC-0045)"
+
+reconciliations:
+  - reconciliation_id: LEDGER-RECON-001
+    recorded_by: DEC-0046
+    recorded_at: 2026-08-30T04:02:23Z
+    from_main_sha: 1669ae9a396838b72ba461c846b98e84478ab24f
+    to_main_sha: 93efa54f1edc2ec3c0bb5646827719f92af06b86
+    reason: "persistent-state reconciliation after the persistent Architect package merged (PR #60, merge 93efa54f at 2026-08-30T03:59:21Z): the package-establishment snapshot baseline moves from 1669ae9a to the post-merge mainline, and the WORK-040 round 1 verdict plus the correction-only authorization WORK-040-CORRECTION-001 are recorded on the WORK-040 entry"
+    history: "no work-item history rewritten: every WORK-001..WORK-039 entry is byte-identical to the package-establishment snapshot; WORK-040 gains its review_rounds count, its correction-decision reference, and the repository-local correction handoff; the reconciliation is formal and visible, never silent"

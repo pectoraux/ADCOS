@@ -1,0 +1,28 @@
+# ADCOS Architect decision record.
+# schema: spec/architect/decision-record-template.md; verified by tools/spec_check.py (ARCH-04).
+
+decision_id: DEC-0021
+type: acceptance
+work_item: WORK-021
+acr: null
+pr: 22
+reviewed_sha: 04f803ed0c7ecaf2a5d197c663db7c37598ef5c7
+decision: ACCEPTED
+status: ACCEPTED
+reviewer: "Architect (pectoraux)"
+timestamp: 2026-08-26T16:21:41Z
+findings:
+  - "Definition of done satisfied for WORK-021 (Wi-Fi/non-3GPP access adapter)."
+  - "Migrated record: the repository-durable evidence of acceptance is the Architect merge of PR #22 (merge commit c25013d8d744c1d4464245f2aeb5044a86fe11da); chat-era review commentary is not restated here."
+blockers: []
+required_corrections: []
+evidence:
+  merge_sha: c25013d8d744c1d4464245f2aeb5044a86fe11da
+  ci_run: null
+  artifacts: []
+accepted_scope:
+  - "The WORK-021 contract as frozen in spec/work-items.md (objective, acceptance criteria, definition of done)."
+rejected_scope: []
+downstream_effect:
+  - "Unblocks, per the frozen DAG: WORK-024, WORK-034, WORK-037"
+resolved_by: null

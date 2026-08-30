@@ -1,0 +1,30 @@
+# ADCOS Architect decision record.
+# schema: spec/architect/decision-record-template.md; verified by tools/spec_check.py (ARCH-04).
+decision_id: DEC-0043
+type: correction
+work_item: WORK-039
+acr: null
+pr: 44
+reviewed_sha: ddc35155c8a54e9c292c0512b04ac77207718d34
+decision: CHANGES_REQUIRED
+status: SUPERSEDED
+reviewer: "Architect (pectoraux)"
+timestamp: null
+findings:
+  - "Migrated record: the blocker ruling was rendered in the chat-era review and was not persisted as a PR comment; the durable repository evidence of the verdict is the correction commit c515231 (2026-08-29) and the correction report posted on PR #44 (2026-08-29T19:32:25Z); the timestamp field is therefore null."
+  - "Blocker W039-001: the claimed multi-hop revocation propagation was not actually implemented; step 4 of propagate_revocation applied each exchange directly at the target store while the round count was only a pre-computed distance label (distance calculation, not distance-based forwarding); the validating test case_21 was a false-positive architectural test."
+blockers:
+  - "W039-001"
+required_corrections:
+  - "implement actual hop-by-hop relay delivery: each declaration must ride a real WORK-003 envelope forwarded verbatim along the deterministic path, with real receipts at each intermediate domain, and only the final recipient applying the exchange through the real apply_exchange"
+evidence:
+  merge_sha: null
+  ci_run: 99149529328
+  artifacts:
+    - "correction commit c515231fa23bc168d603926a81b2c73654e3dfb4 (WORK-039 correction 1)"
+accepted_scope: []
+rejected_scope:
+  - "distance-label simulation presented as multi-hop relay delivery"
+downstream_effect:
+  - "WORK-039 acceptance deferred until the correction landed; resolved at c515231 and accepted (DEC-0039)"
+resolved_by: DEC-0039

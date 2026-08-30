@@ -1,0 +1,28 @@
+# ADCOS Architect decision record.
+# schema: spec/architect/decision-record-template.md; verified by tools/spec_check.py (ARCH-04).
+
+decision_id: DEC-0006
+type: acceptance
+work_item: WORK-006
+acr: null
+pr: 6
+reviewed_sha: 94763e7ba0e9c3c317640df4320b25ce1c47be90
+decision: ACCEPTED
+status: ACCEPTED
+reviewer: "Architect (pectoraux)"
+timestamp: 2026-08-24T06:23:28Z
+findings:
+  - "Definition of done satisfied for WORK-006 (Peer discovery)."
+  - "Migrated record: the repository-durable evidence of acceptance is the Architect merge of PR #6 (merge commit 49752651da392cd2ea19652c1bf34258b32be7ef); chat-era review commentary is not restated here."
+blockers: []
+required_corrections: []
+evidence:
+  merge_sha: 49752651da392cd2ea19652c1bf34258b32be7ef
+  ci_run: null
+  artifacts: []
+accepted_scope:
+  - "The WORK-006 contract as frozen in spec/work-items.md (objective, acceptance criteria, definition of done)."
+rejected_scope: []
+downstream_effect:
+  - "Unblocks, per the frozen DAG: WORK-007"
+resolved_by: null

@@ -1,0 +1,29 @@
+# ADCOS Architect decision record.
+# schema: spec/architect/decision-record-template.md; verified by tools/spec_check.py (ARCH-04).
+
+decision_id: DEC-0036
+type: acceptance
+work_item: WORK-036
+acr: null
+pr: 41
+reviewed_sha: f8078db17fb9f0e2ae78f5bfe38538fef58c8dee
+decision: ACCEPTED
+status: ACCEPTED
+reviewer: "Architect (pectoraux)"
+timestamp: 2026-08-28T18:44:03Z
+findings:
+  - "Definition of done satisfied for WORK-036 (Network-in-a-Box); software implementation accepted; the physical site deployment remains OPEN (EVID-005)"
+  - "Migrated record: the repository-durable evidence of acceptance is the Architect merge of PR #41 (merge commit 481fc528639617eaa425dd4d1340bc57a1051425); chat-era review commentary is not restated here."
+blockers: []
+required_corrections: []
+evidence:
+  merge_sha: 481fc528639617eaa425dd4d1340bc57a1051425
+  ci_run: null
+  artifacts:
+    - "EVID-005 (OPEN)"
+accepted_scope:
+  - "The WORK-036 contract as frozen in spec/work-items.md (objective, acceptance criteria, definition of done)."
+rejected_scope: []
+downstream_effect:
+  - "Unblocks, per the frozen DAG: WORK-039, WORK-040"
+resolved_by: null

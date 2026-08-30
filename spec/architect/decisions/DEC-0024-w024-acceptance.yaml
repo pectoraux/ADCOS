@@ -1,0 +1,28 @@
+# ADCOS Architect decision record.
+# schema: spec/architect/decision-record-template.md; verified by tools/spec_check.py (ARCH-04).
+
+decision_id: DEC-0024
+type: acceptance
+work_item: WORK-024
+acr: null
+pr: 25
+reviewed_sha: 87b028147c1487192ac08a702507a5bb06fdeadb
+decision: ACCEPTED
+status: ACCEPTED
+reviewer: "Architect (pectoraux)"
+timestamp: 2026-08-27T03:39:26Z
+findings:
+  - "Definition of done satisfied for WORK-024 (Distributed core / local breakout / UPF integration)."
+  - "Migrated record: the repository-durable evidence of acceptance is the Architect merge of PR #25 (merge commit 6eb145ec51be9264d3a473724733cf1f6fdad918); chat-era review commentary is not restated here."
+blockers: []
+required_corrections: []
+evidence:
+  merge_sha: 6eb145ec51be9264d3a473724733cf1f6fdad918
+  ci_run: null
+  artifacts: []
+accepted_scope:
+  - "The WORK-024 contract as frozen in spec/work-items.md (objective, acceptance criteria, definition of done)."
+rejected_scope: []
+downstream_effect:
+  - "Unblocks, per the frozen DAG: WORK-025, WORK-027, WORK-034, WORK-036"
+resolved_by: null

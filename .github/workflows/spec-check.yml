@@ -154,3 +154,21 @@ jobs:
 
       - name: Run WORK-040 pilot deployment tests
         run: python3 tools/pilot_selftest.py
+
+      # Persistent Architect package: authorization provenance for pull
+      # requests. Runs LAST on purpose: the frozen-surface batteries above
+      # detect the origin/main ref to choose their strict context, and this
+      # step is the only one that fetches it. The spec_check run above
+      # reports ARCH-08 as SKIP in the base-less PR checkout; this step
+      # enforces it strictly: an implementation-file delta requires an
+      # ACTIVE authorization inherited byte-identically from the base
+      # (never self-authorized), with the exact recorded baseline and a
+      # scope covering the whole delta. An in-review ledger entry is
+      # descriptive only and is NEVER authorization (PA-001, DEC-0045);
+      # without an active authorization the step fails closed. And
+      # implementation deltas must not modify spec/architect/.
+      - name: Verify execution-authorization provenance (PR context)
+        if: github.event_name == 'pull_request'
+        run: |
+          git fetch --no-tags origin main
+          python3 tools/spec_check.py --provenance

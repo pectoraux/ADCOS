@@ -1,0 +1,28 @@
+# ADCOS Architect decision record.
+# schema: spec/architect/decision-record-template.md; verified by tools/spec_check.py (ARCH-04).
+
+decision_id: DEC-0025
+type: acceptance
+work_item: WORK-025
+acr: null
+pr: 26
+reviewed_sha: c7e59c50b528240cc1f8d242e99f866fa99f563b
+decision: ACCEPTED
+status: ACCEPTED
+reviewer: "Architect (pectoraux)"
+timestamp: 2026-08-27T10:13:28Z
+findings:
+  - "Definition of done satisfied for WORK-025 (Service registry and edge compute)."
+  - "Migrated record: the repository-durable evidence of acceptance is the Architect merge of PR #26 (merge commit 18dbaed7748e3b53ba4d197e3619aab54a081292); chat-era review commentary is not restated here."
+blockers: []
+required_corrections: []
+evidence:
+  merge_sha: 18dbaed7748e3b53ba4d197e3619aab54a081292
+  ci_run: null
+  artifacts: []
+accepted_scope:
+  - "The WORK-025 contract as frozen in spec/work-items.md (objective, acceptance criteria, definition of done)."
+rejected_scope: []
+downstream_effect:
+  - "Unblocks, per the frozen DAG: WORK-036"
+resolved_by: null

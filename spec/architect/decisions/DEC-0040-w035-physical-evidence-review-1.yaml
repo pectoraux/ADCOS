@@ -1,0 +1,33 @@
+# ADCOS Architect decision record.
+# schema: spec/architect/decision-record-template.md; verified by tools/spec_check.py (ARCH-04).
+decision_id: DEC-0040
+type: correction
+work_item: WORK-035
+acr: null
+pr: 47
+reviewed_sha: null
+decision: CHANGES_REQUIRED
+status: SUPERSEDED
+reviewer: "Architect (pectoraux)"
+timestamp: 2026-08-29T12:10:08Z
+findings:
+  - "Migrated record: the reviewed SHA for this first review round is not durably recoverable (the PR #47 branch was force-pushed through evidence versions v1..v10); the ruling itself is durably quoted in the review comment."
+  - "The validation harness monkeypatches agent.runtime.bind_session and agent.runtime.send_datagram with lambdas and writes agent.runtime.sessions._sessions directly; the reported session continuity and datagram delivery therefore come from a test-double path, not from the accepted W035 runtime."
+  - "The PR promotes mobile.platform.MOBILE_EVIDENCE_STATUS[physical_device] to supported-verified while the evidence set itself says several required physical behaviors are NOT TESTABLE; the promotion is not justified by the submitted evidence."
+blockers:
+  - "physical evidence derived from a test-double path instead of the accepted W035 runtime"
+required_corrections:
+  - "exercise the real W035 composition path end to end"
+  - "revert the evidence-status promotion until the full required physical set is genuinely demonstrated"
+evidence:
+  merge_sha: null
+  ci_run: null
+  artifacts:
+    - "PR #47 review comment 2026-08-29T12:10:08Z"
+accepted_scope: []
+rejected_scope:
+  - "test-double-derived physical evidence"
+  - "evidence-status promotion ahead of genuine demonstration"
+downstream_effect:
+  - "W035 physical device gate remains OPEN (EVID-004)"
+resolved_by: DEC-0042

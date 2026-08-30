@@ -32,6 +32,10 @@ WORK-001 established the governance layer around the frozen specification:
 
 The frozen documents change only through the ACR process. A normal implementation PR is never allowed to silently become an architecture change.
 
+## Persistent Architect
+
+The repository itself is the persistent Architect: `spec/architect/` holds the canonical current-state snapshot (`current-state.md`), the authority precedence chain (`authority-order.md`), the machine-readable execution state, execution ledger, and evidence-obligation registry, the durable decision records (`decisions/`), the repository-local Work Item authorizations (`authorizations/`), and the review and resume protocols. A brand-new Architect or implementation agent resumes from `spec/architect/resume-protocol.md` alone — chat history is never authority. **No repository-local authorization means implementation must stop** (enforced by CI; see `tools/README.md`).
+
 Run the deterministic specification consistency checks (offline, zero dependencies):
 
 ```bash

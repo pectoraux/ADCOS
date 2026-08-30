@@ -1,0 +1,30 @@
+# ADCOS Architect decision record.
+# schema: spec/architect/decision-record-template.md; verified by tools/spec_check.py (ARCH-04).
+decision_id: DEC-0041
+type: correction
+work_item: WORK-035
+acr: null
+pr: 47
+reviewed_sha: a8038d54fd10fee90adc553244f678109dab3560
+decision: CHANGES_REQUIRED
+status: SUPERSEDED
+reviewer: "Architect (pectoraux)"
+timestamp: 2026-08-29T14:23:19Z
+findings:
+  - "The monkeypatch and private-store defects are gone, but tools/physical_protocol_validation.py constructs DynamicInterfaceSource and feeds it into the production MobileAgent and AgentRuntime; after the real Android snapshot the script calls if_source_m.update(...), synthesizing wlan0 and rmnet0 state, so the physical OS observation drives a synthetic interface authority before the protocol action."
+  - "That is not admissible as physical handover proof."
+blockers:
+  - "physical observation drives a synthetic interface authority before the protocol action"
+required_corrections:
+  - "the physical OS observation must drive the production interface authority directly, with no synthetic source between"
+evidence:
+  merge_sha: null
+  ci_run: null
+  artifacts:
+    - "PR #47 re-review comment 2026-08-29T14:23:19Z"
+accepted_scope: []
+rejected_scope:
+  - "synthetic-interface-authority handover proof"
+downstream_effect:
+  - "W035 physical device gate remains OPEN (EVID-004)"
+resolved_by: DEC-0042

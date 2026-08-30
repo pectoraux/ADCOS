@@ -1,0 +1,29 @@
+# ADCOS Architect decision record.
+# schema: spec/architect/decision-record-template.md; verified by tools/spec_check.py (ARCH-04).
+
+decision_id: DEC-0020
+type: acceptance
+work_item: WORK-020
+acr: null
+pr: 21
+reviewed_sha: 5dd9f0d9da511cad580c365200f6b58ea7075fa7
+decision: ACCEPTED
+status: ACCEPTED
+reviewer: "Architect (pectoraux)"
+timestamp: 2026-08-28T13:49:52Z
+findings:
+  - "Definition of done satisfied for WORK-020 (5G RAN/gNB adapter); accepted with the external SDR evidence gate OPEN (EVID-002): architecture conformance PASS, automated verification PASS, physical SDR lab BLOCKED (docs/WORK-020-real-sdr-acceptance.md)"
+  - "Migrated record: the repository-durable evidence of acceptance is the Architect merge of PR #21 (merge commit ddc7787ca03ef1658997974ade9d81a6c04c9b3a); chat-era review commentary is not restated here."
+blockers: []
+required_corrections: []
+evidence:
+  merge_sha: ddc7787ca03ef1658997974ade9d81a6c04c9b3a
+  ci_run: null
+  artifacts:
+    - "EVID-002 (OPEN)"
+accepted_scope:
+  - "The WORK-020 contract as frozen in spec/work-items.md (objective, acceptance criteria, definition of done)."
+rejected_scope: []
+downstream_effect:
+  - "Unblocks, per the frozen DAG: WORK-034, WORK-037"
+resolved_by: null

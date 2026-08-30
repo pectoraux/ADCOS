@@ -7,10 +7,11 @@ Deterministic, offline consistency checks for the ADCOS specification repository
 ### Invocation
 
 ```bash
-python3 tools/spec_check.py
+python3 tools/spec_check.py                    # full check suite
+python3 tools/spec_check.py --provenance       # strict ARCH-08 provenance only
 ```
 
-Requirements: Python 3.8+ standard library only. No network access, no external services, no third-party packages, no environment-specific absolute paths. The command may be run from any working directory; paths resolve relative to the repository root.
+Requirements: Python 3.8+ standard library only. No network access, no external services, no third-party packages, no environment-specific absolute paths. The command may be run from any working directory; paths resolve relative to the repository root. `--provenance` requires an `origin/main` ref in the checkout (the dedicated CI step fetches the pull-request base before invoking it) and fails when it is unavailable; the full suite reports ARCH-08 as SKIP in base-less contexts instead.
 
 Exit codes:
 
@@ -33,6 +34,14 @@ CI runs the same command on every push and pull request (`.github/workflows/spec
 | `DEPS-02` | yes | The dependency graph (DAG edges ∪ declared dependencies) is acyclic. |
 | `DEPS-03` | yes | Execution phases cover every Work Item, are numbered sequentially, and every DAG edge respects phase ordering and intra-phase ordering; the critical path never places an item before its dependency. |
 | `ADV-01` | no (advisory) | Declared dependencies not reflected in the DAG, and DAG edges not declared in `spec/work-items.md`, are reported. Advisories do not change the exit code; they are specification-consistency findings for the Architect to resolve (directly or via an ACR). |
+| `ARCH-01` | yes | The persistent Architect package (`spec/architect/`) exists with all required artifacts (current state, authority order, execution state/ledger/evidence registries, protocols, templates, decision registry, authorizations). |
+| `ARCH-02` | yes | The machine-readable state files parse within the supported YAML subset (a strict, deterministic block-mapping/block-sequence subset; anything else fails closed) and satisfy their schemas (required keys, controlled vocabularies, lifecycle-consistent fields). |
+| `ARCH-03` | yes | Execution authorization integrity: exactly one active Work Item when implementing; an active repository-local authorization exists, matches the recorded baseline, satisfies the frozen dependency declarations, and carries a handoff; no duplicate authorizations; **no current authorization = implementation must stop**. |
+| `ARCH-04` | yes | Decision registry integrity: decision ids unique and filename-matched; acceptance `reviewed_sha` equals the ledger reviewed head and `merge_sha` equals the ledger merge SHA; ledger decision references resolve with matching Work Items. |
+| `ARCH-05` | yes | Execution ledger coherence: lifecycle states are internally consistent (accepted-merged entries carry merge evidence; in-review entries never claim a merge), agree with `execution-state.yaml`, and in-review items have all hard dependencies accepted. |
+| `ARCH-06` | yes | Evidence obligations are registered, honestly classified (`PASS`/`PARTIAL`/`NOT-TESTABLE`/`OPEN`), visible in the current-state snapshot, and referenceable — open obligations cannot disappear, and a PHYSICAL `PASS` requires an Architect acceptance decision. |
+| `ARCH-07` | yes | Canonical reference resolution: repository path references, `DEC-NNNN` and `EVID-NNN` references across the package resolve; handoff references in the ledger resolve. |
+| `ARCH-08` | yes* | Implementation-PR authorization provenance: with a base reference available (full clone with `origin/main`, or strict `--provenance` mode), any implementation-file delta requires an **active** authorization **inherited byte-identically from the base** (never self-authorized) whose `baseline_sha` matches the recorded main baseline exactly and whose scope covers every implementation file. An **in-review ledger entry is descriptive only and is never authorization** (PA-001, DEC-0045): without an active authorization the check fails closed (no current authorization = implementation must stop). Implementation deltas must not modify `spec/architect/`. Without a base reference the check reports SKIP and CI enforces it via the dedicated provenance step. |
 
 ### Determinism
 
@@ -44,7 +53,11 @@ This tool validates repository structure and specification mechanics only. It is
 
 ## spec_check_selftest.py
 
-Deterministic, offline negative and positive tests for the checker itself, introduced by WORK-001 correction cycles 2 and 3 (Architect reviews of PR #1) and extended during the WORK-015 review (Architect-directed VERS-01 declaration/reference refinement: Status-section prose references must pass while all declaration forms still fail). Each case copies the specification tree into a temporary directory, applies exactly one change, runs the checker, and asserts the expected exit code and failing check. No repository file is ever modified; temporary directories are always removed.
+Deterministic, offline negative and positive tests for the checker itself, introduced by WORK-001 correction cycles 2 and 3 (Architect reviews of PR #1), extended during the WORK-015 review (Architect-directed VERS-01 declaration/reference refinement: Status-section prose references must pass while all declaration forms still fail), and extended again by the persistent Architect package (ARCH + provenance case families). Each case copies the specification tree into a temporary directory, applies exactly one change, runs the checker, and asserts the expected exit code and failing check. No repository file is ever modified; temporary directories are always removed.
+
+Persistent-Architect cases (governance era) prove the required integrity properties end to end: a new session reconstructs active state from the unmutated package (`architect-baseline-reconstructs-state`); a missing authorization blocks implementation (`ARCH-03`); a stale authorization whose baseline no longer matches the recorded main baseline is detected (`ARCH-03`); review state cannot contradict execution state (`ARCH-05`); an in-review ledger entry cannot claim a merge (`ARCH-02`); an acceptance decision's SHA cannot differ from the reviewed SHA (`ARCH-04`); open evidence obligations cannot disappear (`ARCH-06`); broken canonical references fail (`ARCH-07`); and the supported YAML subset fails closed on flow sequences (`ARCH-02`).
+
+Provenance cases initialize a temporary git repository with an `origin/main` base ref and run `spec_check.py --provenance`: a governance-only delta passes; an unauthorized implementation file fails; a self-added/modified authorization fails (the authorization must be inherited from the base); an in-review ledger entry with a matching branch and areas does **not** authorize implementation — it fails closed without an active authorization (PA-001, DEC-0045; the inversion of the original pre-correction case); an authorized implementation delta passes (the active authorization is inherited byte-identically from the base via `base_ops` that land it in the base commit, with the exact recorded baseline and the delta inside scope); and an implementation delta that also modifies `spec/architect/` fails. These cases require a local `git`; they are skipped-fatal (assertion error) if git operations fail.
 
 ### Invocation
 

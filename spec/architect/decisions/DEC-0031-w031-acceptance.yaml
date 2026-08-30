@@ -1,0 +1,28 @@
+# ADCOS Architect decision record.
+# schema: spec/architect/decision-record-template.md; verified by tools/spec_check.py (ARCH-04).
+
+decision_id: DEC-0031
+type: acceptance
+work_item: WORK-031
+acr: null
+pr: 34
+reviewed_sha: 4f80bdc246ede98d52b28ec2dd919ffda24d08ca
+decision: ACCEPTED
+status: ACCEPTED
+reviewer: "Architect (pectoraux)"
+timestamp: 2026-08-28T06:51:45Z
+findings:
+  - "Definition of done satisfied for WORK-031 (Network and behavior simulator)."
+  - "Migrated record: the repository-durable evidence of acceptance is the Architect merge of PR #34 (merge commit 4ee45e57559b03c7b0fa25df3af4825cec990c47); chat-era review commentary is not restated here."
+blockers: []
+required_corrections: []
+evidence:
+  merge_sha: 4ee45e57559b03c7b0fa25df3af4825cec990c47
+  ci_run: null
+  artifacts: []
+accepted_scope:
+  - "The WORK-031 contract as frozen in spec/work-items.md (objective, acceptance criteria, definition of done)."
+rejected_scope: []
+downstream_effect:
+  - "Unblocks, per the frozen DAG: WORK-039"
+resolved_by: null

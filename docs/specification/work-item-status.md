@@ -1,27 +1,15 @@
 # Work Item Status Snapshot
 
-## Baseline
+## Status
 
-`main@4ee45e57559b03c7b0fa25df3af4825cec990c47`
+**SUPERSEDED — historical snapshot (2026-08-28, main@4ee45e5)**
 
-## Accepted + merged
+This snapshot predates the persistent Architect package and is retained
+for history only. The authoritative current state lives in:
 
-`W001–W031`
+- `spec/architect/current-state.md` — the single current-state snapshot
+- `spec/architect/execution-state.yaml` — machine-readable execution state
+- `spec/architect/execution-ledger.yaml` — per-Work-Item lifecycle ledger
+  (WORK-001..WORK-039 accepted-merged; WORK-040 in review on PR #48)
 
-## Next candidate
-
-`W032 — Conformance Suite`
-
-W032's frozen dependency declaration is now exactly synchronized with the frozen DAG by `ACR-003`: `W016 → W032`.
-
-## Execution status
-
-W032 is **DAG-ready** once all of its declared hard dependencies are confirmed Architect-accepted and merged. It is not execution-ready until the Architect explicitly designates it as the sole active Work Item.
-
-## Architecture questions
-
-`OAQ-001` is resolved by accepted `ACR-003`.
-
-## Governing rule
-
-No Work Item may infer or add dependencies outside the synchronized frozen DAG. Any future dependency change requires a new ACR.
+Do not update this file; new sessions must read the persistent package.

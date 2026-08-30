@@ -1,0 +1,33 @@
+# ADCOS Architect decision record.
+# schema: spec/architect/decision-record-template.md; verified by tools/spec_check.py (ARCH-04).
+decision_id: DEC-0044
+type: governance
+work_item: null
+acr: null
+pr: 49
+reviewed_sha: f2880650956ab688233e839c0c59cd2182e20f70
+decision: CHANGES_REQUIRED
+status: CHANGES_REQUIRED
+reviewer: "Architect (pectoraux)"
+timestamp: 2026-08-29T23:50:48Z
+findings:
+  - "PR #49 must be treated as incomplete with respect to persistent architecture custody: the roadmap and ACR are useful, but the repository must also become the persistent Architect for future implementation sessions."
+  - "The persistent package must distinguish normative architecture, accepted precedent, evidence, and historical notes, and must never rely on chat history as an authoritative source."
+  - "spec/work-items.md remains frozen; W041+ must not be silently appended until ACR-004 is accepted."
+blockers:
+  - "persistent architecture custody absent from the repository"
+required_corrections:
+  - "add a canonical spec/architect/ resume package containing at minimum: current-state snapshot; authority precedence; decision/acceptance record format; execution-authorization format; per-Work-Item handoff template; execution ledger; evidence-obligation registry; review protocol; deterministic new-Architect/new-Z.ai resume procedure; and CI-integrity rules that prevent an implementation PR from proceeding without repository-local authorization"
+evidence:
+  merge_sha: null
+  ci_run: null
+  artifacts:
+    - "PR #49 Architect follow-up comment 2026-08-29T23:50:48Z"
+    - "spec/architect/ (this package, its fulfillment)"
+accepted_scope: []
+rejected_scope:
+  - "acceptance of PR #49 ahead of the persistent package"
+downstream_effect:
+  - "ACR-004 and the connectivity-economy roadmap are gated on this package being accepted first"
+  - "W041+ remain nonexistent (frozen backlog WORK-001..WORK-040) until ACR-004 is accepted"
+resolved_by: null

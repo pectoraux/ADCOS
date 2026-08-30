@@ -1,0 +1,47 @@
+# ADCOS Architect decision record.
+# schema: spec/architect/decision-record-template.md; verified by tools/spec_check.py (ARCH-04).
+decision_id: DEC-0046
+type: correction
+work_item: WORK-040
+acr: null
+pr: 48
+reviewed_sha: ee9b356020b6450d85837f60e60c41d08f0ec09a
+decision: CHANGES_REQUIRED
+status: CHANGES_REQUIRED
+reviewer: "Architect (pectoraux)"
+timestamp: 2026-08-30T04:02:23Z
+findings:
+  - "Review of the delivered WORK-040 pilot (PR #48, head ee9b356, CI run 33278751838 SUCCESS): the honest evidence position stands — criterion 1 (real users/devices participate) is PARTIAL with software-class device processes rather than physical handsets or human users, and criterion 2 (a real 5G access path) is NOT-TESTABLE on the current host. A software rehearsal can never close a physical criterion by inference."
+  - "Criteria 3-6 (non-cellular path, relay/backhaul path, resilience/failover, operational evidence) are already evidenced with operational-class evidence and must be preserved through the correction cycle."
+  - "The verdict is CHANGES_REQUIRED, and with this decision the Architect issues a repository-local, correction-only authorization — WORK-040-CORRECTION-001 — recorded in spec/architect/authorizations/WORK-040.yaml as status active against baseline 93efa54f (main after the PR #60 merge). The authorization becomes persistent authority when this reconciliation merges to main; until then it is proposed state carried by PR #61. This does NOT accept WORK-040."
+  - "Provenance: no GitHub review exists on PR #48 (the repository-connected identity is the PR author and cannot request changes on its own PR — the DEC-0045 HTTP 422 precedent); per review-protocol section 5 this decision record is the durable repository-side review state. The verdict and correction authorization were rendered by the Architect in the session of 2026-08-30; the timestamp is the PR #61 creation time, the durable repository event carrying this transition."
+blockers:
+  - "criterion 1: no real-device participation evidence (software-class participants only)"
+  - "criterion 2: no real 5G physical access evidence (NOT-TESTABLE on the current host)"
+required_corrections:
+  - "demonstrate real-device participation using an actual physical endpoint while preserving the production ADCOS chain"
+  - "attempt and, only if genuinely available, demonstrate a real 5G access path, distinguishing 5G from generic cellular evidence"
+  - "preserve the already demonstrated non-cellular, relay/backhaul, failover, and operational evidence"
+  - "keep evidence provenance exact and classify unavailable physical evidence as NOT-TESTABLE or OPEN rather than promoting software evidence"
+evidence:
+  merge_sha: null
+  ci_run: 33278751838
+  artifacts:
+    - "PR #48 delivery: head ee9b356020b6450d85837f60e60c41d08f0ec09a, CI run 33278751838 SUCCESS, delivery record posted 2026-08-29"
+    - "PR #60 merge 93efa54f1edc2ec3c0bb5646827719f92af06b86 at 2026-08-30T03:59:21Z — the mainline the correction authorization is issued against"
+    - "Architect correction-authorization directive, session web-71c04019-eb3d-43be-a11f-d530daa86427 (trace 1a050d623430ae9d), 2026-08-30; PR #61 carries the durable transition"
+accepted_scope:
+  - "criteria 3-6 of the delivered pilot (non-cellular path, relay/backhaul, failover, operational evidence) as operational-class evidence"
+  - "the correction cycle only: real-device participation evidence; physical 5G access evidence if genuinely available; preservation of the existing evidence"
+rejected_scope:
+  - "acceptance of WORK-040 in its delivered form"
+  - "W041+ behavior"
+  - "new protocol semantics or new authorities"
+  - "synthetic physical-path evidence, private-method fallbacks as acceptance evidence, or promotion of software/emulated evidence to PHYSICAL PASS"
+downstream_effect:
+  - "spec/architect/authorizations/WORK-040.yaml is active (authorized: true) with authorization_id WORK-040-CORRECTION-001 against baseline 93efa54f — the repository-local authority an implementation PR requires under ARCH-08"
+  - "spec/architect/execution-state.yaml mode implementing with active_work_item WORK-040 and active_authorization WORK-040-CORRECTION-001 (correction-only scope)"
+  - "spec/architect/execution-ledger.yaml is formally reconciled to main 93efa54f (LEDGER-RECON-001); the W040 in-review entry remains descriptive only and is never authorization (PA-001, DEC-0045)"
+  - "EVID-007 and EVID-008 carry this decision as review_decision; the correction cycle updates their evidence, never their physical classification or anti-promotion discipline"
+  - "WORK-040 acceptance remains blocked pending Architect re-review of the correction PR; W041+ remains blocked pending ACR-004"
+resolved_by: null

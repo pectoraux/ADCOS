@@ -1,0 +1,35 @@
+# ADCOS Architect decision record.
+# schema: spec/architect/decision-record-template.md; verified by tools/spec_check.py (ARCH-04).
+decision_id: DEC-0042
+type: correction
+work_item: WORK-035
+acr: null
+pr: 47
+reviewed_sha: null
+decision: CHANGES_REQUIRED
+status: CHANGES_REQUIRED
+reviewer: "Architect (pectoraux)"
+timestamp: 2026-08-29T15:07:11Z
+findings:
+  - "Migrated record: the v6 reviewed SHA is not durably recoverable (the PR #47 branch was force-pushed through evidence versions; only the v2 review explicitly recorded a head, a8038d54, after which further versions preceded v6)."
+  - "Substantial improvement: the evidence now correctly separates physical observation, production MobileAgent gating, and the still-open physical handover boundary; the Android harness permission is signature-protected."
+  - "The physical handover gate still cannot close: the reviewed validator maps cellular to host lo (IF_MAP wifi=wlp3s0, cellular=lo) and constructs the production MobileAgent with LinuxInterfaceSource against the host, so the physical handset Wi-Fi disable does not create a genuinely handset-backed alternate transport."
+  - "The script demonstrates a real handset observation and a production W035 reaction, plus a real two-process checkpoint/recovery experiment, but not a physical transport re-bind over a handset-backed second path."
+blockers:
+  - "no genuinely handset-backed second transport path for the physical handover demonstration"
+required_corrections:
+  - "demonstrate the physical transport re-bind over a handset-backed second path, or keep the gate honestly open"
+evidence:
+  merge_sha: null
+  ci_run: null
+  artifacts:
+    - "PR #47 v6 review comment 2026-08-29T15:07:11Z"
+    - "spec/architect/evidence-obligations.yaml EVID-004"
+accepted_scope:
+  - "W035 software implementation CLOSED (accepted at DEC-0035)"
+  - "physical observation evidence PASS"
+rejected_scope:
+  - "physical transport handover closure"
+downstream_effect:
+  - "W035 physical device track remains OPEN (EVID-004); PRs #45, #46, #47 remain open pending Architect disposition"
+resolved_by: null

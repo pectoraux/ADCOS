@@ -1,0 +1,28 @@
+# ADCOS Architect decision record.
+# schema: spec/architect/decision-record-template.md; verified by tools/spec_check.py (ARCH-04).
+
+decision_id: DEC-0013
+type: acceptance
+work_item: WORK-013
+acr: null
+pr: 13
+reviewed_sha: 3c3588535135e0a91172b162cfb9f848adb121f0
+decision: ACCEPTED
+status: ACCEPTED
+reviewer: "Architect (pectoraux)"
+timestamp: 2026-08-25T04:44:12Z
+findings:
+  - "Definition of done satisfied for WORK-013 (Multipath session manager)."
+  - "Migrated record: the repository-durable evidence of acceptance is the Architect merge of PR #13 (merge commit edb241ca03fbb2f91b0c89cf67cb17d85298575c); chat-era review commentary is not restated here."
+blockers: []
+required_corrections: []
+evidence:
+  merge_sha: edb241ca03fbb2f91b0c89cf67cb17d85298575c
+  ci_run: null
+  artifacts: []
+accepted_scope:
+  - "The WORK-013 contract as frozen in spec/work-items.md (objective, acceptance criteria, definition of done)."
+rejected_scope: []
+downstream_effect:
+  - "Unblocks, per the frozen DAG: WORK-014, WORK-023, WORK-031, WORK-035"
+resolved_by: null

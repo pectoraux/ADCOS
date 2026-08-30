@@ -1,0 +1,101 @@
+# ADCOS external evidence obligations — machine-readable, persisted by the Architect.
+#
+# External evidence is tracked SEPARATELY from software acceptance
+# (spec/workflow.md 2.2; ACR-002). A software PASS can never silently become
+# a physical PASS. Valid statuses: PASS, PARTIAL, NOT-TESTABLE, OPEN.
+# Closing or changing an obligation requires an Architect decision record;
+# obligations never disappear silently (verified by tools/spec_check.py ARCH-06).
+#
+# schema: spec/architect/ (evidence obligations v1).
+
+schema_version: 1
+last_updated: "2026-08-30"
+
+obligations:
+  - obligation_id: EVID-001
+    work_item: WORK-019
+    criterion: "Real Open5GS interoperation gate (observe-to-adopt, real PDU session, DN echo over the deployed core)"
+    evidence_class: PHYSICAL
+    status: PASS
+    required_environment: "Open5GS + UERANSIM deployment (Docker, host network) per docs/WORK-019-real-open5gs-verification.md"
+    latest_evidence_artifact: "docs/WORK-019-real-open5gs-verification.md"
+    evidence_sha: null
+    review_decision: DEC-0019
+    remaining_condition: "None for the closed gate. Disclosed limitation: an independent UPF/N3 packet capture was not permitted by the environment and is not claimed."
+
+  - obligation_id: EVID-002
+    work_item: WORK-020
+    criterion: "At least one SDR-based lab topology works (WORK-020 acceptance criterion 4)"
+    evidence_class: PHYSICAL
+    status: OPEN
+    required_environment: "Physical SDR hardware lab (SDR-LAB RESULT: BLOCKED on the available host; no SDR hardware fabricated or substituted)"
+    latest_evidence_artifact: "docs/WORK-020-real-sdr-acceptance.md"
+    evidence_sha: null
+    review_decision: DEC-0020
+    remaining_condition: "Run the physical SDR lab topology on real SDR hardware; RF simulation and software RAN remain inadmissible for this criterion (docs/WORK-020-rf-simulation-evidence.md)."
+
+  - obligation_id: EVID-003
+    work_item: WORK-034
+    criterion: "Real Raspberry Pi / low-power edge hardware track (HARDWARE_EVIDENCE_STATUS)"
+    evidence_class: PHYSICAL
+    status: OPEN
+    required_environment: "Raspberry Pi-class physical hardware"
+    latest_evidence_artifact: "edge battery HARDWARE_EVIDENCE_STATUS disclosure"
+    evidence_sha: null
+    review_decision: DEC-0034
+    remaining_condition: "Demonstrate on real Raspberry Pi-class hardware; simulation is engineering verification, never a physical PASS."
+
+  - obligation_id: EVID-004
+    work_item: WORK-035
+    criterion: "Physical Android device track; specifically the physical transport re-bind/handover over a handset-backed second path"
+    evidence_class: PHYSICAL
+    status: OPEN
+    required_environment: "Physical Android handset with a genuinely handset-backed second transport path (DEC-0042)"
+    latest_evidence_artifact: "PR #47 v6 review (DEC-0042)"
+    evidence_sha: null
+    review_decision: DEC-0042
+    remaining_condition: "Physical observation is PASS and the software implementation is CLOSED, but the handover re-bind over a handset-backed second path remains undemonstrated; host-lo mapping and synthetic interface sources are inadmissible."
+
+  - obligation_id: EVID-005
+    work_item: WORK-036
+    criterion: "Physical appliance deployment at a real isolated site (APPLIANCE_EVIDENCE_STATUS)"
+    evidence_class: PHYSICAL
+    status: OPEN
+    required_environment: "Community/emergency-class physical site deployment"
+    latest_evidence_artifact: "appliance battery APPLIANCE_EVIDENCE_STATUS disclosure"
+    evidence_sha: null
+    review_decision: DEC-0036
+    remaining_condition: "Operate the Network-in-a-Box at a real site; isolated-site simulation is engineering verification, never a physical PASS."
+
+  - obligation_id: EVID-006
+    work_item: WORK-037
+    criterion: "Real 5G interoperability lab (class C; profile lab gate PASSED on a real 5G lab)"
+    evidence_class: PHYSICAL
+    status: OPEN
+    required_environment: "Real open 5G Core/RAN lab per the frozen W037 runbook"
+    latest_evidence_artifact: "interop battery PROFILE_EVIDENCE_STATUS disclosure"
+    evidence_sha: null
+    review_decision: DEC-0037
+    remaining_condition: "Pass the profile lab gate on a real 5G lab; RF simulation, OAI RFsim, software emulation, and in-repo conformance peers can never be promoted to class C."
+
+  - obligation_id: EVID-007
+    work_item: WORK-040
+    criterion: "Real users/devices participate (pilot criterion 1)"
+    evidence_class: PHYSICAL
+    status: PARTIAL
+    required_environment: "Real human users and physical devices in the pilot"
+    latest_evidence_artifact: "PR #48 evidence (pilot report; software-class participants)"
+    evidence_sha: null
+    review_decision: DEC-0046
+    remaining_condition: "The correction cycle (WORK-040-CORRECTION-001) must demonstrate participation by an actual physical endpoint while preserving the production ADCOS chain; current participants are software-class device processes, not physical handsets or human users."
+
+  - obligation_id: EVID-008
+    work_item: WORK-040
+    criterion: "At least one real 5G access path works (pilot criterion 2)"
+    evidence_class: PHYSICAL
+    status: NOT-TESTABLE
+    required_environment: "Real 5G infrastructure per the frozen W037 runbook (no SDR/SCTP/TUN/Open5GS toolchain on the pilot host)"
+    latest_evidence_artifact: "PR #48 evidence (GATE_DISABLED reconnaissance; frozen W037 runbook quoted as requires)"
+    evidence_sha: null
+    review_decision: DEC-0046
+    remaining_condition: "The correction cycle (WORK-040-CORRECTION-001) must attempt a real 5G access path and record the genuine outcome; the criterion stays NOT-TESTABLE on hosts without real 5G infrastructure, with three-level anti-promotion enforced and 5G distinguished from generic cellular evidence."

@@ -1,0 +1,28 @@
+# ADCOS Architect decision record.
+# schema: spec/architect/decision-record-template.md; verified by tools/spec_check.py (ARCH-04).
+
+decision_id: DEC-0028
+type: acceptance
+work_item: WORK-028
+acr: null
+pr: 30
+reviewed_sha: 164394087fb1f3618b52bea8de16a9c20c43eb46
+decision: ACCEPTED
+status: ACCEPTED
+reviewer: "Architect (pectoraux)"
+timestamp: 2026-08-27T19:12:15Z
+findings:
+  - "Definition of done satisfied for WORK-028 (Threat model and security hardening)."
+  - "Migrated record: the repository-durable evidence of acceptance is the Architect merge of PR #30 (merge commit d5002c4b2af30734f5bb42122e5c625076e946e2); chat-era review commentary is not restated here."
+blockers: []
+required_corrections: []
+evidence:
+  merge_sha: d5002c4b2af30734f5bb42122e5c625076e946e2
+  ci_run: null
+  artifacts: []
+accepted_scope:
+  - "The WORK-028 contract as frozen in spec/work-items.md (objective, acceptance criteria, definition of done)."
+rejected_scope: []
+downstream_effect:
+  - "Unblocks, per the frozen DAG: WORK-040"
+resolved_by: null

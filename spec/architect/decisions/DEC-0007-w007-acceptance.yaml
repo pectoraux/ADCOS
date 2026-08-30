@@ -1,0 +1,28 @@
+# ADCOS Architect decision record.
+# schema: spec/architect/decision-record-template.md; verified by tools/spec_check.py (ARCH-04).
+
+decision_id: DEC-0007
+type: acceptance
+work_item: WORK-007
+acr: null
+pr: 7
+reviewed_sha: a86620dd16668c2e721c845e29b1595c73660d8c
+decision: ACCEPTED
+status: ACCEPTED
+reviewer: "Architect (pectoraux)"
+timestamp: 2026-08-24T09:32:39Z
+findings:
+  - "Definition of done satisfied for WORK-007 (Evidence-aware topology graph)."
+  - "Migrated record: the repository-durable evidence of acceptance is the Architect merge of PR #7 (merge commit f1dee71c0cae7a038fbf1e990e1b0b08ef018c52); chat-era review commentary is not restated here."
+blockers: []
+required_corrections: []
+evidence:
+  merge_sha: f1dee71c0cae7a038fbf1e990e1b0b08ef018c52
+  ci_run: null
+  artifacts: []
+accepted_scope:
+  - "The WORK-007 contract as frozen in spec/work-items.md (objective, acceptance criteria, definition of done)."
+rejected_scope: []
+downstream_effect:
+  - "Unblocks, per the frozen DAG: WORK-008, WORK-011, WORK-015, WORK-026, WORK-028, WORK-031, WORK-032"
+resolved_by: null

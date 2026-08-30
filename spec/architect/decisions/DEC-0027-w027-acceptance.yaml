@@ -1,0 +1,28 @@
+# ADCOS Architect decision record.
+# schema: spec/architect/decision-record-template.md; verified by tools/spec_check.py (ARCH-04).
+
+decision_id: DEC-0027
+type: acceptance
+work_item: WORK-027
+acr: null
+pr: 28
+reviewed_sha: a4ed7c70e14bfbb474037597c643f30d87473a89
+decision: ACCEPTED
+status: ACCEPTED
+reviewer: "Architect (pectoraux)"
+timestamp: 2026-08-27T18:25:12Z
+findings:
+  - "Definition of done satisfied for WORK-027 (Energy-aware control and resilience); blockers B1-B3 corrected before acceptance (PR #28 review chain, 2026-08-27)"
+  - "Migrated record: the repository-durable evidence of acceptance is the Architect merge of PR #28 (merge commit 1a8a2a3d4c8bcb1e2c6215cd4dbcde7fd799efd6); chat-era review commentary is not restated here."
+blockers: []
+required_corrections: []
+evidence:
+  merge_sha: 1a8a2a3d4c8bcb1e2c6215cd4dbcde7fd799efd6
+  ci_run: null
+  artifacts: []
+accepted_scope:
+  - "The WORK-027 contract as frozen in spec/work-items.md (objective, acceptance criteria, definition of done)."
+rejected_scope: []
+downstream_effect:
+  - "Unblocks, per the frozen DAG: WORK-031, WORK-040"
+resolved_by: null

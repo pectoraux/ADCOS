@@ -1,0 +1,28 @@
+# ADCOS Architect decision record.
+# schema: spec/architect/decision-record-template.md; verified by tools/spec_check.py (ARCH-04).
+
+decision_id: DEC-0012
+type: acceptance
+work_item: WORK-012
+acr: null
+pr: 12
+reviewed_sha: c0140d7b3279e0afdc92100ad3b533d123bcc741
+decision: ACCEPTED
+status: ACCEPTED
+reviewer: "Architect (pectoraux)"
+timestamp: 2026-08-24T17:47:03Z
+findings:
+  - "Definition of done satisfied for WORK-012 (Logical sessions)."
+  - "Migrated record: the repository-durable evidence of acceptance is the Architect merge of PR #12 (merge commit 8ec6254caa35e2e60f58848b7ca09cb828426c4e); chat-era review commentary is not restated here."
+blockers: []
+required_corrections: []
+evidence:
+  merge_sha: 8ec6254caa35e2e60f58848b7ca09cb828426c4e
+  ci_run: null
+  artifacts: []
+accepted_scope:
+  - "The WORK-012 contract as frozen in spec/work-items.md (objective, acceptance criteria, definition of done)."
+rejected_scope: []
+downstream_effect:
+  - "Unblocks, per the frozen DAG: WORK-013, WORK-014, WORK-016, WORK-017, WORK-018, WORK-026, WORK-030, WORK-031, WORK-032, WORK-035"
+resolved_by: null

@@ -1,0 +1,28 @@
+# ADCOS Architect decision record.
+# schema: spec/architect/decision-record-template.md; verified by tools/spec_check.py (ARCH-04).
+
+decision_id: DEC-0026
+type: acceptance
+work_item: WORK-026
+acr: null
+pr: 27
+reviewed_sha: bc56e08bd42c620502230a9bd110b481fee47d37
+decision: ACCEPTED
+status: ACCEPTED
+reviewer: "Architect (pectoraux)"
+timestamp: 2026-08-27T12:56:16Z
+findings:
+  - "Definition of done satisfied for WORK-026 (Telemetry and observability); chat-era item: no durable repository-local handoff prompt located (governance gap closed prospectively by this package)"
+  - "Migrated record: the repository-durable evidence of acceptance is the Architect merge of PR #27 (merge commit ec2ef93dd034e2e7db79284c421c5b490f7ce8f6); chat-era review commentary is not restated here."
+blockers: []
+required_corrections: []
+evidence:
+  merge_sha: ec2ef93dd034e2e7db79284c421c5b490f7ce8f6
+  ci_run: null
+  artifacts: []
+accepted_scope:
+  - "The WORK-026 contract as frozen in spec/work-items.md (objective, acceptance criteria, definition of done)."
+rejected_scope: []
+downstream_effect:
+  - "Unblocks, per the frozen DAG: WORK-027, WORK-029, WORK-030, WORK-033"
+resolved_by: null

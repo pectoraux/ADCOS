@@ -1,0 +1,28 @@
+# ADCOS Architect decision record.
+# schema: spec/architect/decision-record-template.md; verified by tools/spec_check.py (ARCH-04).
+
+decision_id: DEC-0015
+type: acceptance
+work_item: WORK-015
+acr: null
+pr: 15
+reviewed_sha: a6d5158669fa9bbdcda676662e2bcf2d0c6c1c8c
+decision: ACCEPTED
+status: ACCEPTED
+reviewer: "Architect (pectoraux)"
+timestamp: 2026-08-25T11:41:31Z
+findings:
+  - "Definition of done satisfied for WORK-015 (Federation protocol); review refinement durably recorded: the Status-line prose-reference classification (tools/spec_check.py, WORK-015 review direction)"
+  - "Migrated record: the repository-durable evidence of acceptance is the Architect merge of PR #15 (merge commit c611f78f9e5be492744087ee8ada9362131eb677); chat-era review commentary is not restated here."
+blockers: []
+required_corrections: []
+evidence:
+  merge_sha: c611f78f9e5be492744087ee8ada9362131eb677
+  ci_run: null
+  artifacts: []
+accepted_scope:
+  - "The WORK-015 contract as frozen in spec/work-items.md (objective, acceptance criteria, definition of done)."
+rejected_scope: []
+downstream_effect:
+  - "Unblocks, per the frozen DAG: WORK-025, WORK-028, WORK-030, WORK-032, WORK-039"
+resolved_by: null

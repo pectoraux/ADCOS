@@ -1,0 +1,29 @@
+# ADCOS Architect decision record.
+# schema: spec/architect/decision-record-template.md; verified by tools/spec_check.py (ARCH-04).
+
+decision_id: DEC-0034
+type: acceptance
+work_item: WORK-034
+acr: null
+pr: 39
+reviewed_sha: a591ac6f1e085a37994e54af18a316a2943e3b31
+decision: ACCEPTED
+status: ACCEPTED
+reviewer: "Architect (pectoraux)"
+timestamp: 2026-08-28T15:41:25Z
+findings:
+  - "Definition of done satisfied for WORK-034 (Raspberry Pi / low-power gateway)."
+  - "Migrated record: the repository-durable evidence of acceptance is the Architect merge of PR #39 (merge commit 42253b43f6146f8acbe03cf370f094c17e514cf8); chat-era review commentary is not restated here."
+blockers: []
+required_corrections: []
+evidence:
+  merge_sha: 42253b43f6146f8acbe03cf370f094c17e514cf8
+  ci_run: null
+  artifacts:
+    - "EVID-003 (OPEN)"
+accepted_scope:
+  - "The WORK-034 contract as frozen in spec/work-items.md (objective, acceptance criteria, definition of done)."
+rejected_scope: []
+downstream_effect:
+  - "Unblocks, per the frozen DAG: WORK-036"
+resolved_by: null

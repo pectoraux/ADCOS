@@ -1,0 +1,80 @@
+# ADCOS execution state — persisted by the Architect.
+#
+# Reconciled after the PR #60 merge: the WORK-040 correction cycle is now
+# authorized repository-locally (DEC-0046 / WORK-040-CORRECTION-001, baseline
+# 93efa54f). The frozen mode vocabulary is implementing/awaiting-architect-
+# decisions; the correction-only qualifier of this authorization is carried
+# by halted_reason and by the authorization record itself.
+#
+# schema: spec/architect/ (execution state v1); verified by ARCH-02/ARCH-03.
+schema_version: 1
+package: "persistent-architect"
+last_updated: "2026-08-30"
+
+repository:
+  canonical: "github.com/pectoraux/ADCOS"
+  main_sha: 93efa54f1edc2ec3c0bb5646827719f92af06b86
+  main_sha_semantics: "main after the merge of the persistent Architect package (PR #60); the baseline the WORK-040 correction authorization is issued against"
+
+versions:
+  architecture_version_reference: "1.0"
+  architecture_version_authority: "spec/architecture.md ## Status (single declaration site)"
+  protocol_version_reference: "1.0"
+  protocol_version_authority: "spec/schemas/protocol.json"
+
+execution:
+  mode: "implementing"
+  active_work_item: WORK-040
+  active_authorization: "WORK-040-CORRECTION-001"
+  halted_reason: "Correction-only implementing: WORK-040 remains CHANGES_REQUIRED (DEC-0046) and only the WORK-040-CORRECTION-001 scope may proceed; acceptance is not granted and W041+ remain blocked. When the correction PR is delivered, this halts pending Architect re-review."
+  next_required_decisions:
+    - "Review the W040 correction PR after it is submitted under WORK-040-CORRECTION-001"
+    - "Disposition W035 physical-evidence PRs 45, 46, 47"
+    - "Decide ACR-004 / PR #49 after the persistent Architect package is on main"
+
+in_review:
+  - work_item: WORK-040
+    branch: "work-040-pilot-deployment"
+    pr: 48
+    pr_head: ee9b356020b6450d85837f60e60c41d08f0ec09a
+    baseline_sha: 1669ae9a396838b72ba461c846b98e84478ab24f
+    state: "in-review"
+    delivered_at: "2026-08-29"
+    areas:
+      - pilot/
+
+open_prs:
+  - pr: 45
+    head: "work-035-device-evidence"
+    subject: "W035 physical Android evidence calibrated partial run"
+    disposition: "superseded evidence chain; pending formal disposition"
+  - pr: 46
+    head: "work-035-android-mobile-agent"
+    subject: "W035 Physical Android Device Validation"
+    disposition: "superseded evidence chain; pending formal disposition"
+  - pr: 47
+    head: "work-035-physical-evidence-v2"
+    subject: "W035 Final Physical Protocol Validation"
+    disposition: "latest physical evidence chain; pending final disposition"
+  - pr: 48
+    head: "work-040-pilot-deployment"
+    subject: "WORK-040 Pilot deployment"
+    disposition: "changes required; correction scope authorized by WORK-040-CORRECTION-001"
+  - pr: 49
+    head: "roadmap/connectivity-economy"
+    subject: "Connectivity commerce roadmap and proposed ACR-004"
+    disposition: "proposed; decision pending"
+
+open_acrs:
+  - acr: "ACR-004"
+    title: "Connectivity Commerce Plane"
+    status: "PROPOSED"
+    on_main: false
+    location: "branch roadmap/connectivity-economy (PR #49)"
+
+open_architectural_questions: []
+
+accepted_work_items:
+  first: "WORK-001"
+  last: "WORK-039"
+  note: "all Architect-accepted and merged"

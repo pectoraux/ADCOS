@@ -1,0 +1,109 @@
+# ADCOS Work Item authorization record — WORK-040 correction cycle.
+#
+# WORK-040-CORRECTION-001 (issued by DEC-0046): the Architect's
+# repository-local, correction-only authorization. The original chat
+# designation (2026-08-29, pre-persistent-governance) is historical
+# provenance only; this record is the sole durable authority for the
+# correction scope.
+#
+# In the frozen authorization vocabulary the cycle is expressed as
+# status 'active' with the authorized flag set — the authorization is
+# deliberately narrow: it does NOT accept WORK-040. Acceptance remains
+# blocked pending Architect re-review, and the W040 in-review ledger
+# entry stays descriptive only (PA-001, DEC-0045: review state is never
+# authorization).
+#
+# schema: spec/architect/authorizations/ (v1); verified by tools/spec_check.py (ARCH-03).
+
+work_item: WORK-040
+status: active
+authorized: true
+type: implementation
+authorization_id: "WORK-040-CORRECTION-001"
+authorization_decision: DEC-0046
+baseline_sha: 93efa54f1edc2ec3c0bb5646827719f92af06b86
+existing_delivery_head: ee9b356020b6450d85837f60e60c41d08f0ec09a
+existing_delivery_pr: 48
+review_basis: "Architect CHANGES_REQUIRED ruling on the delivered W040 pilot (DEC-0046): criterion 1 physical participation and criterion 2 real 5G physical access remain open; criteria 3-6 are already evidenced and must be preserved."
+
+dependencies:
+  - WORK-027
+  - WORK-028
+  - WORK-036
+  - WORK-037
+  - WORK-039
+
+authority_inputs:
+  - "WORK-033 AgentRuntime"
+  - "WORK-034 EdgeGateway"
+  - "WORK-036 Network-in-a-Box"
+  - "WORK-037 Open RAN/Core profile"
+  - "WORK-039 federation/relay discipline"
+  - "W035 physical Android evidence where genuinely available"
+
+authority_outputs:
+  - "pilot deployment evidence only; no new protocol authority"
+
+scope:
+  - "pilot/"
+  - "tools/pilot_selftest.py"
+  - "docs/WORK-040-handoff.md"
+  - "docs/WORK-040-evidence.md"
+  - "evidence/work-040/"
+
+required_corrections:
+  - "Demonstrate real-device participation using an actual physical endpoint while preserving the production ADCOS chain."
+  - "Attempt and, only if genuinely available, demonstrate a real 5G access path. Distinguish 5G from generic cellular evidence."
+  - "Preserve the already demonstrated non-cellular, relay/backhaul, failover, and operational evidence."
+  - "Keep all evidence provenance exact and classify unavailable physical evidence as NOT-TESTABLE or OPEN rather than promoting software evidence."
+
+acceptance_criteria:
+  - "real users/devices participate"
+  - "at least one 5G access path, one non-cellular path, and one relay/backhaul path work"
+  - "resilience/failover demonstrated"
+  - "operational evidence is captured"
+
+evidence_classes:
+  - criterion: "real users/devices participate"
+    class: PHYSICAL
+    allowed_statuses:
+      - PASS
+      - PARTIAL
+      - NOT-TESTABLE
+      - OPEN
+  - criterion: "real 5G access path"
+    class: PHYSICAL
+    allowed_statuses:
+      - PASS
+      - PARTIAL
+      - NOT-TESTABLE
+      - OPEN
+  - criterion: "non-cellular path; relay/backhaul path; failover; operational evidence"
+    class: OPERATIONAL
+    allowed_statuses:
+      - PASS
+      - PARTIAL
+      - NOT-TESTABLE
+      - OPEN
+
+out_of_scope:
+  - "new identity/session/routing/federation authority"
+  - "pilot-specific protocol semantics"
+  - "private-method fallbacks used to manufacture physical evidence"
+  - "synthetic interface substitution for physical-path acceptance"
+  - "promoting software or emulated evidence to PHYSICAL PASS"
+  - "weakening anti-promotion controls"
+  - "modifying frozen spec semantics"
+  - "implementing W041+"
+
+acceptance_gate:
+  status: "Architect review required after correction"
+  required_evidence:
+    - "criterion 1 physical participant PASS or explicitly unresolved"
+    - "criterion 2 physical 5G path PASS or explicitly unresolved"
+    - "criteria 3-6 retained/proven"
+    - "exact execution SHA and evidence manifest"
+    - "all relevant CI checks green"
+
+handoff: docs/WORK-040-correction-handoff.md
+handoff_required: true

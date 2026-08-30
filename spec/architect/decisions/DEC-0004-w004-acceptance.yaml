@@ -1,0 +1,28 @@
+# ADCOS Architect decision record.
+# schema: spec/architect/decision-record-template.md; verified by tools/spec_check.py (ARCH-04).
+
+decision_id: DEC-0004
+type: acceptance
+work_item: WORK-004
+acr: null
+pr: 4
+reviewed_sha: 4f855c8c3330d37bb3f4579e4f1ae032adae396b
+decision: ACCEPTED
+status: ACCEPTED
+reviewer: "Architect (pectoraux)"
+timestamp: 2026-08-23T23:48:24Z
+findings:
+  - "Definition of done satisfied for WORK-004 (Cryptographic node identity and credential abstraction)."
+  - "Migrated record: the repository-durable evidence of acceptance is the Architect merge of PR #4 (merge commit 628e1bba3d2217a9166c0c0fff86e4b13291e7c7); chat-era review commentary is not restated here."
+blockers: []
+required_corrections: []
+evidence:
+  merge_sha: 628e1bba3d2217a9166c0c0fff86e4b13291e7c7
+  ci_run: null
+  artifacts: []
+accepted_scope:
+  - "The WORK-004 contract as frozen in spec/work-items.md (objective, acceptance criteria, definition of done)."
+rejected_scope: []
+downstream_effect:
+  - "Unblocks, per the frozen DAG: WORK-005, WORK-006, WORK-010, WORK-012, WORK-015, WORK-017, WORK-028, WORK-032"
+resolved_by: null

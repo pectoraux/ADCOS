@@ -1,0 +1,39 @@
+# ADCOS Architect decision record.
+# schema: spec/architect/decision-record-template.md; verified by tools/spec_check.py (ARCH-04).
+decision_id: DEC-0045
+type: governance
+work_item: null
+acr: null
+pr: 60
+reviewed_sha: 1e153c15425dd7a5af6446d9ba03b5a3d95e2d1d
+decision: CHANGES_REQUIRED
+status: CHANGES_REQUIRED
+reviewer: "Architect (pectoraux)"
+timestamp: 2026-08-30T03:30:00Z
+findings:
+  - "Review round 1 of the persistent-Architect package (PR #60, head 1e153c1): the persistent-Architect concept - durable authority in repository artifacts rather than chat - is right, but the package is not yet safe to make authoritative in its delivered form."
+  - "PA-001: check_arch_08 allowed an implementation PR to pass the provenance gate with NO active authorization whenever its branch merely matched an in-review execution-ledger entry (branch + areas reconstruction). That treats review state as authorization - exactly the failure mode the package exists to eliminate: implementation proceeding on the strength of historical/review state instead of explicit Architect authorization, in direct contradiction of the package invariant no repository-local authorization = implementation must stop."
+  - "Provenance of this review record: the GitHub review API rejected the CHANGES_REQUESTED action from the repository-connected identity because that identity is the PR author (POST /repos/pectoraux/ADCOS/pulls/60/reviews event REQUEST_CHANGES returned HTTP 422, Can not request changes on your own pull request, 2026-08-30). The GitHub-side CHANGES_REQUESTED state must be applied by a separate reviewer/Architect identity; per review-protocol section 5 this decision record is the durable repository-side review state, and the repository artifact is the authority. The timestamp is the session-window approximation of the review directive (2026-08-30, ~03:30Z)."
+blockers:
+  - "PA-001: ARCH-08 treated an in-review ledger entry as authorization, contradicting the package invariant no repository-local authorization = implementation must stop"
+required_corrections:
+  - "an implementation PR must require an ACTIVE authorization (status: active) that already exists on base/main, inherited byte-identically (never self-authorized), with the exact recorded baseline and a scope covering the entire implementation delta"
+  - "an in-review ledger entry must be descriptive only and never authorization: the selftest case that proved in-review branch reconstruction passes must be inverted to prove that in-review without active authorization FAILS"
+  - "governance/meta-only PRs remain allowed without implementation authorization"
+evidence:
+  merge_sha: null
+  ci_run: 33283493892
+  artifacts:
+    - "PR #60 review round 1 - Architect directive via the Z.ai implementation session web-71c04019-eb3d-43be-a11f-d530daa86427 (trace 1a050b853455a939), 2026-08-30"
+    - "GitHub review API rejection (repository-connected identity = PR author): HTTP 422, Can not request changes on your own pull request, 2026-08-30"
+    - "PR #60 head under review: 1e153c15425dd7a5af6446d9ba03b5a3d95e2d1d"
+accepted_scope:
+  - "the persistent-Architect concept: durable authority in repository artifacts rather than chat (explicitly affirmed by the Architect in review round 1)"
+rejected_scope:
+  - "merging PR #60 in its pre-correction form (the package is not yet safe to make authoritative)"
+  - "treating an in-review ledger entry, or any review/historical state, as implementation authorization"
+downstream_effect:
+  - "PR #60 stays open; the correction is narrowly scoped to the governance package and does not touch WORK-040 or the networking architecture"
+  - "the GitHub CHANGES_REQUESTED review state on PR #60 is to be applied by a separate reviewer/Architect identity; this record governs durably regardless of the GitHub UI state"
+  - "WORK-040 PR #48 remains in review, untouched by this correction; its verdict is still pending"
+resolved_by: null

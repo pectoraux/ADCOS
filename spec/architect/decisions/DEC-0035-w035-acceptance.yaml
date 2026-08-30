@@ -1,0 +1,29 @@
+# ADCOS Architect decision record.
+# schema: spec/architect/decision-record-template.md; verified by tools/spec_check.py (ARCH-04).
+
+decision_id: DEC-0035
+type: acceptance
+work_item: WORK-035
+acr: null
+pr: 40
+reviewed_sha: f1a3ce83267f12eaa4e974a1200c8bf37e7a484a
+decision: ACCEPTED
+status: ACCEPTED
+reviewer: "Architect (pectoraux)"
+timestamp: 2026-08-28T16:43:48Z
+findings:
+  - "Definition of done satisfied for WORK-035 (Android/mobile Agent); software implementation accepted; the physical device track remains OPEN (EVID-004; DEC-0040 through DEC-0042)"
+  - "Migrated record: the repository-durable evidence of acceptance is the Architect merge of PR #40 (merge commit cffbe01639eca7c67988e2df16a7641e145203c1); chat-era review commentary is not restated here."
+blockers: []
+required_corrections: []
+evidence:
+  merge_sha: cffbe01639eca7c67988e2df16a7641e145203c1
+  ci_run: null
+  artifacts:
+    - "EVID-004 (OPEN)"
+accepted_scope:
+  - "The WORK-035 contract as frozen in spec/work-items.md (objective, acceptance criteria, definition of done)."
+rejected_scope: []
+downstream_effect:
+  - "No frozen-DAG dependents remain ahead of it."
+resolved_by: null

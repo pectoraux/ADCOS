@@ -26,6 +26,7 @@ The following registry is the single authority for the role of every specificati
 | `spec/schemas/` | Schema location | — | Canonical home of machine-readable schemas/registries (content begins with WORK-002) |
 | `spec/acr/` | Change-control records | — | Architecture Change Request records |
 | `spec/prompts/` | Implementation prompts | — | Per-Work-Item Z.ai handoff prompts authored by the Architect |
+| `spec/architect/` | Persistent governance authority | — | The persistent Architect package: current state, authority order, execution state/ledger, decision records, authorizations, evidence obligations, review/resume protocols, templates |
 
 Rules:
 
@@ -33,6 +34,7 @@ Rules:
 2. Frozen documents change only through the Architecture Change Request process in `spec/change-control.md`. A normal implementation PR is never allowed to silently become an architecture change.
 3. Process-authority documents are maintained by the Architect through normal PR review; if such a change would alter a frozen rule, it requires an ACR.
 4. The Architect is the architecture authority. Z.ai is the implementation agent and must not reinterpret, simplify, replace, or extend frozen documents.
+5. `spec/architect/` is the persistent governance state of the repository (see `spec/architect/README.md`): it records decisions, execution authorization, the execution ledger, and evidence obligations, and is maintained by the Architect. Implementation PRs must not modify it; a chat message alone never authorizes implementation — only a repository-local authorization record in `spec/architect/authorizations/` does.
 
 ## 2. Naming Conventions
 
@@ -90,6 +92,6 @@ python3 tools/spec_check.py
 
 CI runs the same command on every push and pull request (`.github/workflows/spec-check.yml`). The check catalog and invocation details are documented in `tools/README.md`.
 
-The checker validates repository structure and specification mechanics — file existence, document role markers, frozen-status markers, version-kind distinction, backlog integrity, dependency reference resolution, graph acyclicity, and ordering consistency. It deliberately does not validate prose semantics; it is not a protocol semantic compiler.
+The checker validates repository structure and specification mechanics — file existence, document role markers, frozen-status markers, version-kind distinction, backlog integrity, dependency reference resolution, graph acyclicity, and ordering consistency — and the integrity of the persistent Architect package (checks `ARCH-01` … `ARCH-08`: package structure, machine-readable state schemas, execution authorization, decision registry, execution ledger, evidence obligations, canonical references, and implementation-PR authorization provenance; see `tools/README.md`). It deliberately does not validate prose semantics; it is not a protocol semantic compiler.
 
 Ordering authority: `spec/dependency-graph.md` defines the approved implementation order (its DAG, execution phases, and critical path). Per-item `Dependencies:` lines in `spec/work-items.md` declare each Work Item's dependencies. Where a declared dependency is not reflected in the DAG, the checker reports a non-blocking advisory; such divergence must be resolved by the Architect (directly or through an ACR) and never by an implementation PR. See `spec/workflow.md` §2.

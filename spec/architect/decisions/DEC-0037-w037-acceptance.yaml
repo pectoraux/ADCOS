@@ -1,0 +1,29 @@
+# ADCOS Architect decision record.
+# schema: spec/architect/decision-record-template.md; verified by tools/spec_check.py (ARCH-04).
+
+decision_id: DEC-0037
+type: acceptance
+work_item: WORK-037
+acr: null
+pr: 42
+reviewed_sha: 98c57eca368424b292d4f4ee956f303ea4e0ccee
+decision: ACCEPTED
+status: ACCEPTED
+reviewer: "Architect (pectoraux)"
+timestamp: 2026-08-28T19:46:07Z
+findings:
+  - "Definition of done satisfied for WORK-037 (Open RAN/Core interoperability profile); software implementation accepted; the real 5G lab class C remains OPEN (EVID-006)"
+  - "Migrated record: the repository-durable evidence of acceptance is the Architect merge of PR #42 (merge commit cebe9f938d49f31b4c6fdd13e68f1e9075afc904); chat-era review commentary is not restated here."
+blockers: []
+required_corrections: []
+evidence:
+  merge_sha: cebe9f938d49f31b4c6fdd13e68f1e9075afc904
+  ci_run: null
+  artifacts:
+    - "EVID-006 (OPEN)"
+accepted_scope:
+  - "The WORK-037 contract as frozen in spec/work-items.md (objective, acceptance criteria, definition of done)."
+rejected_scope: []
+downstream_effect:
+  - "Unblocks, per the frozen DAG: WORK-040"
+resolved_by: null

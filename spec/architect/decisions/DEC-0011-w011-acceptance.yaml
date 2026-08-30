@@ -1,0 +1,28 @@
+# ADCOS Architect decision record.
+# schema: spec/architect/decision-record-template.md; verified by tools/spec_check.py (ARCH-04).
+
+decision_id: DEC-0011
+type: acceptance
+work_item: WORK-011
+acr: null
+pr: 11
+reviewed_sha: b55cec8712b084063c775a6059fffa27d72c7ccd
+decision: ACCEPTED
+status: ACCEPTED
+reviewer: "Architect (pectoraux)"
+timestamp: 2026-08-24T16:46:50Z
+findings:
+  - "Definition of done satisfied for WORK-011 (Path computation and routing engine)."
+  - "Migrated record: the repository-durable evidence of acceptance is the Architect merge of PR #11 (merge commit 38a8f950252f16e86fa3e245e29c67ef21722b49); chat-era review commentary is not restated here."
+blockers: []
+required_corrections: []
+evidence:
+  merge_sha: 38a8f950252f16e86fa3e245e29c67ef21722b49
+  ci_run: null
+  artifacts: []
+accepted_scope:
+  - "The WORK-011 contract as frozen in spec/work-items.md (objective, acceptance criteria, definition of done)."
+rejected_scope: []
+downstream_effect:
+  - "Unblocks, per the frozen DAG: WORK-012, WORK-013, WORK-015, WORK-023, WORK-026, WORK-027, WORK-030, WORK-031, WORK-032"
+resolved_by: null
