@@ -451,8 +451,8 @@ handset attached to a host with adb (the runbook, handoff §8).
 
 | # | Criterion | Status | Class | Execution SHA | Artifact | Environment / observation / reaction / verification |
 |---|---|---|---|---|---|---|
-| 1 | real users/devices | **PARTIAL** (explicitly unresolved) | physical (demonstrated: operational) | `916f0559` | handover attempt `sha256:4a48e276…` | env: this host (no handset reachable; §6.2's detection evidence). reaction: the full handover transition chain works end-to-end over three real processes (§7.2: real socket death, production re-bind, same logical session, both-carriage receiver corroboration, service on the secondary). verification: battery 28/28 incl. the anti-promotion negatives; the physical demonstration requires the handset attached to a host with adb (the runbook, handoff §8) |
-| 2 | 5G access path | **NOT-TESTABLE** | physical | `916f0559` | handover attempt `sha256:4a48e276…` | env: no 5G infrastructure AND no handset here. observation: the pre/post framework access-technology capture is implemented (the post observation is now actually RECORDED into the document; NR-only 5G rule; the manifest interface cross-corroborates the Android framework's own NR determination). verification: the 27-field handover template is frozen; criterion 2 PASS additionally requires the tether interface observation, the route transition onto the tether, and the independent traffic verification — all validator-enforced |
+| 1 | real users/devices | **PARTIAL** (explicitly unresolved; materially strengthened by the external v9 physical evidence, §7.7) | physical (demonstrated: operational) | `916f0559` + `a8f0b39a` | handover attempt `sha256:4a48e276…` + the v9 integration `sha256:4f9af08a…` | env: this host (no handset reachable; §6.2's detection evidence); the Android agent's workstation (the W035 v9 physical run, §7.7). reaction: the full handover transition chain works end-to-end over three real processes (§7.2) AND the Android agent's v9 chain independently demonstrates the REAL physical handover on the REAL handset through production ADCOS classes (§7.7: TECNO KL4/Android 14, wlp3s0→enx0e523cbd6b00 route transition, same-session continuity, receiver-verified datagram). verification: battery 29/29 incl. the anti-promotion negatives; the external v9 chain is integrated as EXTERNAL-PHYSICAL and never promoted to W040-harness evidence; the W040-harness physical run (the runbook, handoff §8) remains the step that would close criterion 1 |
+| 2 | 5G access path | **NOT-TESTABLE** | physical | `916f0559` + `a8f0b39a` | handover attempt `sha256:4a48e276…` | env: no 5G infrastructure AND no handset here; the v9 chain's post-handover network is GENERIC cellular with NO NR report (§7.7) — cellular is never automatically 5G. observation: the pre/post framework access-technology capture is implemented (the post observation is now actually RECORDED into the document; NR-only 5G rule; the manifest interface cross-corroborates the Android framework's own NR determination). verification: the 27-field handover template is frozen; criterion 2 PASS additionally requires the tether interface observation, the route transition onto the tether, and the independent traffic verification — all validator-enforced |
 | 3 | non-cellular path | **PASS** (preserved) | operational | `916f0559` | run digest `sha256:bd620530…` | unchanged from the delivery; re-verified at this SHA (10/10 checks); byte-identical before/after the correction-2 changes at the same baseline HEAD |
 | 4 | relay/backhaul path | **PASS** (preserved) | operational | `916f0559` | run digest `sha256:bd620530…` | unchanged; re-verified (the handover rehearsal additionally exercised the relay leg as the secondary carriage, 8 more verbatim frames) |
 | 5 | resilience/failover | **PASS** (preserved) | operational | `916f0559` | run digest `sha256:bd620530…` | unchanged; re-verified (the handover rehearsal is a SECOND, independent proof of the same production failover discipline) |
@@ -514,3 +514,72 @@ re-derivation).
    correction claims no physical PASS; W040 acceptance still requires
    the physical runs where the handset/infrastructure genuinely exist
    and the Architect's re-review (DEC-0046's acceptance gate).
+
+### 7.7 The Android agent's W035 v9 artifact set: integrated as
+EXTERNAL-PHYSICAL evidence (never promoted)
+
+During the correction cycle the Android Studio/Gemini agent pushed its
+v9 physical-validation artifact set to this branch (d014425, “WORK-
+035/W040: physical handover validator v10 - definitive”). CI correctly
+rejected the push: ARCH-08 (the execution-authorization provenance
+gate) fails closed on the out-of-scope W035 harness files (the
+`android/` Studio project, the validator tools,
+`evidence/w035-device-v9/`) — none are within the WORK-040-
+CORRECTION-001 scope. Resolution (history preserved, nothing
+fabricated):
+
+- the out-of-scope raw harness was REVERTED from the branch (a clean
+  revert commit; d014425 remains in history; the disposition of the
+  raw harness belongs to the Architect — re-adding it here requires an
+  authorization-scope extension, carrying it on the W035 evidence
+  chain PRs #45-47 requires no change);
+- the five OBSERVATION artifacts are preserved byte-identically under
+  the authorized evidence directory `evidence/work-040/android-
+  agent-v9/` (device_manifest.json, evidence_manifest.json,
+  linux_network_observations.jsonl, protocol_reactions.jsonl,
+  test_matrix.md — every evidence-manifest-declared SHA-256 verified
+  against the actual preserved bytes: all match);
+- the integration record
+  `evidence/work-040/android-agent-v9-observations.json`
+  (execution SHA `a8f0b39a`, artifact `sha256:4f9af08a…`) binds the
+  five artifacts by SHA-256, records the agent's own provenance
+  (TECNO KL4 / Android 14 / build fingerprint / APK
+  `com.example.w035harness` `sha256:dc334bf1…`), and integrates the
+  observed chain.
+
+**What the v9 chain genuinely proves (the agent's own authoritative
+observations):** a REAL physical handover on the REAL handset — the
+operator disabled Wi-Fi; the host's default route transitioned
+`wlp3s0` (Wi-Fi) → `enx0e523cbd6b00` (USB tether); the production
+`MobileAgent` session `sha256:cb354fc7…` survived the transition
+(`handover-completed: wifi -> cellular` on the SAME session); a real
+datagram traversed the tether (`payload: ADCOS-Physical-Tether-v8`)
+with the agent's receiver-side VERIFIED claim; the two-process
+recovery lifecycle checkpointed and recovered across PIDs. The W035
+test matrix's own PASS claims are the agent's classification of ITS
+matrix — cross-referenced here, never promoted.
+
+**What it does NOT prove (recorded honestly):** the chain was produced
+by the W035 validation harness (its own `mobile-node`/`peer-node`
+identities and topology), NOT the W040 pilot harness — so it is
+classified EXTERNAL-PHYSICAL and the W040 criterion classifications
+are unchanged: criterion 1 stays PARTIAL (an external harness's chain
+is never inferentially promoted to W040-harness evidence; the
+W040-harness physical run, handoff §8, remains the step that would
+close it), criterion 2 stays NOT-TESTABLE (the transition is GENERIC
+cellular — no `mDataNetworkType`/NR state was captured anywhere in the
+v9 set; cellular is never automatically 5G). The harness discrepancy
+is also recorded: the pushed code (titled v10) is NOT the byte-exact
+validator that produced the v9 record (the device manifest declares
+validator SHA `68c8c522…`; the v10 IF_MAP names a different tether
+interface than the recorded observation) — recorded, not resolved.
+
+**The ADCOS-side integration surface** (battery case_29):
+`validate_android_v9_artifacts` (fail-closed: every manifest-declared
+hash verified against the bytes; the device-manifest completeness +
+APK digest well-formedness; the complete handover chain on ONE session
+id with the receiver-side VERIFIED claim; the genuine default-route
+transition) and `integrate_android_v9_observations` (the integration
+record with the honest never-promoting classification). Tampered
+artifacts, broken chains, missing files, and malformed digests all
+fail closed.

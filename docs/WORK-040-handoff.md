@@ -2,7 +2,7 @@
 
 **Work item:** WORK-040 — Pilot deployment
 **Branch:** `work-040-pilot-deployment` (originally anchored on `main@1669ae9a`; synchronized with `main@4efcc8c` for the correction cycle; base `1760fc6` for correction cycle 2)
-**Package:** `pilot/` (11 modules) + `tools/pilot_selftest.py` (28-case battery)
+**Package:** `pilot/` (11 modules) + `tools/pilot_selftest.py` (29-case battery)
 **CI step:** "Run WORK-040 pilot deployment tests" (after the federation-at-scale step)
 **Correction cycle:** WORK-040-CORRECTION-001 (DEC-0046) — repository-local authority; correction-only scope
 
@@ -431,3 +431,53 @@ The handover evidence artifact for THIS host (no handset reachable — the
 honest fail-closed attempt + the software-verified rehearsal) is
 `evidence/work-040/physical-handover-attempt.json`; the full correction-2
 record is `docs/WORK-040-evidence.md` §7.
+
+### 8.5 The coordination record: the Android agent's W035 v9 artifact
+set (arrived, integrated, never promoted)
+
+During the correction cycle the Android Studio/Gemini agent pushed its
+v9 physical-validation artifact set to this branch directly (d014425,
+"WORK-035/W040: physical handover validator v10 - definitive"):
+the `android/w035-harness/` Studio project (an APK-backed observation
+harness, `com.example.w035harness`), the validator tools
+(`tools/adb_platform_source.py`, `tools/physical_protocol_validation.py`
+— a REAL production-class chain: `MobileAgent` + `AgentRuntime` + the
+real session handshake over the handset's connectivity), and the five
+`evidence/w035-device-v9/` observation artifacts.
+
+**The governance resolution (nothing fabricated, history preserved):**
+CI correctly failed on the push — ARCH-08 (the execution-authorization
+provenance gate) rejects the harness files as outside the
+WORK-040-CORRECTION-001 scope (`pilot/`, `tools/pilot_selftest.py`,
+the two W040 docs, `evidence/work-040/`). The raw harness was REVERTED
+from the branch (d014425 remains in history); the five OBSERVATION
+artifacts are preserved byte-identically under the authorized directory
+`evidence/work-040/android-agent-v9/` (every evidence-manifest-declared
+SHA-256 verified against the actual bytes), and the integration record
+`evidence/work-040/android-agent-v9-observations.json` binds them by
+SHA-256 and classifies the chain EXTERNAL-PHYSICAL — the W040
+criterion classifications are unchanged (criterion 1 PARTIAL, criterion
+2 NOT-TESTABLE; see `docs/WORK-040-evidence.md` §7.7 for what the v9
+chain genuinely proves — a REAL handover on the REAL TECNO KL4 handset
+through production ADCOS classes — and what it does not: it is the W035
+harness's chain, not the W040 pilot harness's, and its transition is
+generic cellular with no NR report).
+
+**The Architect's open disposition** (recorded, not decided here): the
+raw W035 harness (the android/ project + the validator tools) may be
+re-added to THIS PR only through an authorization-scope extension; it
+can equally live on the W035 evidence-chain PRs (#45-47, pending final
+disposition) with no change here. Both paths stay open; the revert
+commit is trivially reversible.
+
+**For the NEXT physical run** (whoever executes it): the v9 chain
+demonstrates the target physical handover pattern END-TO-END on the
+Architect's workstation hardware (wlp3s0 Wi-Fi → enx0e523cbd6b00 USB
+tether, same-session continuity, receiver-verified datagram). The
+W040-harness run (the runbook §8.2, the `--handover` device node on the
+handset) remains the step that would close W040 criterion 1 under the
+W040 validator — the v9 evidence materially strengthens the record but
+an external harness's chain is never inferentially promoted. The
+Android agent's next contribution for THAT run is the observation
+manifest per `evidence/work-040/android-manifest-template.json` (§8.4),
+filled with the framework's own reports at the marked operator step.
