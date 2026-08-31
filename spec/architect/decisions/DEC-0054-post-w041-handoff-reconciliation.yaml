@@ -1,0 +1,45 @@
+# ADCOS Architect decision record.
+# schema: spec/architect/decision-record-template.md; verified by tools/spec_check.py (ARCH-04).
+#
+# Governance-only reconciliation after DEC-0053 and DEC-0052 merged. This record
+# does not change any verdict; it synchronizes the persistent Architect snapshot
+# and the active W041 authorization to the actual post-merge mainline.
+decision_id: DEC-0054
+type: governance
+work_item: WORK-041
+acr: null
+pr: null
+reviewed_sha: ca1889a1053e63aba88bdf2fb36f2f161d9bbcf1
+decision: ACCEPTED
+status: ACCEPTED
+reviewer: "Architect (pectoraux)"
+timestamp: 2026-08-31T10:55:00Z
+findings:
+  - "PR #104 merged the single-Architect governance rule at d83fecdcb6bbfb6c1dbea523088772ec3bc0edb7."
+  - "PR #103 merged the atomic W040->W041 handoff at ca1889a1053e63aba88bdf2fb36f2f161d9bbcf1, advancing main beyond the W041 authorization baseline recorded by DEC-0052."
+  - "ARCH-03/ARCH-05 require the persistent main snapshot and active authorization baseline to be reconciled to the actual mainline before W041 implementation begins."
+  - "No semantic architecture change is required; this is a governance snapshot reconciliation only."
+blockers: []
+required_corrections: []
+evidence:
+  merge_sha: null
+  ci_run: null
+  artifacts:
+    - "spec/architect/execution-state.yaml"
+    - "spec/architect/execution-ledger.yaml"
+    - "spec/architect/authorizations/WORK-041.yaml"
+    - "spec/architect/current-state.md"
+accepted_scope:
+  - "Reconcile persistent Architect main_sha values to ca1889a1053e63aba88bdf2fb36f2f161d9bbcf1."
+  - "Reconcile WORK-041-CORE-001 baseline_sha to the actual current mainline so ARCH-03 provenance remains valid for subsequent implementation."
+  - "Record the reconciliation formally without changing W040 acceptance status, evidence obligations, W041 scope, or frozen architecture."
+rejected_scope:
+  - "Any implementation of W041."
+  - "Any change to frozen architecture or dependency semantics."
+  - "Any change to W040 acceptance or EVID-007/EVID-008 status."
+  - "Any authorization for W042/W043/W048."
+downstream_effect:
+  - "WORK-041-CORE-001 remains the sole active authorization, now reconciled to the actual mainline."
+  - "W041 implementation may begin from the reconciled mainline under the existing authorization."
+  - "W040 remains in-review and not accepted; its physical evidence obligations remain independently open."
+resolved_by: null
