@@ -24,6 +24,11 @@
 # (W041 contract Evidence classes), and any physical claims remain
 # governed separately by W040's open PHYSICAL obligations EVID-007/EVID-008.
 #
+# Baseline reconciliation (DEC-0054, 2026-08-31): baseline_sha moves
+# 1f8833e5cfbb3e1a17bac5c718070a31a7f67775 -> ca1889a1053e63aba88bdf2fb36f2f161d9bbcf1
+# after DEC-0053 and DEC-0052 merged. Scope, authorization identity,
+# governing decision, dependencies, and all other fields are unchanged.
+#
 # schema: spec/architect/authorizations/ (v1); verified by tools/spec_check.py (ARCH-03).
 
 work_item: WORK-041
@@ -32,7 +37,7 @@ authorized: true
 type: implementation
 authorization_id: "WORK-041-CORE-001"
 authorization_decision: DEC-0052
-baseline_sha: 1f8833e5cfbb3e1a17bac5c718070a31a7f67775
+baseline_sha: ca1889a1053e63aba88bdf2fb36f2f161d9bbcf1
 review_basis: "DEC-0052 atomic handoff: WORK-040-CORRECTION-001 superseded; W041 activated as the single active Work Item. ACR-005 (DEC-0047) is the architecture basis; W041 ready-candidate contract gates implementation. W040 physical validation continues independently; EVID-007/EVID-008 remain OPEN and W040-owned."
 
 dependencies:
