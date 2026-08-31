@@ -8,6 +8,10 @@
 # NetworkPath/platform boundary) is the active Work Item. W042/W043/W048 remain
 # unauthorized. The frozen dependency DAG is unchanged.
 #
+# Post-handoff baseline reconciliation (DEC-0054, 2026-08-31): main advanced
+# from 1f8833e5 to ca1889a after DEC-0053 and DEC-0052 merged. No execution
+# semantics changed; the persistent snapshot now points at actual main.
+#
 # schema: spec/architect/ (execution state v1); verified by ARCH-02/ARCH-03.
 schema_version: 1
 package: "persistent-architect"
@@ -15,8 +19,8 @@ last_updated: "2026-08-31"
 
 repository:
   canonical: "github.com/pectoraux/ADCOS"
-  main_sha: 1f8833e5cfbb3e1a17bac5c718070a31a7f67775
-  main_sha_semantics: "current main after PR #101 merged DEC-0051 ratification; DEC-0052 atomic handoff reconciles the persistent state to this mainline and transfers the single active execution slot from WORK-040-CORRECTION-001 to WORK-041-CORE-001"
+  main_sha: ca1889a1053e63aba88bdf2fb36f2f161d9bbcf1
+  main_sha_semantics: "current main after PR #103 merged the DEC-0052 atomic W040->W041 handoff and PR #104 merged DEC-0053 single-Architect review/merge authority; DEC-0054 reconciles persistent state to this mainline without changing execution semantics"
 
 versions:
   architecture_version_reference: "1.0"
@@ -28,7 +32,7 @@ execution:
   mode: "implementing"
   active_work_item: WORK-041
   active_authorization: "WORK-041-CORE-001"
-  halted_reason: "Atomic handoff (DEC-0052): WORK-040-CORRECTION-001 superseded; WORK-041-CORE-001 is the single active authorization. W041 implements the ACR-005 NetworkPath/platform boundary. W040 remains an independent physical validation track (in-review, NOT accepted; EVID-007 PARTIAL, EVID-008 NOT-TESTABLE remain OPEN and W040-owned) and may resume under a future evidence-continuation authorization. W042/W043/W048 remain unauthorized pending their own repository-local authorizations."
+  halted_reason: "W041 is the single active authorization under DEC-0052. W040 remains an independent physical validation track (in-review, NOT accepted; EVID-007 PARTIAL, EVID-008 NOT-TESTABLE remain OPEN and W040-owned) and may resume under a future evidence-continuation authorization. W042/W043/W048 remain unauthorized pending their own repository-local authorizations."
   next_required_decisions:
     - "Implement WORK-041 (ACR-005 NetworkPath/platform boundary) under WORK-041-CORE-001"
     - "Resume W040 physical validation under a future type: evidence-continuation authorization once physical evidence (real device, real 5G path) is available; EVID-007/EVID-008 remain OPEN"
@@ -62,7 +66,7 @@ open_prs:
   - pr: 48
     head: "work-040-pilot-deployment"
     subject: "WORK-040 Pilot deployment"
-    disposition: "changes required; correction scope authorized by WORK-040-CORRECTION-001, baseline reconciled to main 03f19c5e by LEDGER-RECON-003 (PR #86)"
+    disposition: "changes required; correction authorization superseded by DEC-0052; W040 remains in-review and not accepted"
   - pr: 49
     head: "roadmap/connectivity-economy"
     subject: "Connectivity commerce roadmap and proposed ACR-004"
@@ -70,7 +74,15 @@ open_prs:
   - pr: 82
     head: "arch/acr-009-commercial-control-plane"
     subject: "ACR-009 Commercial Connectivity Control Plane"
-    disposition: "accepted by DEC-0050 and merged; acceptance reconciliation recorded by this governance transition"
+    disposition: "accepted by DEC-0050 and merged"
+  - pr: 103
+    head: "governance/w040-w041-atomic-handoff"
+    subject: "Atomic W040→W041 execution handoff (DEC-0052)"
+    disposition: "merged as ca1889a; W040 authorization superseded and W041 activated"
+  - pr: 104
+    head: "governance/single-architect-review-authority"
+    subject: "Single-Architect review and merge authority (DEC-0053)"
+    disposition: "merged as d83fecd; single Architect is sole review/acceptance/merge authority"
 
 open_acrs: []
 
