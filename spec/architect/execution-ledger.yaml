@@ -74,7 +74,7 @@ work_items:
     handoff: spec/prompts/WORK-003.md
     handoff_required: false
     lifecycle: accepted-merged
-    note: "two correction cycles durably documented before acceptance"
+    note: "two CHANGES REQUIRED review verdicts rendered before acceptance (PR #3 review chain, 2026-08-23)"
   - work_item: WORK-004
     title: "Cryptographic node identity and credential abstraction"
     phase: 1
@@ -262,6 +262,7 @@ work_items:
     handoff: spec/prompts/WORK-014.md
     handoff_required: false
     lifecycle: accepted-merged
+    note: "implemented under the ACR-001-corrected dependency declaration (WORK-017 removed from the declared dependencies)"
   - work_item: WORK-015
     title: "Federation protocol"
     phase: 2
@@ -276,9 +277,10 @@ work_items:
     review_rounds: null
     acceptance_decision: DEC-0015
     correction_decisions: []
-    handoff: null
+    handoff: spec/prompts/WORK-015.md
     handoff_required: false
     lifecycle: accepted-merged
+    note: "review refinement durably recorded: the Status-line prose-reference classification (tools/spec_check.py, WORK-015 review direction)"
   - work_item: WORK-016
     title: "Adapter SDK/runtime"
     phase: 3
@@ -296,6 +298,7 @@ work_items:
     handoff: null
     handoff_required: false
     lifecycle: accepted-merged
+    note: "chat-era item: no durable repository-local handoff prompt located (governance gap closed prospectively by this package)"
   - work_item: WORK-017
     title: "Secure transport profiles"
     phase: 3
@@ -313,6 +316,7 @@ work_items:
     handoff: null
     handoff_required: false
     lifecycle: accepted-merged
+    note: "two-phase acceptance: PR #17 merged first, then PR #18 restored the Architect-corrected secure transport; the accepted reviewed head is PR #18 head 8b12d0bf"
   - work_item: WORK-018
     title: "IPv6 and IP integration boundary"
     phase: 3
@@ -330,6 +334,7 @@ work_items:
     handoff: null
     handoff_required: false
     lifecycle: accepted-merged
+    note: "chat-era item: no durable repository-local handoff prompt located (governance gap closed prospectively by this package)"
   - work_item: WORK-019
     title: "5G Core integration adapter"
     phase: 4
@@ -347,6 +352,8 @@ work_items:
     handoff: null
     handoff_required: false
     lifecycle: accepted-merged
+    evidence_obligations: "EVID-001 (PASS, closed)"
+    note: "chat-era item: no durable repository-local handoff prompt located (governance gap closed prospectively by this package); real Open5GS verification closed PASS (EVID-001)"
   - work_item: WORK-020
     title: "5G RAN/gNB adapter"
     phase: 4
@@ -361,10 +368,11 @@ work_items:
     review_rounds: null
     acceptance_decision: DEC-0020
     correction_decisions: []
-    handoff: null
+    handoff: spec/prompts/WORK-020.md
     handoff_required: false
     lifecycle: accepted-merged
     evidence_obligations: "EVID-002 (OPEN)"
+    note: "accepted with the external SDR evidence gate OPEN (EVID-002): architecture conformance PASS, automated verification PASS, physical SDR lab BLOCKED (docs/WORK-020-real-sdr-acceptance.md)"
   - work_item: WORK-021
     title: "Wi-Fi/non-3GPP access adapter"
     phase: 4
@@ -379,7 +387,7 @@ work_items:
     review_rounds: null
     acceptance_decision: DEC-0021
     correction_decisions: []
-    handoff: null
+    handoff: spec/prompts/WORK-021.md
     handoff_required: false
     lifecycle: accepted-merged
   - work_item: WORK-022
@@ -484,6 +492,7 @@ work_items:
     handoff: null
     handoff_required: false
     lifecycle: accepted-merged
+    note: "blockers B1-B3 corrected before acceptance (PR #28 review chain, 2026-08-27)"
   - work_item: WORK-028
     title: "Threat model and security hardening"
     phase: 5
@@ -622,6 +631,7 @@ work_items:
     handoff_required: false
     lifecycle: accepted-merged
     evidence_obligations: "EVID-004 (OPEN)"
+    note: "software implementation accepted; the physical device track remains OPEN (EVID-004; DEC-0040 through DEC-0042)"
   - work_item: WORK-036
     title: "Network-in-a-Box"
     phase: 7
@@ -640,6 +650,7 @@ work_items:
     handoff_required: false
     lifecycle: accepted-merged
     evidence_obligations: "EVID-005 (OPEN)"
+    note: "software implementation accepted; the physical site deployment remains OPEN (EVID-005)"
   - work_item: WORK-037
     title: "Open RAN/Core interoperability profile"
     phase: 7
@@ -658,14 +669,15 @@ work_items:
     handoff_required: false
     lifecycle: accepted-merged
     evidence_obligations: "EVID-006 (OPEN)"
+    note: "software implementation accepted; the real 5G lab class C remains OPEN (EVID-006)"
   - work_item: WORK-038
     title: "Future IMT / 6G adapter profile"
     phase: 8
     branch: "work-038-future-imt-6g"
     baseline_sha: cebe9f938d49f31b4c6fdd13e68f1e9075afc904
     pr: 43
-    pr_head: 6c809f95d49949281c5c184c0c10720e9c5509c9
-    reviewed_sha: 6c809f95d49949281c5c184c0c10720e9c5509c9
+    pr_head: 6c8095f95d49949281c5c184c0c10720e9c5509c9
+    reviewed_sha: 6c8095f95d49949281c5c184c0c10720e9c5509c9
     merge_sha: 06c445a19d04ce6f3642b9138d6ca3318b4e325d
     merged_at: 2026-08-29T01:44:07Z
     ci_run: null
@@ -675,6 +687,7 @@ work_items:
     handoff: docs/WORK-038-handoff.md
     handoff_required: false
     lifecycle: accepted-merged
+    note: "class C physical evidence not-applicable per the frozen handoff own class list (docs/WORK-038-evidence.md)"
   - work_item: WORK-039
     title: "Federation at scale"
     phase: 8
