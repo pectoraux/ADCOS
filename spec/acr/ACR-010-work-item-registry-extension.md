@@ -10,7 +10,7 @@ atomic proposal vehicle (`spec/change-control.md` §3 element 8): the frozen
 registry extension, the machine-checked expectation update, and the
 persistent-state synchronization take effect only when the Architect merges
 the PR. Until that merge, the current architecture snapshot remains
-authoritative and unchanged on `main`.
+authoritative and unchanged on `main`. Proposal vehicle: PR #108.
 
 Issue context: WORK-041 tracking issue #68 (NetworkPath/platform boundary,
 ACR-005 / DEC-0047); WORK-042 tracking issue #69 (event-driven platform
@@ -230,7 +230,7 @@ authority ownership are all preserved.
 PENDING. This section must be completed by the Architect: render the
 decision (ACCEPTED / REJECTED) as a durable decision record
 (`spec/architect/decisions/DEC-NNNN-*.yaml`, type governance, `acr:
-ACR-010`) and merge or close this PR accordingly. Until that decision is
+ACR-010`) and merge or close PR #108 accordingly. Until that decision is
 recorded, this ACR is PROPOSED and creates no authorization, no
 acceptance, and no architectural effect.
 

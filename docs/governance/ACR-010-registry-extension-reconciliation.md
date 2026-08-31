@@ -1,7 +1,7 @@
 # ACR-010 — Evidence and Reconciliation: The Machine-Checked Work Item Registry Boundary
 
 **Status: PROPOSED evidence document — accompanies ACR-010
-(`spec/acr/ACR-010-work-item-registry-extension.md`).**
+(`spec/acr/ACR-010-work-item-registry-extension.md`, carried by PR #108).**
 
 Date: 2026-08-31. Author context: ACR-010 proposal prepared by the
 implementation agent for Architect review; no decision is rendered here.

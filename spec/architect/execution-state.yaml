@@ -39,7 +39,7 @@ execution:
   active_authorization: "WORK-041-CORE-001"
   halted_reason: "Atomic handoff (DEC-0052): WORK-040-CORRECTION-001 superseded; WORK-041-CORE-001 is the single active authorization. W041 implements the ACR-005 NetworkPath/platform boundary. W040 remains an independent physical validation track (in-review, NOT accepted; EVID-007 PARTIAL, EVID-008 NOT-TESTABLE remain OPEN and W040-owned) and may resume under a future evidence-continuation authorization. W042/W043/W048 remain unauthorized pending their own repository-local authorizations. The W041 implementation delivery is merged on main (PR #107, head 4ce5a42, merge 96db8aa, CI run 33426900730 SUCCESS); its Architect acceptance review is pending, and ACR-010 (PROPOSED) carries the synchronized registry extension that makes WORK-041 machine-representable in the frozen backlog, the dependency graph, and the execution ledger."
   next_required_decisions:
-    - "Decide ACR-010 (frozen Work Item registry extension: register WORK-041 in spec/work-items.md and spec/dependency-graph.md; expected Work Item count 40 -> 41; WORK-041 ledger entry lifecycle implemented) — PROPOSED, carried by branch governance/acr-010-work-item-registry-extension"
+    - "Decide ACR-010 (frozen Work Item registry extension: register WORK-041 in spec/work-items.md and spec/dependency-graph.md; expected Work Item count 40 -> 41; WORK-041 ledger entry lifecycle implemented) — PROPOSED on PR #108"
     - "Render the WORK-041 acceptance review on the merged delivery (PR #107, head 4ce5a42, merge 96db8aa, CI run 33426900730 SUCCESS): record the Architect acceptance decision (DEC-NNNN) and transition the WORK-041 ledger entry from implemented to accepted-merged, or require corrections"
     - "Ratify the commercial roadmap dependency model (docs/roadmap/commercial-dependency-model.md): W051/W052/W053 resequencing, W043 retirement, W049 unification (#98 canonical, #95 superseded), W050 capability-matrix boundary"
     - "Disposition superseded governance threads: PR #100 (W041=CommercialCore contract reconciliation, superseded by DEC-0052's NetworkPath binding) and PR #102 (handoff analysis, superseded by merged PR #103)"
@@ -96,7 +96,7 @@ open_acrs:
   - acr: "ACR-010"
     status: "PROPOSED"
     subject: "Frozen Work Item registry extension (register WORK-041 in the frozen backlog/DAG; expected Work Item count 40 -> 41; WORK-041 ledger entry lifecycle implemented)"
-    vehicle: "governance/acr-010-work-item-registry-extension"
+    vehicle_pr: 108
 
 accepted_acrs:
   - acr: "ACR-005"
