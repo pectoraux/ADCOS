@@ -6,7 +6,7 @@
 
 Durable Architect decision records live in this directory as `DEC-NNNN-<short-slug>.yaml`, numbered sequentially and stably. Schema: `spec/architect/decision-record-template.md`. Verified by `tools/spec_check.py` (ARCH-04).
 
-Migration convention: records DEC-0001 … DEC-0039 are the acceptances of WORK-001 … WORK-039, reconstructed from repository-durable evidence. Unknown chat-era detail is not invented. Records DEC-0040 … DEC-0053 are corrective/governance/architecture decisions whose requirements shape future work.
+Migration convention: records DEC-0001 … DEC-0039 are the acceptances of WORK-001 … WORK-039, reconstructed from repository-durable evidence. Unknown chat-era detail is not invented. Records DEC-0040 … DEC-0054 are corrective/governance/architecture decisions whose requirements shape future work.
 
 ## Registry
 
@@ -65,6 +65,7 @@ Migration convention: records DEC-0001 … DEC-0039 are the acceptances of WORK-
 | DEC-0051 | governance | null | ACCEPTED | ACCEPTED | Work Item dependency decoupling (W040 decoupled as non-blocking prerequisite for downstream software work) |
 | DEC-0052 | governance | WORK-040 | ACCEPTED | ACCEPTED | Atomic W040→W041 execution handoff (supersede WORK-040-CORRECTION-001; activate WORK-041-CORE-001; preserve W040 evidence ownership) |
 | DEC-0053 | governance | null | ACCEPTED | ACCEPTED | Single-Architect review and merge authority |
+| DEC-0054 | governance | null | ACCEPTED | ACCEPTED | Post-handoff mainline reconciliation (1f8833e → ca1889a) |
 
 ## Rules
 
