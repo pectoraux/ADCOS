@@ -129,7 +129,7 @@ work_items:
   - work_item: WORK-007
     title: "Evidence-aware topology graph"
     phase: 1
-    branch: "work-007/evidence-aware-topology"
+    branch: "work-007-evidence-aware-topology"
     baseline_sha: null
     pr: 7
     pr_head: a86620dd16668c2e721c845e29b1595c73660d8c
@@ -163,7 +163,7 @@ work_items:
   - work_item: WORK-009
     title: "Intent and QoS model"
     phase: 1
-    branch: "work-009-intent-qos-model"
+    branch: "work-009/intent-qos-model"
     baseline_sha: null
     pr: 9
     pr_head: 65cb75bf80ee7d9608fe6eb28dbcba0084766e95
@@ -242,7 +242,7 @@ work_items:
     review_rounds: null
     acceptance_decision: DEC-0013
     correction_decisions: []
-    handoff: spec/prompts/WORK-013.md
+    handoff: null
     handoff_required: false
     lifecycle: accepted-merged
   - work_item: WORK-014
@@ -277,7 +277,7 @@ work_items:
     review_rounds: null
     acceptance_decision: DEC-0015
     correction_decisions: []
-    handoff: spec/prompts/WORK-015.md
+    handoff: null
     handoff_required: false
     lifecycle: accepted-merged
     note: "review refinement durably recorded: the Status-line prose-reference classification (tools/spec_check.py, WORK-015 review direction)"
@@ -387,7 +387,7 @@ work_items:
     review_rounds: null
     acceptance_decision: DEC-0021
     correction_decisions: []
-    handoff: spec/prompts/WORK-021.md
+    handoff: null
     handoff_required: false
     lifecycle: accepted-merged
   - work_item: WORK-022
@@ -404,7 +404,7 @@ work_items:
     review_rounds: null
     acceptance_decision: DEC-0022
     correction_decisions: []
-    handoff: null
+    handoff: spec/prompts/WORK-022.md
     handoff_required: false
     lifecycle: accepted-merged
   - work_item: WORK-023
@@ -421,7 +421,7 @@ work_items:
     review_rounds: null
     acceptance_decision: DEC-0023
     correction_decisions: []
-    handoff: null
+    handoff: docs/WORK-023-handoff.md
     handoff_required: false
     lifecycle: accepted-merged
   - work_item: WORK-024
@@ -534,7 +534,7 @@ work_items:
     baseline_sha: null
     pr: 32
     pr_head: 7cfe4fbd7094ca6ffe928873c637d0d4d0a1369d
-    reviewed_sha: 7cfe4fbd7094ca6ffe928873c637d0d4d0a1369d
+    reviewed_sha: 7cfe4fbd7094ca6ffe928873c637d0d4a1369d
     merge_sha: bd775c5365b87a75f502be5a5ecb0d4f25eeee45
     merged_at: 2026-08-28T04:02:15Z
     ci_run: null
@@ -578,6 +578,7 @@ work_items:
     handoff: docs/WORK-032-handoff.md
     handoff_required: false
     lifecycle: accepted-merged
+    note: "implemented under the ACR-003-synchronized dependency declaration (W016 -> W032 added to the DAG)"
   - work_item: WORK-033
     title: "Linux Agent"
     phase: 6
@@ -676,8 +677,8 @@ work_items:
     branch: "work-038-future-imt-6g"
     baseline_sha: cebe9f938d49f31b4c6fdd13e68f1e9075afc904
     pr: 43
-    pr_head: 6c8095f95d49949281c5c184c0c10720e9c5509c9
-    reviewed_sha: 6c8095f95d49949281c5c184c0c10720e9c5509c9
+    pr_head: 6c8096f95d49949281c5c184c0c10720e9c5509c9
+    reviewed_sha: 6c8096f95d49949281c5c184c0c10720e9c5509c9
     merge_sha: 06c445a19d04ce6f3642b9138d6ca3318b4e325d
     merged_at: 2026-08-29T01:44:07Z
     ci_run: null
