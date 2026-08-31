@@ -25,6 +25,13 @@
 # reconciliation). The correction-only scope, the governing decision
 # (DEC-0046), the dependencies, and every other field are unchanged.
 #
+# Baseline reconciliation (LEDGER-RECON-004, 2026-08-31, recorded on PR #100):
+# baseline_sha moves 03f19c5e -> 5da120f (post-PR-86 LEDGER-RECON-003 merge
+# reconciliation, directed by the Architect as a governance-only
+# reconciliation that also aligns the W041/W042 ready-candidate contracts to
+# the ACR-009 commercial sequencing). The correction-only scope, the governing
+# decision (DEC-0046), the dependencies, and every other field are unchanged.
+#
 # schema: spec/architect/authorizations/ (v1); verified by tools/spec_check.py (ARCH-03).
 
 work_item: WORK-040
@@ -33,7 +40,7 @@ authorized: true
 type: implementation
 authorization_id: "WORK-040-CORRECTION-001"
 authorization_decision: DEC-0046
-baseline_sha: 03f19c5e7fee3acc209f8e48701493e109685921
+baseline_sha: 5da120f6e0945410a8fc9346692058ca9a8b49f3
 existing_delivery_head: ee9b356020b6450d85837f60e60c41d08f0ec09a
 existing_delivery_pr: 48
 review_basis: "Architect CHANGES_REQUIRED ruling on the delivered W040 pilot (DEC-0046): criterion 1 physical participation and criterion 2 real 5G physical access remain open; criteria 3-6 are already evidenced and must be preserved."

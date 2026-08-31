@@ -1,20 +1,24 @@
 # ADCOS execution state — persisted by the Architect.
 #
-# Reconciled after the ACR-009 acceptance merge. WORK-040 remains the sole active
+# Reconciled after the ACR-009 acceptance merge and the LEDGER-RECON-004
+# work-item contract reconciliation. WORK-040 remains the sole active
 # authorized Work Item; W041/W042/W043 are prepared candidates only. The
 # WORK-040-CORRECTION-001 baseline is formally reconciled to this mainline by
-# LEDGER-RECON-003.
+# LEDGER-RECON-004, and the W041/W042 ready-candidate contracts under
+# spec/architect/work-items/ now carry the ACR-009 commercial sequencing
+# (issues #83/#84) with the ACR-005/006-era text preserved as superseded
+# history.
 # ACR-009 is accepted by DEC-0050 but does not itself authorize implementation.
 #
 # schema: spec/architect/ (execution state v1); verified by ARCH-02/ARCH-03.
 schema_version: 1
 package: "persistent-architect"
-last_updated: "2026-08-30"
+last_updated: "2026-08-31"
 
 repository:
   canonical: "github.com/pectoraux/ADCOS"
-  main_sha: 03f19c5e7fee3acc209f8e48701493e109685921
-  main_sha_semantics: "actual current main after PR #82 merged ACR-009 and compensating cleanup removed a temporary direct-write artifact; this governance reconciliation records DEC-0050 acceptance and preserves the rule that ACR acceptance does not authorize implementation"
+  main_sha: 5da120f6e0945410a8fc9346692058ca9a8b49f3
+  main_sha_semantics: "actual current main after PR #86 merged LEDGER-RECON-003 (the ACR-009 acceptance reconciliation); this LEDGER-RECON-004 governance reconciliation records the post-RECON-003 mainline, reconciles the W041/W042 ready-candidate contracts to the accepted ACR-009 commercial sequencing, and preserves the rule that ACR acceptance does not authorize implementation"
 
 versions:
   architecture_version_reference: "1.0"
@@ -60,7 +64,7 @@ open_prs:
   - pr: 48
     head: "work-040-pilot-deployment"
     subject: "WORK-040 Pilot deployment"
-    disposition: "changes required; correction scope authorized by WORK-040-CORRECTION-001, baseline reconciled to main 03f19c5e by LEDGER-RECON-003 (PR #86)"
+    disposition: "changes required; correction scope authorized by WORK-040-CORRECTION-001, baseline reconciled to main 5da120f by LEDGER-RECON-004 (PR #100)"
   - pr: 49
     head: "roadmap/connectivity-economy"
     subject: "Connectivity commerce roadmap and proposed ACR-004"

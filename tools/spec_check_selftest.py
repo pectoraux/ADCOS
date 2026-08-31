@@ -39,7 +39,9 @@ implementing with the active WORK-040 correction authorization
 WORK-040-CORRECTION-001 (baseline
 93efa54f at issuance, moved to 3810da99 by the LEDGER-RECON-002
 post-PR-67 mainline reconciliation, then to 03f19c5e by the
-LEDGER-RECON-003 post-PR-82 ACR-009 acceptance reconciliation) — the "missing authorization" and
+LEDGER-RECON-003 post-PR-82 ACR-009 acceptance reconciliation, then to
+5da120f by the LEDGER-RECON-004 post-PR-86 work-item-contract
+reconciliation) — the "missing authorization" and
 "no active authorization" cases revert that activation deliberately to
 simulate the stopped state. The PROVENANCE cases initialize a temporary git repository with
 an origin/main base and prove the authorization-provenance rules of
@@ -489,7 +491,7 @@ ARCH_CASES: List[Case] = [
         # An active authorization whose baseline no longer matches the
         # recorded main baseline is stale. The fixture base already
         # carries the active WORK-040-CORRECTION-001 authorization
-        # (baseline 03f19c5e since the LEDGER-RECON-003 post-PR-82
+        # (baseline 5da120f since the LEDGER-RECON-004 post-PR-86
         # reconciliation); corrupting the recorded main baseline
         # makes it stale.
         "name": "architect-stale-authorization-detected",
@@ -497,7 +499,7 @@ ARCH_CASES: List[Case] = [
             (
                 "replace",
                 "spec/architect/execution-state.yaml",
-                "  main_sha: 03f19c5e7fee3acc209f8e48701493e109685921",
+                "  main_sha: 5da120f6e0945410a8fc9346692058ca9a8b49f3",
                 "  main_sha: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             )
         ],

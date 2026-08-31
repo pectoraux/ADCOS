@@ -19,8 +19,8 @@
 # never silently rewritten.
 
 schema_version: 1
-main_sha: 03f19c5e7fee3acc209f8e48701493e109685921
-last_updated: "2026-08-30"
+main_sha: 5da120f6e0945410a8fc9346692058ca9a8b49f3
+last_updated: "2026-08-31"
 work_items:
   - work_item: WORK-001
     title: "Protocol specification/governance foundation"
@@ -752,3 +752,10 @@ reconciliations:
     to_main_sha: 03f19c5e7fee3acc209f8e48701493e109685921
     reason: "ACR-009 acceptance reconciliation: main advanced from the PR-67 governance baseline to the post-PR-82 mainline containing the accepted Commercial Connectivity Control Plane; DEC-0050 records acceptance while W041/W042/W043 remain unauthorized."
     history: "No work-item history rewritten: WORK-001..WORK-040 entries remain byte-identical; this reconciliation changes only the ledger snapshot baseline and records the formal movement of the persistent Architect state."
+  - reconciliation_id: LEDGER-RECON-004
+    recorded_by: "Architect-directed governance-only reconciliation on PR #100 (2026-08-31): work-item contract reconciliation and post-RECON-003 baseline movement; no new decision record is required because no work-item history is rewritten, no authorization is created or altered in scope, and the governing decisions (DEC-0046, DEC-0050) are unchanged"
+    recorded_at: 2026-08-31T04:37:50Z
+    from_main_sha: 03f19c5e7fee3acc209f8e48701493e109685921
+    to_main_sha: 5da120f6e0945410a8fc9346692058ca9a8b49f3
+    reason: "post-RECON-003 reconciliation: main advanced to 5da120f (the PR #86 merge of LEDGER-RECON-003) while the persistent-state snapshot, the WORK-040-CORRECTION-001 authorization, and the W041/W042 ready-candidate contracts still referenced the pre-merge state; the snapshot baseline (main_sha) and the authorization baseline_sha are formally moved to the current mainline, and the stale ACR-005/006-era W041/W042 contract files are reconciled to the ACR-009 commercial sequencing (issues #83/#84) with the historical text preserved in-file as superseded history"
+    history: "no work-item history rewritten: every WORK-001..WORK-040 entry is byte-identical; W041/W042/W043 remain unauthorized ready-candidates and no authorization is created; no protocol semantics changed; the only changes are the snapshot baseline, the LEDGER-RECON-004 record itself, the reconciled baseline_sha in authorizations/WORK-040.yaml, the reconciled W041/W042 contract files (spec/architect/work-items/), and the reconciling narrative fields in execution-state.yaml and current-state.md"

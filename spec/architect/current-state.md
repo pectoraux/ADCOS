@@ -1,11 +1,11 @@
 # ADCOS Current State
 
-**Persistent Architect snapshot — updated after ACR-009 acceptance.**
+**Persistent Architect snapshot — updated after ACR-009 acceptance and the LEDGER-RECON-004 contract reconciliation.**
 
 ## Repository
 
 - Repository: `github.com/pectoraux/ADCOS`
-- Current `main`: `03f19c5e7fee3acc209f8e48701493e109685921` (tree-clean post-ACR-009 acceptance; includes the PR #82 acceptance merge and compensating cleanup commits for a temporary direct-write artifact)
+- Current `main`: `5da120f6e0945410a8fc9346692058ca9a8b49f3` (tree-clean; includes the PR #82 ACR-009 acceptance merge, the compensating cleanup commits for a temporary direct-write artifact, and the PR #86 LEDGER-RECON-003 governance merge)
 - Architecture version: `1.0` (`spec/architecture.md`)
 - Protocol version: `1.0` (`spec/schemas/protocol.json`)
 
@@ -21,7 +21,7 @@ GitHub/repository state is the persistent Architect. Chat is not an authority so
 
 - Active Work Item: `WORK-040`
 - Execution mode: `implementing` (correction-only)
-- Active authorization: `WORK-040-CORRECTION-001` (DEC-0046), baseline `03f19c5e7fee3acc209f8e48701493e109685921` (reconciled by LEDGER-RECON-003; correction-only scope unchanged)
+- Active authorization: `WORK-040-CORRECTION-001` (DEC-0046), baseline `5da120f6e0945410a8fc9346692058ca9a8b49f3` (reconciled by LEDGER-RECON-004; correction-only scope unchanged)
 - W040 status: `in-review` on PR `#48` (round 1 verdict: CHANGES_REQUIRED, DEC-0046)
 - W040 implementation head: `ee9b356020b6450d85837f60e60c41d08f0ec09a`
 - W040 original baseline: `1669ae9a396838b72ba461c846b98e84478ab24f`
@@ -46,9 +46,10 @@ A software rehearsal cannot close a physical criterion by inference.
 ## Planned / gated Work Items
 
 - `WORK-040`: correction cycle active; acceptance remains blocked pending Architect re-review.
-- `WORK-041`: READY-CANDIDATE contract recorded under ACR-009; execution not authorized and remains blocked while W040 is active.
-- `WORK-042`: READY-CANDIDATE contract recorded under ACR-009; execution not authorized, and depends on W041 where its interfaces are consumed.
-- `WORK-043`: READY-CANDIDATE contract recorded under ACR-009; execution not authorized, and depends on W042/W041 where its interfaces are consumed.
+- `WORK-041`: READY-CANDIDATE CommercialCore contract (issue #83, `spec/architect/work-items/WORK-041.md`) recorded under ACR-009; execution not authorized and remains blocked while W040 is active.
+- `WORK-042`: READY-CANDIDATE UsageLedger contract (issue #84, `spec/architect/work-items/WORK-042.md`) recorded under ACR-009; execution not authorized, and depends on W041 where its interfaces are consumed.
+- `WORK-043`: READY-CANDIDATE EconomicAllocation contract (issue #85) recorded under ACR-009; execution not authorized, and depends on W042/W041 where their interfaces are consumed.
+- The W041/W042 ready-candidate contracts were reconciled to the ACR-009 commercial sequencing by LEDGER-RECON-004 (2026-08-31); the earlier ACR-005/006-era contract text is preserved inside those files as clearly-marked superseded history, and ACR-005/ACR-006 remain accepted architecture direction.
 - `WORK-044+`: not yet authorized; must be established through the mission/learning/change-control process.
 
 ## Architecture Change Requests
