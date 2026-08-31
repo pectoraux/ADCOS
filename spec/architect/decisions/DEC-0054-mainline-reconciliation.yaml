@@ -1,0 +1,45 @@
+# ADCOS Architect decision record.
+# schema: spec/architect/decision-record-template.md; verified by tools/spec_check.py (ARCH-04).
+#
+# This governance reconciliation records the movement of the persistent
+# Architect snapshot from the pre-handoff mainline to the actual post-merge
+# mainline after DEC-0053 and DEC-0052 were merged.
+decision_id: DEC-0054
+type: governance
+work_item: null
+acr: null
+pr: null
+reviewed_sha: ca1889a1053e63aba88bdf2fb36f2f161d9bbcf1
+decision: ACCEPTED
+status: ACCEPTED
+reviewer: "Architect (pectoraux)"
+timestamp: 2026-08-31T11:15:00Z
+findings:
+  - "The persistent Architect snapshot recorded main 1f8833e, but actual main advanced to ca1889a after the merged DEC-0052 W040->W041 handoff and DEC-0053 single-Architect governance clarification."
+  - "WORK-041-CORE-001 remains active and its authorization scope, dependencies, and semantics are unchanged; only its baseline reference requires reconciliation to the actual current mainline."
+  - "W040 remains in-review and not accepted; EVID-007 and EVID-008 remain OPEN and W040-owned."
+  - "No frozen architecture semantics or Work Item acceptance criteria change in this reconciliation."
+blockers: []
+required_corrections: []
+evidence:
+  merge_sha: null
+  ci_run: null
+  artifacts:
+    - "spec/architect/execution-state.yaml"
+    - "spec/architect/execution-ledger.yaml"
+    - "spec/architect/authorizations/WORK-041.yaml"
+    - "spec/architect/current-state.md"
+accepted_scope:
+  - "Reconcile persistent Architect repository.main_sha and execution-ledger main_sha from 1f8833e to ca1889a."
+  - "Reconcile WORK-041-CORE-001 baseline_sha to ca1889a without changing its authorization scope or authority inputs."
+  - "Record LEDGER-RECON-005 in the execution ledger and preserve all prior work-item history."
+  - "Update current-state.md to identify ca1889a as current main and retain the W040/W041 governance semantics."
+rejected_scope:
+  - "Any modification to DEC-0052's rendered verdict or reviewed_sha."
+  - "Acceptance or closure of WORK-040 or its physical evidence obligations."
+  - "Any new Work Item authorization beyond WORK-041-CORE-001."
+  - "Any frozen architecture or protocol semantic change."
+downstream_effect:
+  - "ARCH-03/ARCH-05/ARCH-08 provenance remains anchored to the actual current mainline for the active W041 authorization."
+  - "The active execution slot remains WORK-041/WORK-041-CORE-001."
+resolved_by: null
