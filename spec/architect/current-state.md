@@ -1,11 +1,11 @@
 # ADCOS Current State
 
-**Persistent Architect snapshot — reconciled after the DEC-0052 atomic handoff and the commercial roadmap reconciliation (LEDGER-RECON-005).**
+**Persistent Architect snapshot — reconciled after the DEC-0052 atomic handoff and the commercial roadmap reconciliation (LEDGER-RECON-005); the W041 delivery (PR #107) is recorded and ACR-010 is proposed.**
 
 ## Repository
 
 - Repository: `github.com/pectoraux/ADCOS`
-- Current `main`: `bb964a1bd94176fdc55f6870ffcdaf75445cc657` (tree-clean; PR #101 merged DEC-0051 ratification, PR #103 merged DEC-0052 atomic handoff + DEC-0053 single-Architect authority, and the W041 implementation-directive docs commit; the persistent state and the active WORK-041-CORE-001 baseline are reconciled to this mainline by LEDGER-RECON-005)
+- Current `main`: `96db8aa4423dff845a223e0c93c67f3dc14e314d` (tree-clean; PR #107 merged the WORK-041 implementation at head `4ce5a42`, CI run 33426900730 SUCCESS). The persistent-state snapshot baseline and the active `WORK-041-CORE-001` authorization baseline remain reconciled at `bb964a1bd94176fdc55f6870ffcdaf75445cc657` per LEDGER-RECON-005; ACR-010 records the W041 delivery facts without moving the snapshot baseline, and the next reconciliation moves it per the standing RECON convention.
 - Architecture version: `1.0` (`spec/architecture.md`)
 - Protocol version: `1.0` (`spec/schemas/protocol.json`)
 
@@ -21,8 +21,8 @@ GitHub/repository state is the persistent Architect. Chat is not an authority so
 
 - Active Work Item: `WORK-041`
 - Execution mode: `implementing`
-- Active authorization: `WORK-041-CORE-001` (DEC-0052), baseline `bb964a1bd94176fdc55f6870ffcdaf75445cc657` (atomic handoff from WORK-040-CORRECTION-001; baseline reconciled to the current mainline by LEDGER-RECON-005)
-- W041 status: `active` — implements the ACR-005 NetworkPath/platform boundary (DEC-0047)
+- Active authorization: `WORK-041-CORE-001` (DEC-0052), baseline `bb964a1bd94176fdc55f6870ffcdaf75445cc657` (atomic handoff from WORK-040-CORRECTION-001; baseline reconciled to the LEDGER-RECON-005 snapshot baseline)
+- W041 status: `active` — implements the ACR-005 NetworkPath/platform boundary (DEC-0047). The implementation delivery is **merged** (PR `#107`, head `4ce5a42`, merge `96db8aa`, CI run 33426900730 SUCCESS, merged 2026-08-31T19:15:03Z); the ledger records it at lifecycle `implemented` with `acceptance_decision: null` — **the Architect acceptance review is pending** and remains a separate decision from ACR-010.
 - W040 status: `in-review` on PR `#48` (round 1 verdict: CHANGES_REQUIRED, DEC-0046). The W040 correction authorization `WORK-040-CORRECTION-001` was superseded by DEC-0052 (atomic handoff); W040 is **not accepted** (lifecycle stays `in-review`, `acceptance_decision: null`).
 - W040 implementation head: `ee9b356020b6450d85837f60e60c41d08f0ec09a`
 - W040 original baseline: `1669ae9a396838b72ba461c846b98e84478ab24f`
@@ -48,8 +48,8 @@ A software rehearsal cannot close a physical criterion by inference.
 ## Planned / gated Work Items
 
 - `WORK-040`: correction authorization `WORK-040-CORRECTION-001` superseded by DEC-0052 (atomic handoff to W041). W040 remains an independent physical validation track — `in-review`, **not accepted**; EVID-007 (PARTIAL) and EVID-008 (NOT-TESTABLE) remain OPEN and W040-owned. The correction cycle may resume later under a `type: evidence-continuation` authorization once physical evidence is available.
-- `WORK-041`: contract recorded under ACR-005 (tracking issue #68); **active authorized implementation track** under `WORK-041-CORE-001` (DEC-0052). Implements the ACR-005 NetworkPath/platform boundary. W040 was decoupled as a non-blocking prerequisite by DEC-0051; W041 is DAG-ready and active.
-- `WORK-042`: READY-CANDIDATE contract recorded under ACR-006 (tracking issue #69, `spec/architect/work-items/WORK-042.md`); execution not authorized, and depends on W041 where its interfaces are consumed.
+- `WORK-041`: contract recorded under ACR-005 (tracking issue #68); **active authorized implementation track** under `WORK-041-CORE-001` (DEC-0052). Implements the ACR-005 NetworkPath/platform boundary. W040 was decoupled as a non-blocking prerequisite by DEC-0051; W041 is DAG-ready and active. The delivery is merged (PR `#107`); its registration in the frozen backlog and dependency graph (Phase 9) and its execution-ledger entry are carried by **ACR-010 (PROPOSED)**; Architect acceptance is pending.
+- `WORK-042`: READY-CANDIDATE contract recorded under ACR-006 (tracking issue #69, `spec/architect/work-items/WORK-042.md`); execution not authorized, and depends on W041 where its interfaces are consumed. ACR-010 does not register or authorize WORK-042; the registry can represent it only when its own governance authorization issues.
 - `WORK-043`: retired from commercial use and left unassigned (LEDGER-RECON-005); the commercial-era "W043 EconomicAllocation" label is superseded by W053.
 - Commercial chain (resequenced by LEDGER-RECON-005): `WORK-051` CommercialCore (issue #83) → `WORK-052` UsageLedger (issue #84) → `WORK-053` EconomicAllocation (issue #85) — ready-candidates, unauthorized. `WORK-044`–`WORK-050` (issues #88–#92, #98, #96) remain ready-candidates, unauthorized; the duplicate W049 definition is resolved (issue #98 canonical, issue #95 superseded, discoverable).
 - `WORK-044+`: the canonical commercial dependency model is `docs/roadmap/commercial-dependency-model.md` (W041–W053 decomposition, explicit dependency graph, W040 as physical validation / evidence track — advisory, not a prerequisite, superseded-label history). Not authorized; each Work Item must still be established and authorized through the mission/learning/change-control process.
@@ -62,8 +62,9 @@ A software rehearsal cannot close a physical criterion by inference.
 - `ACR-006` — Event-Driven Platform Integration and Journal-First Recovery — **ACCEPTED**, DEC-0048, proposal merged by PR #64.
 - `ACR-007` — Mission-Immutable, Architecture-Evolvable Governance — **ACCEPTED**, DEC-0049, merged by PR #67.
 - `ACR-009` — Commercial Connectivity Control Plane — **ACCEPTED**, DEC-0050, proposal merged by PR #82; durable acceptance is recorded by PR #86.
+- `ACR-010` — Work Item Registry Extension Beyond WORK-040 — **PROPOSED** (branch `governance/acr-010-work-item-registry-extension`): synchronized registration of WORK-041 in the frozen backlog and dependency graph (Phase 9; expected Work Item count 40 → 41) plus the WORK-041 execution-ledger entry (lifecycle `implemented`). No acceptance, authorization, or architecture-version semantics are changed by the proposal; the machine-checked contradiction it resolves is documented in `docs/governance/ACR-010-registry-extension-reconciliation.md`.
 
-ACR-005 and ACR-006 define reusable architectural direction without independently authorizing implementation. ACR-007 defines the mission/architecture distinction and durable learning loop. ACR-009 defines the accepted commercial control-plane architecture; none of these ACRs independently authorizes Work Item implementation.
+ACR-005 and ACR-006 define reusable architectural direction without independently authorizing implementation. ACR-007 defines the mission/architecture distinction and durable learning loop. ACR-009 defines the accepted commercial control-plane architecture; none of these ACRs independently authorizes Work Item implementation. ACR-010 is a proposal: it registers the already-authorized-and-delivered WORK-041 in the frozen registry without creating any new authorization or accepting WORK-041.
 
 ## Experience and learning
 

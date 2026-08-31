@@ -490,3 +490,20 @@ Acceptance criteria:
 - operational evidence is captured.
 Required verification: pilot report and final conformance review.
 Definition of done: ADCOS is demonstrated as a credible decentralized connectivity platform.
+
+# Phase 9 — Governed architecture evolution
+
+Work Items registered beyond the original 40-item snapshot register here as their own ACR/governance authorizations issue. WORK-041 is the first such item (registered by ACR-010); its registry definition is taken from the canonical W041 contract (spec/architect/work-items/WORK-041.md, tracking issue #68) and the authorization record WORK-041-CORE-001 (DEC-0052). WORK-042 remains a ready-candidate and is NOT registered until its own governance authorization issues.
+
+### WORK-041 — First-Class Network Path and Platform Integration
+Objective: Implement the accepted ACR-005 network-path/platform boundary — a technology-neutral NetworkPath representation over existing authority-owned state, separating platform observation from ADCOS protocol state, and separating path detection, validation, binding, activation, and retirement — without creating a new identity, session, routing, transport, federation, or policy authority.
+Dependencies: WORK-016, WORK-018, WORK-033, WORK-034
+Acceptance criteria:
+- The same logical session can move between distinct validated physical paths without changing session_id.
+- Candidate paths are detected without automatically becoming active.
+- Failed validation/bind/probe leaves the existing active path intact where possible.
+- The path/platform evidence chain is explicit, deterministic, replay-safe, and independently verifiable.
+- Existing accepted batteries remain green; no frozen authority ownership changes.
+Required verification: static checks, networkpath_selftest, deterministic evidence-chain verification.
+Out of scope: new identity/session/routing/transport/federation/policy authority; wire-schema changes unless separately authorized; private authority access; synthetic physical evidence presented as physical PASS; W042 implementation (the W041→W042 interface dependency where W042 consumes W041 interfaces remains hard and is governed by the W042 ready-candidate contract); W043/W048 implementation; commercial core/payment/settlement implementation; physical validation claims (physical evidence is not required for this Work Item; any physical claims remain governed by WORK-040's open PHYSICAL obligations EVID-007/EVID-008).
+Definition of done: Path and platform facts are representable as an explicit, deterministic, replay-safe evidence chain, with stable logical sessions across physical path changes and no new authority.

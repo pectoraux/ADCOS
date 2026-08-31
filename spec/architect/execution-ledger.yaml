@@ -738,6 +738,24 @@ work_items:
     areas:
       - pilot/
     note: "in review, round 1 verdict rendered: delivered on PR #48 (head ee9b356, CI run 33278751838 SUCCESS, delivery record posted 2026-08-29); DEC-0046 rules CHANGES_REQUIRED (criteria 1-2 open) and issued the repository-local correction authorization WORK-040-CORRECTION-001 (baseline 03f19c5e after LEDGER-RECON-003); DEC-0052 (2026-08-31) supersedes WORK-040-CORRECTION-001 as the active authorization, transferring the single active execution slot to WORK-041-CORE-001 — WORK-040 is NOT accepted (lifecycle stays in-review, acceptance_decision stays null); EVID-007 (PARTIAL) and EVID-008 (NOT-TESTABLE) remain OPEN and W040-owned; the correction cycle may resume later under a type: evidence-continuation authorization once physical evidence is available; this in-review entry stays descriptive only and is never authorization (PA-001, DEC-0045)"
+  - work_item: WORK-041
+    title: "First-Class Network Path and Platform Integration"
+    phase: 9
+    branch: "work-041-networkpath-core"
+    baseline_sha: ece53db043e3b7e3aa4f35e0e4271b10ca1a4e16
+    pr: 107
+    pr_head: 4ce5a42b42532cf1daceda8e20e0d1d7eff8f788
+    reviewed_sha: null
+    merge_sha: 96db8aa4423dff845a223e0c93c67f3dc14e314d
+    merged_at: 2026-08-31T19:15:03Z
+    ci_run: 33426900730
+    review_rounds: 2
+    acceptance_decision: null
+    correction_decisions: []
+    handoff: docs/WORK-041-handoff.md
+    handoff_required: true
+    lifecycle: implemented
+    note: "delivery entry added by ACR-010 (frozen Work Item registry extension) exactly per the convention recorded by LEDGER-RECON-004: a W041 ledger entry is added once W041 has a delivery PR and is registered in the frozen backlog. Delivered under WORK-041-CORE-001 (DEC-0052; authorization baseline bb964a1 as reconciled by LEDGER-RECON-005; implementation branch cut from ece53db, which carries the authorization record byte-identically from main). PR #107 review: round 1 found one blocking evidence-digest defect (networkpath_selftest case_26 inverted assertion); the correction landed at head 4ce5a42 (commit 'fix inverted digest assertion in case_26 (equality=PASS, mismatch=FAIL)'); round 2 verified the fix — authoritative CI run 33426900730 (spec-check) on 4ce5a42 is SUCCESS — and the Architect merged PR #107 at 96db8aa (2026-08-31T19:15:03Z). The Work Item is NOT accepted: lifecycle stays implemented, acceptance_decision stays null, reviewed_sha stays null until an Architect acceptance decision record identifies the exact reviewed SHA (review-protocol §5). WORK-041-CORE-001 remains the single active authorization (acceptance/supersession is a separate future Architect decision); W042/W043/W048 remain unauthorized. The snapshot baseline (main_sha bb964a1, LEDGER-RECON-005) is deliberately NOT moved by ACR-010; the next reconciliation moves it per the standing RECON convention. No W001..W040 entry is rewritten."
 
 reconciliations:
   - reconciliation_id: LEDGER-RECON-001

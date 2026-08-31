@@ -63,6 +63,7 @@ flowchart TD
   W038[W038 Future IMT Adapter]
   W039[W039 Federation Scale]
   W040[W040 Pilot]
+  W041[W041 NetworkPath/Platform Boundary]
 
   W001 --> W002 --> W003 --> W004 --> W005 --> W006 --> W007
   W005 --> W008
@@ -187,6 +188,10 @@ flowchart TD
   W036 --> W040
   W037 --> W040
   W039 --> W040
+  W016 --> W041
+  W018 --> W041
+  W033 --> W041
+  W034 --> W041
 ```
 
 ---
@@ -236,6 +241,11 @@ These establish simulation, conformance, and the Linux reference Agent.
 
 The architecture is not considered future-proof until `W038` proves a hypothetical 6G/future-access implementation can be added without changing the core protocol.
 
+### Phase 9 — Governed architecture evolution
+`W041`
+
+Architectural execution units registered beyond the original 40-item snapshot (per ACR-010) belong to this evolution lane. `W041` implements the accepted ACR-005 network-path/platform boundary; it is a parallel evolution track whose hard dependencies are satisfied, not a member of the generation/scale lane, and it places no ordering obligation on any earlier item.
+
 ---
 
 ## 4. Critical Path
@@ -265,7 +275,7 @@ W001
  → W040
 ```
 
-This is intentionally not the only path. Wi-Fi, fixed backhaul, simulator, telemetry, and resilience can evolve in parallel when their graph dependencies are met.
+This is intentionally not the only path. Wi-Fi, fixed backhaul, simulator, telemetry, and resilience can evolve in parallel when their graph dependencies are met. WORK-041 (Phase 9) is likewise not on this critical path: it is a governed architecture-evolution track, not a dependency of the pilot or of any critical-path member.
 
 ---
 
@@ -326,7 +336,7 @@ A passing test suite cannot override an architecture violation.
 
 ## 8. Completion Criterion
 
-ADCOS is architecturally complete only when all 40 Work Items are Architect-accepted and the final conformance/interop/pilot evidence demonstrates:
+ADCOS is architecturally complete only when all 41 Work Items are Architect-accepted and the final conformance/interop/pilot evidence demonstrates:
 
 ```text
 5G today
