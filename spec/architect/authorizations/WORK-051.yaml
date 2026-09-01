@@ -1,138 +1,59 @@
-# ADCOS Work Item authorization record — WORK-051 active implementation.
-#
-# WORK-051-CORE-001 (issued by DEC-0058): the Architect's repository-local
-# authorization for WORK-051 (CommercialCore: connectivity intent, offers,
-# reservation, lease, and transaction lifecycle, ACR-009). This record is
-# the sole durable authority for W051 implementation scope. It becomes the
-# single active authorization at the moment DEC-0058 merges, atomically
-# superseding WORK-042-CORE-001 (whose Work Item is accepted-merged through
-# DEC-0057 in the same governance transition) so the single active
-# execution slot is never vacant (mode implementing + zero active auths =
-# STOP) nor double-occupied (two active auths = ARCH-03 FAIL).
-#
-# Scope is the ACR-009 commercial control-plane core per the WORK-051
-# ready-candidate contract (tracking issue #83, canonical identity per the
-# ACR-011 registered entry and docs/roadmap/commercial-dependency-model.md):
-# the canonical commercial state lifecycle ConnectivityIntent, OfferSelected,
-# ReservationHeld, SessionAuthorized, PathActive, DeliveryStarted,
-# UsageAccruing, DeliveryCompleted, BillableFinal, SettlementPending, Settled
-# (with compensating states/events for cancellation, expiry, path failure,
-# and non-delivery), implemented as an append-only, deterministic,
-# idempotent state machine that references — never owns or mutates —
-# existing logical session IDs, NetworkPath IDs, and delivery evidence,
-# and explicitly separates reservation/payment state from actual delivery
-# — WITHOUT creating a new identity, session, routing, path, transport,
-# federation, or policy authority, without moving payment rails/custody/
-# payout/KYC/jurisdiction/discovery/SDKs inside this Work Item, and without
-# letting payment-provider-specific assumptions leak into the core.
-#
-# W051 is the commercial chain head: its frozen registry declaration is
-# Dependencies: none (spec/work-items.md; ACR-009 acceptance is its
-# architectural precondition, not a Work Item dependency — satisfied by
-# DEC-0050). W051 does NOT authorize WORK-044 through WORK-050, WORK-052,
-# WORK-053, or WORK-048; every registered dependency edge (W044..W049,
-# W052, W053 on W051 and each other) remains hard and unchanged. W051
-# makes NO physical validation claims; the commercial core is a pure
-# software control-plane model and physical-device evidence is not
-# required for W051 implementation; any physical claims remain governed
-# separately by W040's open PHYSICAL obligations EVID-007/EVID-008 (W040
-# stays in-review and is NOT accepted; its track is independent of W051
-# and unaffected by this authorization).
-#
-# Baseline note: baseline_sha is fe6e6e3 (current main at this governance
-# commit, the post-PR-#110/#111/#115 mainline reconciled by LEDGER-RECON-007).
-# Per the RECON-002/003/004/005/006/007 convention it moves in lockstep
-# with the snapshot baseline only through a formally recorded
-# reconciliation; there is no in-flight W051 implementation branch to
-# invalidate at activation time — a future W051 implementation PR
-# branches from a main carrying this exact record.
-#
-# schema: spec/architect/authorizations/ (v1); verified by tools/spec_check.py (ARCH-03).
-
+# ADCOS Work Item authorization record — WORK-051 provenance.
+# Superseded by DEC-0059 after Architect acceptance of PR #117.
 work_item: WORK-051
-status: active
-authorized: true
+status: superseded
+authorized: false
+superseded_by: "WORK-052-CORE-001"
+supersession_decision: DEC-0059
 type: implementation
 authorization_id: "WORK-051-CORE-001"
 authorization_decision: DEC-0058
 baseline_sha: fe6e6e35a49cb2113315d0ec1569f7e93a3cf200
-review_basis: "DEC-0058 atomic transition: WORK-042 accepted-merged (DEC-0057, PR #110 head 708a432, merge 207d70e, CI run 33444952103 SUCCESS); WORK-042-CORE-001 superseded; WORK-051-CORE-001 is the single active authorization. ACR-009 (DEC-0050) is the architecture basis; the WORK-051 ready-candidate contract (issue #83) gates implementation; ACR-005/ACR-006/ACR-007 are accepted; W041 NetworkPath interfaces are referenced (accepted-merged, DEC-0054) where NetworkPath references are consumed; W042 journal-first discipline is referenced (accepted-merged, DEC-0057) where consumed. W040 physical validation is advisory only (DEC-0051) and continues independently (in-review, NOT accepted; EVID-007/EVID-008 remain OPEN and W040-owned)."
-
+review_basis: "DEC-0058 activation; exact W051 scope and provenance retained here."
 dependencies: []
-
 authority_inputs:
-  - "ACR-009 accepted (DEC-0050) — Commercial Connectivity Control Plane (the architecture basis: canonical commercial objects and lifecycle, authority boundaries, usage integrity, provider abstraction)"
-  - "ACR-005 accepted (DEC-0047) — First-Class Network Path and Platform Boundary (NetworkPath identities referenced, never owned)"
-  - "ACR-006 accepted (DEC-0048) — Event-Driven Platform Integration and Journal-First Recovery (journal-first discipline referenced where consumed)"
-  - "ACR-007 accepted (DEC-0049) — Mission-Immutable, Architecture-Evolvable Governance"
-  - "WORK-012 Logical Sessions (logical session identities referenced, never owned)"
-  - "WORK-041 NetworkPath/platform boundary (accepted-merged by DEC-0054; NetworkPath identities referenced, never owned)"
-  - "WORK-042 platform integration and journal-first recovery (accepted-merged by DEC-0057; durable-state discipline referenced where consumed)"
-
+  - "ACR-009 accepted (DEC-0050)"
+  - "ACR-005 accepted (DEC-0047)"
+  - "ACR-006 accepted (DEC-0048)"
+  - "ACR-007 accepted (DEC-0049)"
+  - "WORK-012 Logical Sessions"
+  - "WORK-041 NetworkPath/platform boundary (accepted-merged, DEC-0054)"
+  - "WORK-042 platform integration and journal-first recovery (accepted-merged, DEC-0057)"
 authority_outputs:
-  - "the canonical commercial state lifecycle (ConnectivityIntent through Settled with compensating states/events for cancellation, expiry, path failure, and non-delivery) as an append-only, deterministic, idempotent, attributable state machine that references existing logical session IDs, NetworkPath IDs, and delivery evidence without becoming authoritative for them — no new identity/session/routing/path/transport/federation/policy authority; no payment movement inside ADCOS; no payment-provider-specific assumptions in the core"
-
+  - "canonical commercial state lifecycle from ConnectivityIntent through Settled, with compensating outcomes, without owning connectivity/session/path/routing/transport authorities"
 scope:
   - "commercial/"
   - "tools/commercial_selftest.py"
   - "docs/WORK-051-handoff.md"
   - "docs/WORK-051-evidence.md"
-
 required_corrections: []
-
 acceptance_criteria:
-  - "The full canonical commercial lifecycle is representable, append-only, deterministic, and idempotent, with every state transition attributable."
-  - "Compensating states/events exist for cancellation, expiry, path failure, and non-delivery; historical records remain immutable."
-  - "The core references existing logical session IDs, NetworkPath IDs, and delivery evidence without becoming authoritative for them."
-  - "Payment success never implies delivery; reservation never implies delivery; delivery facts cannot be rewritten by later commercial events."
-  - "Commerce cannot mutate connectivity/session/path/routing/transport authorities; no payment-provider-specific assumptions leak into the core."
-
+  - "Full canonical commercial lifecycle is append-only, deterministic, idempotent, and attributable."
+  - "Compensating states/events preserve immutable history."
+  - "Existing session, NetworkPath, and delivery-evidence identities are referenced, not owned."
+  - "Payment/reservation success never implies delivery."
+  - "No mutation or shadow authority over connectivity/session/path/routing/transport."
 evidence_classes:
   - criterion: "Software/architecture conformance"
     class: SOFTWARE
-    allowed_statuses:
-      - PASS
-      - PARTIAL
-      - NOT-TESTABLE
-      - OPEN
+    allowed_statuses: [PASS, PARTIAL, NOT-TESTABLE, OPEN]
   - criterion: "Deterministic automated verification"
     class: SOFTWARE
-    allowed_statuses:
-      - PASS
-      - PARTIAL
-      - NOT-TESTABLE
-      - OPEN
-  - criterion: "Physical-device evidence (not required for W051 implementation: the commercial core is a pure software control-plane model; any physical claims remain governed separately)"
+    allowed_statuses: [PASS, PARTIAL, NOT-TESTABLE, OPEN]
+  - criterion: "Physical-device evidence not required for W051"
     class: PHYSICAL
-    allowed_statuses:
-      - PASS
-      - PARTIAL
-      - NOT-TESTABLE
-      - OPEN
-
+    allowed_statuses: [PASS, PARTIAL, NOT-TESTABLE, OPEN]
 out_of_scope:
-  - "payment rails, custody, payout execution, KYC/KYB, jurisdiction rules, marketplace discovery, and developer SDKs (later authorized Work Items per the W051 contract explicit non-scope)"
-  - "W040 continuation (W040 remains an independent physical validation track, in-review and NOT accepted; EVID-007/EVID-008 remain W040-owned and OPEN)"
-  - "WORK-044 through WORK-050, WORK-052, WORK-053, or any other Work Item (each requires its own repository-local authorization; every registered dependency edge remains hard)"
+  - "W040 continuation"
+  - "WORK-044 through WORK-050, WORK-052, WORK-053"
+  - "payment rails/custody/payout/KYC/KYB/jurisdiction"
   - "new identity/session/routing/path/transport/federation/policy authority"
-  - "mutating connectivity/session/path/routing/transport authorities or their semantics"
-  - "moving payment movement or provider rails inside ADCOS (payment providers remain responsible for payment authorization, rails, and regulated funds movement behind an explicit boundary)"
-  - "payment-provider-specific assumptions leaking into the core"
-  - "treating reservation or payment success as delivery evidence"
-  - "rewriting historical delivery or commercial facts (corrections are append-only compensating records)"
-  - "private authority access (and private-method fallbacks for lifecycle or evidence)"
-  - "synthetic physical evidence presented as physical PASS"
-  - "wire-schema changes unless separately authorized"
-  - "modifying frozen spec semantics"
-
+  - "wire-schema or frozen architecture changes"
 acceptance_gate:
-  status: "Architect review required after implementation"
+  status: "accepted-merged by DEC-0059"
   required_evidence:
-    - "criteria 1-5 of the W051 contract satisfied with SOFTWARE-class conformance evidence"
-    - "deterministic automated verification PASS (the full lifecycle, cancellation/expiry, non-delivery, duplicate/out-of-order events, immutable-history guarantees, and authority-boundary checks per the contract verification target)"
-    - "existing accepted batteries remain green; no authority ownership changes"
-    - "exact execution SHA and evidence manifest"
-    - "all relevant CI checks green"
-
+    - "exact reviewed delivery SHA 94743283ba99c9f757db7024b7ddf22362e76caa"
+    - "CI run 33482893687 green"
+    - "SOFTWARE-class evidence and existing battery compatibility"
 handoff: docs/WORK-051-handoff.md
 handoff_required: true
