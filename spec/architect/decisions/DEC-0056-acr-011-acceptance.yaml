@@ -1,0 +1,37 @@
+decision_id: DEC-0056
+type: governance
+work_item: null
+acr: ACR-011
+pr: 111
+reviewed_sha: d30b2f7a40ed5ee6abdca7e611fbd6bbba47fcb4
+decision: ACCEPTED
+status: ACCEPTED
+reviewer: Architect (pectoraux)
+timestamp: 2026-09-01T05:25:40Z
+findings:
+  - "ACR-011 addresses a machine-checked registry boundary exposed by the delivered WORK-042 implementation."
+  - "The proposal preserves fail-closed registry, dependency, authorization, and evidence semantics while explicitly representing WORK-043 as retired."
+  - "The synchronized registry extension is consistent with the accepted ACR-009 commercial architecture and the current dependency model."
+blockers: []
+required_corrections: []
+evidence:
+  merge_sha: null
+  ci_run: 33458112038
+  artifacts:
+    - spec/acr/ACR-011-commercial-phase-registry-extension.md
+    - docs/governance/ACR-011-commercial-phase-registry-reconciliation.md
+accepted_scope:
+  - "Register WORK-042 and the canonical commercial Work Items WORK-044 through WORK-053 while preserving WORK-043 as a retired slot."
+  - "Synchronize the frozen Work Item registry, dependency graph, and machine-checked registry expectations without weakening fail-closed semantics."
+  - "Record the corresponding persistent governance state without creating, activating, superseding, or modifying any Work Item authorization."
+  - "Preserve W040 as an independent physical-validation track with its evidence obligations unchanged."
+rejected_scope:
+  - "Acceptance of WORK-042 or activation of any commercial Work Item."
+  - "Implementation of W044-W053 or modification of existing implementation code."
+  - "Any change to Mission Authority or existing protocol authority ownership."
+downstream_effect:
+  - "ACR-011 is accepted as the governing architecture change for extending the Work Item registry through the canonical commercial phase."
+  - "PR #111 is authorized for merge subject to its existing CI and review requirements."
+  - "Future Work Item acceptance and authorization remain separate repository-local governance decisions."
+  - "WORK-042 remains implemented-not-accepted until its own acceptance decision is rendered."
+resolved_by: null
