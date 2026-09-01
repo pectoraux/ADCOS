@@ -4,8 +4,8 @@ package: "persistent-architect"
 last_updated: "2026-09-01"
 repository:
   canonical: "github.com/pectoraux/ADCOS"
-  main_sha: fc3ace9c45b77bae36fe757a5629bc197fd906e4
-  main_sha_semantics: "Post-W051 mainline. DEC-0059 accepts W051 and activates W052 against this baseline."
+  main_sha: dad68cc5c7ecc48eedddfa26264a8b38f7fe84fa
+  main_sha_semantics: "Post-W052 mainline. DEC-0060 accepts W052 and activates W053 against this baseline."
 versions:
   architecture_version_reference: "1.0"
   architecture_version_authority: "spec/architecture.md ## Status (single declaration site)"
@@ -13,12 +13,12 @@ versions:
   protocol_version_authority: "spec/schemas/protocol.json"
 execution:
   mode: "implementing"
-  active_work_item: WORK-052
-  active_authorization: "WORK-052-CORE-001"
-  halted_reason: "W052 is active-authorized; Z.ai may implement from this mainline."
+  active_work_item: WORK-053
+  active_authorization: "WORK-053-CORE-001"
+  halted_reason: "W053 is active-authorized; Z.ai may implement from this mainline."
   next_required_decisions:
-    - "Review the WORK-052 delivery PR on its exact head against the twelve invariants and acceptance gate."
-    - "After W052 acceptance, evaluate W053 EconomicAllocation authorization."
+    - "Review the WORK-053 delivery PR on its exact head against the ten invariants and acceptance gate."
+    - "After W053 acceptance, evaluate the next eligible commercial Work Item from the canonical dependency graph."
 in_review:
   - work_item: WORK-040
     branch: "work-040-pilot-deployment"
@@ -51,8 +51,8 @@ accepted_acrs:
 open_architectural_questions: []
 accepted_work_items:
   first: "WORK-001"
-  last: "WORK-051"
-  note: "WORK-001..WORK-039, WORK-041, WORK-042, and WORK-051 are accepted-merged; WORK-040 remains in-review and unaccepted."
+  last: "WORK-052"
+  note: "WORK-001..WORK-039, WORK-041, WORK-042, WORK-051, and WORK-052 are accepted-merged; WORK-040 remains in-review and unaccepted."
 planned_work_items:
   - work_item: WORK-040
     issue: 48
@@ -110,15 +110,15 @@ planned_work_items:
     prerequisite: "accepted by DEC-0059 on PR #117"
   - work_item: WORK-052
     issue: 84
-    status: "active authorized"
+    status: "accepted-merged"
     contract: "issue #84"
-    authorization: "WORK-052-CORE-001"
-    prerequisite: "W051 accepted-merged"
+    authorization: "WORK-052-CORE-001 (superseded by DEC-0060)"
+    prerequisite: "accepted by DEC-0059 and DEC-0060"
   - work_item: WORK-053
     issue: 85
-    status: "ready-candidate"
+    status: "active authorized"
     contract: "issue #85"
-    authorization: "none"
+    authorization: "WORK-053-CORE-001"
     prerequisite: "W052 accepted-merged"
 open_prs:
   - pr: 48
@@ -132,7 +132,7 @@ open_prs:
     disposition: "superseded; historical"
   - pr: 108
     subject: "superseded ACR-010"
-    disposition: "superseded by DEC-0054/DEC-0055; historical"
+    disposition: "superseded; historical"
   - pr: 118
     subject: "WORK-052 handoff"
     disposition: "superseded by DEC-0059; historical"
