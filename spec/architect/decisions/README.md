@@ -6,7 +6,7 @@
 
 Durable Architect decision records live in this directory as `DEC-NNNN-<short-slug>.yaml`, numbered sequentially and stably. Schema: `spec/architect/decision-record-template.md`. Verified by `tools/spec_check.py` (ARCH-04).
 
-Migration convention: records DEC-0001 … DEC-0039 are the acceptances of WORK-001 … WORK-039, reconstructed from repository-durable evidence. Unknown chat-era detail is not invented. Records DEC-0040 … DEC-0058 are corrective/governance/architecture decisions whose requirements shape future work.
+Migration convention: records DEC-0001 … DEC-0039 are the acceptances of WORK-001 … WORK-039, reconstructed from repository-durable evidence. Unknown chat-era detail is not invented. Records DEC-0040 … DEC-0059 are corrective/governance/architecture decisions whose requirements shape future work.
 
 ## Registry
 
@@ -70,6 +70,7 @@ Migration convention: records DEC-0001 … DEC-0039 are the acceptances of WORK-
 | DEC-0056 | governance | null | ACCEPTED | ACCEPTED | ACR-011 acceptance: extend Work Item registry through canonical commercial phase |
 | DEC-0057 | acceptance | WORK-042 | ACCEPTED | ACCEPTED | W042 acceptance: event-driven platform integration + journal-first recovery (PR #110, head 708a432, merge 207d70e, CI 33444952103) |
 | DEC-0058 | governance | WORK-042 | ACCEPTED | ACCEPTED | Atomic W042 acceptance → W051 activation (supersede WORK-042-CORE-001; activate WORK-051-CORE-001 CommercialCore chain head; LEDGER-RECON-007 baseline fe6e6e3; no registry change — ACR-011 already accepted; W040 evidence ownership preserved) |
+| DEC-0059 | acceptance | WORK-051 | ACCEPTED | ACCEPTED | W051 CommercialCore acceptance and atomic W052 UsageLedger activation |
 
 ## Rules
 
