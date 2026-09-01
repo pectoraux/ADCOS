@@ -1,0 +1,53 @@
+# ADCOS Architect decision record.
+# schema: spec/architect/decision-record-template.md; verified by tools/spec_check.py (ARCH-04).
+#
+# This decision atomically accepts WORK-051 on its exact reviewed delivery
+# head, supersedes WORK-051-CORE-001, and activates WORK-052-CORE-001.
+# WORK-052 remains implementation-authorized only after this governance
+# transition lands on main; the subsequent implementation PR must inherit
+# the authorization byte-identically and must not modify spec/architect/.
+
+decision_id: DEC-0059
+type: acceptance
+work_item: WORK-051
+acr: null
+pr: 117
+reviewed_sha: 94743283ba99c9f757db7024b7ddf22362e76caa
+decision: ACCEPTED
+status: ACCEPTED
+reviewer: "Architect (pectoraux)"
+timestamp: 2026-09-01T13:30:00Z
+findings:
+  - "WORK-051 delivery PR #117 is the exact reviewed implementation head 94743283ba99c9f757db7024b7ddf22362e76caa, merged to main as 1dd354ac4c9db7482837c777a67df102f5212cc1."
+  - "Authoritative CI evidence on the delivery head is green: CommercialCore 35/35, provenance 2/2, specification checks 17/17, self-test 32/32, and all mandated sibling batteries green; no PHYSICAL claim is made and W040 obligations remain independently open."
+  - "The implementation satisfies the five W051 acceptance criteria: canonical append-only deterministic lifecycle; compensating terminal outcomes; references rather than ownership of session/NetworkPath/delivery evidence; payment/reservation/delivery separation; and no mutation or shadowing of connectivity/session/path/routing/transport authorities."
+  - "The commercial core remains deterministic under the WORK-033 clock seam and canonical JSON/content-derived identities, with durable idempotency, replay/recovery equivalence, tamper detection, and hash-seed proofs as reported by the authoritative evidence."
+  - "No new authority ownership, frozen architecture semantic, protocol schema, payment rail, KYC/KYB, jurisdiction, marketplace, or SDK scope was introduced by W051."
+  - "WORK-051 is therefore accepted-merged, and the sole active implementation slot may transfer to WORK-052 because W052's hard dependency on W051 is now satisfied."
+blockers: []
+required_corrections: []
+evidence:
+  merge_sha: 1dd354ac4c9db7482837c777a67df102f5212cc1
+  ci_run: 33482893687
+  artifacts:
+    - "docs/WORK-051-evidence.md"
+    - "docs/WORK-051-handoff.md"
+    - "tools/commercial_selftest.py"
+    - "commercial/"
+accepted_scope:
+  - "Accept WORK-051 exactly on reviewed head 94743283ba99c9f757db7024b7ddf22362e76caa and record lifecycle accepted-merged with acceptance_decision DEC-0059."
+  - "Supersede WORK-051-CORE-001 with status superseded, authorized false, superseded_by WORK-052-CORE-001, and supersession_decision DEC-0059; preserve its scope, criteria, provenance, and review basis as durable history."
+  - "Create WORK-052-CORE-001 as the sole active implementation authorization for UsageLedger at the current reconciled main baseline fe6e6e35a49cb2113315d0ec1569f7e93a3cf200, depending hard on accepted-merged WORK-051 and consuming accepted W041/W042 authorities where applicable."
+  - "Transfer execution-state active_work_item/active_authorization from WORK-051 to WORK-052 atomically and reconcile the persistent main snapshot to the current main baseline in the same transition."
+rejected_scope:
+  - "Any modification to accepted W051 code or frozen architecture semantics."
+  - "Any authorization for W053 or W044-W050."
+  - "Any W052 implementation code in this governance transition."
+  - "Any physical evidence promotion or change to W040 ownership/status; EVID-007 and EVID-008 remain OPEN and W040-owned."
+  - "Any payment-provider rails, payout execution, KYC/KYB, jurisdiction policy, marketplace discovery, developer SDKs, client runtime, or wire-schema changes."
+downstream_effect:
+  - "WORK-051 execution-ledger entry becomes accepted-merged with reviewed_sha 94743283ba99c9f757db7024b7ddf22362e76caa, merge_sha 1dd354ac4c9db7482837c777a67df102f5212cc1, acceptance_decision DEC-0059, and CI run 33482893687."
+  - "WORK-051-CORE-001 becomes superseded and remains as durable provenance."
+  - "WORK-052-CORE-001 becomes the single active implementation authorization with baseline fe6e6e35a49cb2113315d0ec1569f7e93a3cf200."
+  - "Z.ai may implement WORK-052 only from a branch cut from the mainline containing WORK-052-CORE-001 exactly; the implementation PR must not modify spec/architect/."
+resolved_by: null
