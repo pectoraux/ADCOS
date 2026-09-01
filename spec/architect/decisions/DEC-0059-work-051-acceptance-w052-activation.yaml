@@ -1,0 +1,34 @@
+# ADCOS Architect decision record.
+# This decision accepts W051 and transfers the sole implementation slot to W052.
+decision_id: DEC-0059
+type: acceptance
+work_item: WORK-051
+acr: null
+pr: 117
+reviewed_sha: 94743283ba99c9f757db7024b7ddf22362e76caa
+decision: ACCEPTED
+status: ACCEPTED
+reviewer: "Architect (pectoraux)"
+timestamp: 2026-09-01T13:30:00Z
+findings:
+  - "PR #117 exact reviewed head passed authoritative CI 33482893687 and the W051 acceptance criteria."
+  - "W051 preserves connectivity/session/path/routing authority boundaries and separates payment/reservation from delivery truth."
+  - "No physical evidence claim is made; W040 remains independent and open."
+blockers: []
+required_corrections: []
+evidence:
+  merge_sha: 1dd354ac4c9db7482837c777a67df102f5212cc1
+  ci_run: 33482893687
+  artifacts:
+    - "docs/WORK-051-evidence.md"
+    - "docs/WORK-051-handoff.md"
+    - "tools/commercial_selftest.py"
+accepted_scope:
+  - "Accept WORK-051 on reviewed head 94743283ba99c9f757db7024b7ddf22362e76caa as accepted-merged."
+  - "Supersede WORK-051-CORE-001 while preserving its scope and provenance."
+  - "Activate WORK-052-CORE-001 at main baseline fc3ace9c45b77bae36fe757a5629bc197fd906e4 as the sole active implementation authorization."
+  - "Transfer the execution state from WORK-051 to WORK-052."
+rejected_scope:
+  - "Any W052 implementation code in this governance transition."
+  - "Any authorization for W053 or W044-W050."
+  - "Any physical-evidence promotion or frozen architecture change."
