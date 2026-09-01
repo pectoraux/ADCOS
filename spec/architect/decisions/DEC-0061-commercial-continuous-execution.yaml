@@ -1,0 +1,39 @@
+# ADCOS Architect decision record.
+# schema: spec/architect/decision-record-template.md; governance/process decision only.
+decision_id: DEC-0061
+type: governance
+work_item: null
+acr: null
+pr: null
+reviewed_sha: dad68cc5c7ecc48eedddfa26264a8b38f7fe84fa
+decision: ACCEPTED
+status: ACCEPTED
+reviewer: "Architect (pectoraux)"
+timestamp: 2026-09-01T15:45:00Z
+findings:
+  - "The commercial roadmap is sufficiently defined to support a continuous execution lane; repeated standalone governance PRs between already-reviewed Work Items add operational friction without adding architectural safety."
+  - "The safety properties that must remain are exact-head Architect review, repository-local authorization, exact baseline/scope provenance, one active implementation authorization, dependency satisfaction, honest evidence classification, and durable acceptance records."
+  - "The successor of an accepted commercial Work Item is deterministically selected from the canonical dependency model and the Commercial Execution Charter; a separate governance PR is not itself a safety requirement."
+blockers: []
+required_corrections: []
+evidence:
+  merge_sha: null
+  ci_run: null
+  artifacts:
+    - "docs/roadmap/commercial-execution-charter.md"
+    - "docs/roadmap/commercial-dependency-model.md"
+accepted_scope:
+  - "Adopt docs/roadmap/commercial-execution-charter.md as the operational governance guidance for the commercial execution lane."
+  - "Permit the Architect, after accepting and merging a Work Item implementation PR, to persist the acceptance record and deterministic successor authorization as one ordinary Architect governance transition without requiring a separate handoff PR solely for ceremony."
+  - "Keep the one-active-authorization rule, inherited authorization provenance, dependency DAG, exact-head review, evidence-class discipline, and implementation scope controls unchanged."
+  - "Use W051 -> W052 -> W053 -> W044 -> W045 -> W046 -> W047 -> W048 -> W049 as the canonical commercial execution lane; W050 remains advisory capability input and W040 remains independent physical validation."
+rejected_scope:
+  - "No weakening of ARCH-03 or ARCH-08 provenance enforcement."
+  - "No parallel implementation authorizations merely to reduce process friction."
+  - "No authorization or acceptance implied by chat, roadmap ordering, issue state, or passing CI alone."
+  - "No change to frozen architecture semantics, protocol schemas, evidence obligations, or payment custody boundaries."
+downstream_effect:
+  - "Future commercial Work Item transitions should use the continuous execution lane rather than creating a separate governance PR solely to hand off between already-declared successors."
+  - "A future successor authorization must still be durably created before its implementation branch is cut, and it must inherit an exact main baseline and declared scope."
+  - "Exceptional skips, dependency changes, governance changes, and architecture changes remain explicit Architect decisions and use the existing governance/ACR paths."
+resolved_by: null
