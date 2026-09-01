@@ -23,14 +23,18 @@
 
 ## W053
 
-EconomicAllocation is authorized to convert only BILLABLE_FINAL UsageLedger facts into immutable provider/developer/ADCOS allocations under versioned economic policy. It owns policy and allocation state plus settlement acknowledgements and compensating allocation events, but it must not become a payment-provider authority or mutate UsageLedger, connectivity, session, NetworkPath, routing, transport, or packet authority.
+EconomicAllocation is the active authorized implementation track. It converts only BILLABLE_FINAL UsageLedger facts into immutable provider/developer/ADCOS allocations under versioned economic policy. It owns policy and allocation state plus settlement acknowledgements and compensating allocation events, but it must not become a payment-provider authority or mutate UsageLedger, connectivity, session, NetworkPath, routing, transport, or packet authority.
 
 ## Commercial chain
 
 `WORK-051 CommercialCore → WORK-052 UsageLedger → WORK-053 EconomicAllocation`
 
-W044-W052 remain unauthorized except for their accepted historical deliveries; W044-W050 are not active implementation tracks.
+W044-W052 are not active implementation tracks; W044-W050 remain future candidates.
 
 ## Governance
 
 DEC-0060 accepts W052 and transfers the single active implementation slot to W053. The transition changes governance state only; no frozen architecture semantic, protocol schema, or physical evidence obligation changes.
+
+## Reconciliation note
+
+The W052 execution-ledger entry still requires a minimal historical reconciliation to change its lifecycle from `registered` to `accepted-merged` and record DEC-0060/PR #121 without rewriting prior history. Until that ledger-only reconciliation lands, the W053 authorization is staged but the activation PR remains a governance reconciliation vehicle rather than a signal to bypass the repository's historical ledger checks.
