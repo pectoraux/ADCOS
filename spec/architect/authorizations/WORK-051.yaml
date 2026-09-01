@@ -3,55 +3,18 @@
 # WORK-051-CORE-001 (issued by DEC-0058): the Architect's repository-local
 # authorization for WORK-051 (CommercialCore: connectivity intent, offers,
 # reservation, lease, and transaction lifecycle, ACR-009). This record is
-# the sole durable authority for W051 implementation scope. It becomes the
-# single active authorization at the moment DEC-0058 merges, atomically
-# superseding WORK-042-CORE-001 (whose Work Item is accepted-merged through
-# DEC-0057 in the same governance transition) so the single active
-# execution slot is never vacant (mode implementing + zero active auths =
-# STOP) nor double-occupied (two active auths = ARCH-03 FAIL).
+# the sole durable authority for W051 implementation scope. It was the sole
+# active implementation authorization until DEC-0059 accepted the delivered
+# Work Item and transferred the execution slot to WORK-052-CORE-001.
 #
-# Scope is the ACR-009 commercial control-plane core per the WORK-051
-# ready-candidate contract (tracking issue #83, canonical identity per the
-# ACR-011 registered entry and docs/roadmap/commercial-dependency-model.md):
-# the canonical commercial state lifecycle ConnectivityIntent, OfferSelected,
-# ReservationHeld, SessionAuthorized, PathActive, DeliveryStarted,
-# UsageAccruing, DeliveryCompleted, BillableFinal, SettlementPending, Settled
-# (with compensating states/events for cancellation, expiry, path failure,
-# and non-delivery), implemented as an append-only, deterministic,
-# idempotent state machine that references — never owns or mutates —
-# existing logical session IDs, NetworkPath IDs, and delivery evidence,
-# and explicitly separates reservation/payment state from actual delivery
-# — WITHOUT creating a new identity, session, routing, path, transport,
-# federation, or policy authority, without moving payment rails/custody/
-# payout/KYC/jurisdiction/discovery/SDKs inside this Work Item, and without
-# letting payment-provider-specific assumptions leak into the core.
-#
-# W051 is the commercial chain head: its frozen registry declaration is
-# Dependencies: none (spec/work-items.md; ACR-009 acceptance is its
-# architectural precondition, not a Work Item dependency — satisfied by
-# DEC-0050). W051 does NOT authorize WORK-044 through WORK-050, WORK-052,
-# WORK-053, or WORK-048; every registered dependency edge (W044..W049,
-# W052, W053 on W051 and each other) remains hard and unchanged. W051
-# makes NO physical validation claims; the commercial core is a pure
-# software control-plane model and physical-device evidence is not
-# required for W051 implementation; any physical claims remain governed
-# separately by W040's open PHYSICAL obligations EVID-007/EVID-008 (W040
-# stays in-review and is NOT accepted; its track is independent of W051
-# and unaffected by this authorization).
-#
-# Baseline note: baseline_sha is fe6e6e3 (current main at this governance
-# commit, the post-PR-#110/#111/#115 mainline reconciled by LEDGER-RECON-007).
-# Per the RECON-002/003/004/005/006/007 convention it moves in lockstep
-# with the snapshot baseline only through a formally recorded
-# reconciliation; there is no in-flight W051 implementation branch to
-# invalidate at activation time — a future W051 implementation PR
-# branches from a main carrying this exact record.
-#
-# schema: spec/architect/authorizations/ (v1); verified by tools/spec_check.py (ARCH-03).
+# The scope and provenance below are preserved unchanged so this record
+# remains durable history after supersession.
 
 work_item: WORK-051
-status: active
-authorized: true
+status: superseded
+authorized: false
+superseded_by: "WORK-052-CORE-001"
+supersession_decision: DEC-0059
 type: implementation
 authorization_id: "WORK-051-CORE-001"
 authorization_decision: DEC-0058
