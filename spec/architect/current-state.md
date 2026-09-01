@@ -32,4 +32,4 @@ W053 and W044-W050 remain unauthorized.
 
 ## Governance
 
-DEC-0059 is a governance acceptance/activation transition only. No frozen architecture semantic, protocol schema, or physical evidence obligation changes.
+DEC-0059 is the W051 acceptance/W052 activation record. DEC-0061 establishes the continuous commercial execution lane: exact-head Architect review remains mandatory, but ordinary successor activation is part of the acceptance transition rather than a separate governance ceremony. The lane order is defined in `docs/roadmap/commercial-execution-charter.md`. No frozen architecture semantic, protocol schema, or physical evidence obligation changes.
