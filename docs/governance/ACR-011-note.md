@@ -1,0 +1,1 @@
+ACR-011 proposal companion note: W042 is implemented and merged while the frozen registry currently ends at W041. The proposed architecture change is to register the canonical post-W042 commercial phase in one controlled extension. This note contains no implementation or authorization.
