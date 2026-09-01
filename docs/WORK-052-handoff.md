@@ -45,16 +45,18 @@ No authorization for W053 or W044-W050 is granted by this handoff.
 **Branch:** `work-052-usage-ledger` (from main `04d7003`, which carries the
 authorization record byte-identically; baseline `fc3ace9` is the DEC-0059
 LEDGER snapshot baseline per the W042/W051 branch-point convention).
-**Battery:** `tools/usage_selftest.py` (39 deterministic cases, stdlib only)
+**Battery:** `tools/usage_selftest.py` (42 deterministic cases, stdlib only)
 wired into `.github/workflows/spec-check.yml` (purely additive step).
 **Evidence manifest:** `docs/WORK-052-evidence.md`.
 
 ### Package map (`usage/`)
 
-- `errors.py` — `UsageLedgerError` + the frozen 22-reason vocabulary
+- `errors.py` — `UsageLedgerError` + the frozen 24-reason vocabulary
   (input/command integrity, two-layer idempotency, account lifecycle,
-  evidence families, the payment/usage and reservation/usage separations,
-  correlation, finality, compensation, immutability, journal integrity).
+  evidence families, admission unambiguity and the commercial-citation/
+  transaction binding, the payment/usage and reservation/usage
+  separations, correlation, finality, compensation, immutability,
+  journal integrity).
 - `evidence.py` — the external evidence boundary: `EvidenceFamily`
   (delivery-evidence / commercial / session / network-path / payment),
   `EvidenceReference` (id + family + provenance + public-read facts),
@@ -71,6 +73,10 @@ wired into `.github/workflows/spec-check.yml` (purely additive step).
   projection), content-derived identities over WORK-003 canonical JSON.
 - `validation.py` — the fail-closed admission gates: family rules
   (payment can never satisfy the delivery-evidence requirement), the
+  EXACTLY-ONE commercial citation BOUND to the command's own
+  transaction id (cross-transaction substitution →
+  TRANSACTION_MISMATCH; multiple distinct commercial/session/path
+  citations → EVIDENCE_AMBIGUOUS), the
   delivery window (pre-delivery commercial states →
   RESERVATION_NOT_DELIVERY; compensating/settlement/settled →
   EVIDENCE_UNAUTHORIZED), session/path correlation
@@ -149,3 +155,44 @@ main-state `spec_check` failures (the PR #120 lean transition's ledger
 lag) are documented in the evidence manifest and belong to the
 Architect reconciliation lane. SOFTWARE-only evidence; W040's
 physical obligations remain untouched.
+
+### PR #121 review response (CHANGES REQUIRED — fixed on the same branch)
+
+The Architect review of the delivery PR recorded four admission-boundary
+gaps. All four are fixed in-place (same branch, same PR, `spec/architect/`
+untouched, no new files):
+
+1. **Transaction binding** — `validate_evidence_integrity` now asserts
+   the unique commercial citation's `reference_id == command.transaction_id`;
+   a crafted command keyed to transaction A carrying transaction B's
+   commercial delivery window fails closed `TRANSACTION_MISMATCH`
+   (regression case_40, over two REAL W051 transactions).
+2. **Admission unambiguity** — exactly one commercial, one session, and
+   one network-path citation are admissible: multiple distinct citations
+   of a correlated family fail closed `EVIDENCE_AMBIGUOUS` in either
+   citation order (deterministic, never iteration-order-dependent);
+   the unique session/path citations must equal the command's cited
+   correlation (regression case_41; same-id duplicate citations still
+   collapse at resolution).
+3. **Idempotency before resolution** — the admission path is now
+   command dedup → shape → OBSERVATION dedup (the durable stored
+   ledger) → live-evidence resolution → family rules → integrity →
+   account gates → clock read: an exact duplicate redelivery is a
+   no-op decided from the STORED observation ledger even after a
+   restart with an EVICTED evidence index, while conflicting reuse
+   still fails closed `OBSERVATION_CONFLICT` and NEW observations on
+   evicted citations still fail closed `EVIDENCE_UNKNOWN`
+   (regression case_42).
+4. **Cross-transaction substitution regression** — the battery gains
+   `_two_transaction_fixture()`: two REAL W051 transactions (distinct
+   content-derived ids and clock epochs) driven through the public
+   surface to `USAGE_ACCRUING` over two real sessions and two real
+   ACTIVE NetworkPaths, snapshotted into one combined `EvidenceIndex`
+   (used by case_40 and case_41).
+
+Post-fix verification: battery **42/42 PASS**; the golden digest stream
+is byte-identical to the original delivery (`38665e9a…` — the fixes
+tighten admission gates only, no recorded fact changed); ARCH-08
+provenance PASS; the inherited main-state `spec_check` condition is
+unchanged (zero `spec/` delta). See the evidence manifest's review-
+response table for the criterion-by-criterion mapping.

@@ -11,7 +11,11 @@ idempotency (command duplicates, observation duplicates and
 conflicting observation-identity reuse), account lifecycle
 discipline (reconciliation, billable finality, compensations),
 the usage/evidence integrity families (unknown, fabricated,
-stale, or unauthorized evidence; wrong-family citations), the
+stale, or unauthorized evidence; wrong-family citations),
+admission unambiguity (multiple commercial/session/NetworkPath
+citations: the evidence model is unambiguous), the
+commercial-citation/transaction binding (cross-transaction
+substitution fails closed), the
 payment/usage and reservation/usage separations (payment capture
 and reservation/lease state can never create usage), delivery
 correlation integrity (session/path mismatch), immutable-history
@@ -33,11 +37,13 @@ class UsageReasonCode:
     ACCOUNT_UNKNOWN = "account-unknown"
     EVIDENCE_UNKNOWN = "evidence-unknown"
     EVIDENCE_REQUIRED = "evidence-required"
+    EVIDENCE_AMBIGUOUS = "evidence-ambiguous"
     EVIDENCE_FAMILY_INVALID = "evidence-family-invalid"
     EVIDENCE_STALE = "evidence-stale"
     EVIDENCE_UNAUTHORIZED = "evidence-unauthorized"
     RESERVATION_NOT_DELIVERY = "reservation-not-delivery"
     PAYMENT_NOT_DELIVERY = "payment-not-delivery"
+    TRANSACTION_MISMATCH = "transaction-mismatch"
     CORRELATION_MISMATCH = "correlation-mismatch"
     RECONCILIATION_REJECTED = "reconciliation-rejected"
     FINALITY_REJECTED = "finality-rejected"
@@ -59,11 +65,13 @@ class UsageReasonCode:
             cls.ACCOUNT_UNKNOWN,
             cls.EVIDENCE_UNKNOWN,
             cls.EVIDENCE_REQUIRED,
+            cls.EVIDENCE_AMBIGUOUS,
             cls.EVIDENCE_FAMILY_INVALID,
             cls.EVIDENCE_STALE,
             cls.EVIDENCE_UNAUTHORIZED,
             cls.RESERVATION_NOT_DELIVERY,
             cls.PAYMENT_NOT_DELIVERY,
+            cls.TRANSACTION_MISMATCH,
             cls.CORRELATION_MISMATCH,
             cls.RECONCILIATION_REJECTED,
             cls.FINALITY_REJECTED,

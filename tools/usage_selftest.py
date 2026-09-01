@@ -47,7 +47,18 @@ gate usage admission):
   each other submission consumes exactly one);
 - fail-closed negatives: every contract violation family raises
   its typed reason code and leaves no journal growth (no
-  phantom state).
+  phantom state);
+- PR #121 review-response regressions: the commercial citation
+  is BOUND to the command's own transaction id (cross-
+  transaction substitution over two REAL W051 transactions
+  fails closed TRANSACTION_MISMATCH), the commercial/session/
+  NetworkPath citation set is UNAMBIGUOUS (multiple distinct
+  citations fail closed EVIDENCE_AMBIGUOUS, order-independent;
+  same-id duplicates collapse), and durable observation
+  idempotency is decided BEFORE live-evidence resolution
+  (restart + evidence eviction replays exact duplicates as
+  no-ops; conflicting reuse and new observations on evicted
+  citations still fail closed).
 
 Usage:
     python3 tools/usage_selftest.py
@@ -91,7 +102,7 @@ from agent import (  # noqa: E402
     StaticInterfaceSource,
     StepClock,
 )
-from agent.clock import AgentClock  # noqa: E402
+from agent.clock import AgentClock, add_seconds  # noqa: E402
 
 from mobile.model import (  # noqa: E402
     MobilePhase,
@@ -617,16 +628,26 @@ def _commercial_tx(
     manager: NetworkPathManager,
     integrator: PlatformIntegrator,
     session_id: str,
+    *,
+    clock_epoch: str = _CT0,
 ):
     """Drive one REAL WORK-051 CommercialCore transaction through
     the public typed surface to USAGE_ACCRUING (inside the
-    delivery window).  Returns (core, transaction_id)."""
+    delivery window).  Returns (core, transaction_id).  The
+    optional ``clock_epoch`` distinguishes a SECOND independent
+    transaction (W051 transaction ids bind the deterministic
+    submitted instant: two drives at the same epoch would derive
+    the SAME id)."""
     references = _commercial_references(manager, integrator, session_id)
     core = CommercialCore(
         store=commercial.MemoryCommercialStore(),
-        clock=StepClock(_CT0, _CSTEP),
+        clock=StepClock(clock_epoch, _CSTEP),
         references=references,
     )
+    # the reservation window is derived from the drive's own clock
+    # epoch (epoch + 10 minutes; at the default epoch this is
+    # byte-identical to the historical _DEADLINE fixture)
+    deadline = add_seconds(clock_epoch, 600)
     out = core.submit_intent(
         command_id="w051-01",
         actor="buyer-agent",
@@ -642,7 +663,7 @@ def _commercial_tx(
     )
     core.hold_reservation(
         command_id="w051-03", transaction_id=tx, actor="platform",
-        source="reservation-service", expires_at=_DEADLINE,
+        source="reservation-service", expires_at=deadline,
     )
     core.authorize_session(
         command_id="w051-04", transaction_id=tx, actor="platform",
@@ -1041,9 +1062,10 @@ def case_01_frozen_vocabularies(results: List[Result]) -> None:
         "invalid-input", "command-invalid", "command-duplicate",
         "command-conflict", "observation-conflict", "account-unknown",
         "evidence-unknown", "evidence-required",
-        "evidence-family-invalid", "evidence-stale",
-        "evidence-unauthorized", "reservation-not-delivery",
-        "payment-not-delivery", "correlation-mismatch",
+        "evidence-ambiguous", "evidence-family-invalid",
+        "evidence-stale", "evidence-unauthorized",
+        "reservation-not-delivery", "payment-not-delivery",
+        "transaction-mismatch", "correlation-mismatch",
         "reconciliation-rejected", "finality-rejected",
         "compensation-rejected", "history-immutable", "event-invalid",
         "journal-corrupt", "store-failed", "instant-invalid",
@@ -3036,6 +3058,490 @@ def case_39_pr_delta_shape(results: List[Result]) -> None:
 
 
 # ---------------------------------------------------------------------------
+# PR #121 review-response regressions (the Architect's four
+# admission-boundary findings)
+# ---------------------------------------------------------------------------
+
+
+def _second_session(runtime, peer) -> str:
+    """Establish a SECOND real session through the ordinary public
+    production handshake."""
+    request = runtime.establish_session(peer.node_id)
+    accept = peer.accept_session(request)
+    confirm = runtime.complete_session(accept)
+    peer.finalize_session(confirm)
+    return confirm.session_id
+
+
+def _two_transaction_fixture():
+    """TWO REAL WORK-051 transactions (A and B), each driven through
+    the full public surface to USAGE_ACCRUING, over TWO real
+    sessions and TWO real ACTIVE NetworkPaths, snapshotted into ONE
+    combined evidence index carrying BOTH commercial projections
+    (the cross-transaction substitution fixture of the PR #121
+    Architect review).  Returns (index, tx_a, tx_b, session_a,
+    session_b)."""
+    runtime, peer, session_a, manager, integrator, shared = _world()
+    core_a, tx_a = _commercial_tx(manager, integrator, session_a)
+    # a second real session and a second real ACTIVE NetworkPath
+    # (eth0) correlated to it -- the second transaction's own
+    # session/path triple
+    session_b = _second_session(runtime, peer)
+    eth = _path_for(manager, ETH_IF)
+    manager.validate(eth)
+    manager.bind(eth, session_b)
+    manager.probe(eth)
+    manager.activate(eth)
+    if manager.active_path_id(session_b) != eth:
+        raise AssertionError("second path not ACTIVE for the second session")
+    # a second INDEPENDENT W051 core (distinct store, distinct
+    # clock epoch so the content-derived transaction id differs)
+    core_b, tx_b = _commercial_tx(
+        manager, integrator, session_b,
+        clock_epoch="2026-09-01T12:30:00Z",
+    )
+    if tx_a == tx_b:
+        raise AssertionError("the two W051 transactions collapsed to one id")
+    if core_a.transaction(tx_a).session_ref != session_a:
+        raise AssertionError("transaction A lost its session correlation")
+    if core_b.transaction(tx_b).session_ref != session_b:
+        raise AssertionError("transaction B lost its session correlation")
+    # the combined snapshot: a caller reading BOTH transactions'
+    # public projections, BOTH established sessions, every path,
+    # the delivery evidence, and the payment observation
+    entries: List[EvidenceReference] = []
+    for record in integrator.journal_records():
+        event = record.event
+        if event.kind == "platform-state-observation":
+            continue
+        entries.append(
+            EvidenceReference(
+                reference_id=event.event_id,
+                family=EvidenceFamily.DELIVERY_EVIDENCE,
+                provenance="platform-journal",
+                instant=event.observed_at,
+            )
+        )
+    for core, tx in ((core_a, tx_a), (core_b, tx_b)):
+        projection = core.transaction(tx)
+        entries.append(
+            EvidenceReference(
+                reference_id=tx,
+                family=EvidenceFamily.COMMERCIAL,
+                provenance="commercial-core",
+                commercial_state=projection.state,
+                session_ref=projection.session_ref,
+                path_ref=projection.path_ref,
+            )
+        )
+    for session_id in (session_a, session_b):
+        entries.append(
+            EvidenceReference(
+                reference_id=session_id,
+                family=EvidenceFamily.SESSION,
+                provenance="sessions-authority",
+            )
+        )
+    for path_id in manager.paths():
+        entries.append(
+            EvidenceReference(
+                reference_id=path_id,
+                family=EvidenceFamily.NETWORK_PATH,
+                provenance="networkpath-manager",
+            )
+        )
+    entries.append(
+        EvidenceReference(
+            reference_id=_payment_ref(),
+            family=EvidenceFamily.PAYMENT,
+            provenance="external-payment-observation",
+        )
+    )
+    return EvidenceIndex(entries), tx_a, tx_b, session_a, session_b
+
+
+def _raw_observation_command(
+    *,
+    command_id: str,
+    observation_id: str,
+    transaction_id: str,
+    evidence_refs: Tuple[str, ...],
+    session_ref: str,
+    path_ref: str,
+    quantity: int,
+    observed_at: str,
+    commercial_refs: Tuple[EvidenceReference, ...],
+    session_refs: Tuple[EvidenceReference, ...],
+    path_refs: Tuple[EvidenceReference, ...],
+    payment_refs: Tuple[EvidenceReference, ...] = (),
+) -> UsageCommand:
+    """Build a raw INGEST_OBSERVATION command carrying EXPLICIT
+    commercial/session/path reference records (the crafted-command
+    surface: the admission validator -- not the typed constructor
+    -- is the authority these regressions pin; the reference
+    records are taken index-authoritative by the caller)."""
+    references = (
+        tuple(
+            EvidenceReference(
+                reference_id=evidence_id,
+                family=EvidenceFamily.DELIVERY_EVIDENCE,
+                provenance="command-citation",
+            )
+            for evidence_id in evidence_refs
+        )
+        + commercial_refs
+        + session_refs
+        + path_refs
+        + payment_refs
+    )
+    return UsageCommand(
+        command_id=command_id,
+        action=UsageAction.INGEST_OBSERVATION,
+        transaction_id=transaction_id,
+        observation_id=observation_id,
+        references=references,
+        payload={
+            "observation_id": observation_id,
+            "quantity": quantity,
+            "unit": "MB",
+            "observed_at": observed_at,
+            "session_ref": session_ref,
+            "path_ref": path_ref,
+            "evidence_refs": tuple(evidence_refs),
+            "payment_refs": (),
+        },
+        actor="metering-agent",
+        source="usage-service",
+    )
+
+
+def _validate_crafted(index: EvidenceIndex, command: UsageCommand) -> None:
+    """Resolve a crafted command against the index and run the
+    evidence-integrity admission gate (the public validation
+    surface, exactly as the admission path composes it)."""
+    resolved = usage.resolve_references(index, command.references)
+    usage.validate_evidence_integrity(command, resolved)
+
+
+def case_40_cross_transaction_substitution(results: List[Result]) -> None:
+    """PR #121 Architect findings 1 + 4: the commercial evidence
+    citation is BOUND to the command's own transaction id -- a
+    transaction A account can never be admitted on transaction B's
+    commercial delivery window (raw crafted command) or B's
+    session/path triple (typed admission), using TWO REAL W051
+    transactions."""
+    name = "case_40_cross_transaction_substitution"
+    index, tx_a, tx_b, session_a, session_b = _two_transaction_fixture()
+    delivery = _delivery_refs(index)
+    commercial = {
+        ref.reference_id: ref
+        for ref in index.by_family(EvidenceFamily.COMMERCIAL)
+    }
+    path_a = commercial[tx_a].path_ref
+    path_b = commercial[tx_b].path_ref
+    problems: List[str] = []
+    # NEGATIVE 1 (the crafted command): transaction A as the
+    # account key, transaction B's commercial citation carrying
+    # B's real in-window projection facts and B's session/path
+    # triple.  Before the review fix this command PASSED the
+    # evidence-integrity gate (B is inside the delivery window and
+    # the cited correlation matches B's projection); the binding
+    # gate now fails it closed.
+    problem = _expect_usage_error(
+        name, UsageReasonCode.TRANSACTION_MISMATCH,
+        _validate_crafted, index,
+        _raw_observation_command(
+            command_id="xs-01", observation_id="obs-x",
+            transaction_id=tx_a,
+            evidence_refs=(delivery[0],),
+            session_ref=session_b, path_ref=path_b,
+            quantity=10, observed_at=_OBS1,
+            commercial_refs=(commercial[tx_b],),
+            session_refs=(index.get(session_b),),
+            path_refs=(index.get(path_b),),
+        ),
+    )
+    if problem:
+        problems.append("crafted substitution: %s" % problem)
+    # NEGATIVE 2 (typed admission): transaction A's account cannot
+    # cite transaction B's session/path triple (the typed surface
+    # builds A's own commercial citation; A's recorded correlation
+    # is session_a/path_a -- the mismatch fails closed)
+    ledger = _fresh_ledger(index)
+    problem = _expect_usage_error(
+        name, UsageReasonCode.CORRELATION_MISMATCH,
+        ledger.ingest_observation,
+        command_id="xs-02", observation_id="obs-x",
+        transaction_id=tx_a,
+        evidence_refs=(delivery[0],),
+        session_ref=session_b, path_ref=path_b,
+        quantity=10, unit="MB", observed_at=_OBS1,
+        actor="metering-agent", source="usage-service",
+    )
+    if problem:
+        problems.append("typed triple substitution: %s" % problem)
+    # no phantom state: transaction A was never admitted
+    if len(ledger.journal_records()) != 0 or ledger.accounts():
+        problems.append("rejected substitutions left phantom state")
+    # POSITIVE CONTROL: honest observations for BOTH real
+    # transactions over the SAME two-transaction index meter
+    # independently (the fixture itself admits honest usage)
+    for label, tx, session in (
+        ("A", tx_a, session_a), ("B", tx_b, session_b),
+    ):
+        out = ledger.ingest_observation(
+            command_id="xs-ok-%s" % label.lower(),
+            observation_id="obs-%s" % label.lower(),
+            transaction_id=tx,
+            evidence_refs=(delivery[0],),
+            session_ref=session, path_ref=commercial[tx].path_ref,
+            quantity=10, unit="MB", observed_at=_OBS1,
+            actor="metering-agent", source="usage-service",
+        )
+        if out.status != "appended":
+            problems.append("honest %s observation not appended" % label)
+    if len({a.transaction_id for a in ledger.accounts()}) != 2:
+        problems.append("the two transactions did not meter independently")
+    if problems:
+        results.append(fail(name, "; ".join(problems)))
+        return
+    results.append(ok(name, "two REAL W051 transactions: a transaction A "
+                            "account cannot be admitted with transaction "
+                            "B's commercial window (TRANSACTION_MISMATCH, "
+                            "crafted) or B's session/path triple "
+                            "(CORRELATION_MISMATCH, typed); honest A and B "
+                            "meter independently"))
+
+
+def case_41_evidence_ambiguity(results: List[Result]) -> None:
+    """PR #121 Architect finding 2: the commercial, session, and
+    NetworkPath correlation is UNAMBIGUOUS -- multiple distinct
+    citations of a correlated family fail closed
+    EVIDENCE_AMBIGUOUS (in both citation orders: deterministic,
+    never iteration-order-dependent), while duplicate citations
+    of the SAME id collapse at resolution and stay admissible."""
+    name = "case_41_evidence_ambiguity"
+    index, tx_a, tx_b, session_a, session_b = _two_transaction_fixture()
+    delivery = _delivery_refs(index)
+    commercial = {
+        ref.reference_id: ref
+        for ref in index.by_family(EvidenceFamily.COMMERCIAL)
+    }
+    path_a = commercial[tx_a].path_ref
+    problems: List[str] = []
+    # two commercial citations (both REAL and inside the delivery
+    # window), in BOTH orders: the old validator silently used
+    # the first by iteration order; admission now fails closed
+    for label, refs in (
+        ("A-then-B", (commercial[tx_a], commercial[tx_b])),
+        ("B-then-A", (commercial[tx_b], commercial[tx_a])),
+    ):
+        problem = _expect_usage_error(
+            name, UsageReasonCode.EVIDENCE_AMBIGUOUS,
+            _validate_crafted, index,
+            _raw_observation_command(
+                command_id="am-%s" % label, observation_id="obs-x",
+                transaction_id=tx_a,
+                evidence_refs=(delivery[0],),
+                session_ref=session_a, path_ref=path_a,
+                quantity=10, observed_at=_OBS1,
+                commercial_refs=refs,
+                session_refs=(index.get(session_a),),
+                path_refs=(index.get(path_a),),
+            ),
+        )
+        if problem:
+            problems.append("two commercial (%s): %s" % (label, problem))
+    # two session citations (both real established sessions)
+    problem = _expect_usage_error(
+        name, UsageReasonCode.EVIDENCE_AMBIGUOUS,
+        _validate_crafted, index,
+        _raw_observation_command(
+            command_id="am-sess", observation_id="obs-x",
+            transaction_id=tx_a,
+            evidence_refs=(delivery[0],),
+            session_ref=session_a, path_ref=path_a,
+            quantity=10, observed_at=_OBS1,
+            commercial_refs=(commercial[tx_a],),
+            session_refs=(index.get(session_a), index.get(session_b)),
+            path_refs=(index.get(path_a),),
+        ),
+    )
+    if problem:
+        problems.append("two sessions: %s" % problem)
+    # two distinct NetworkPath citations (both real path ids)
+    other_path = sorted(
+        entry.reference_id
+        for entry in index.by_family(EvidenceFamily.NETWORK_PATH)
+        if entry.reference_id != path_a
+    )[0]
+    problem = _expect_usage_error(
+        name, UsageReasonCode.EVIDENCE_AMBIGUOUS,
+        _validate_crafted, index,
+        _raw_observation_command(
+            command_id="am-path", observation_id="obs-x",
+            transaction_id=tx_a,
+            evidence_refs=(delivery[0],),
+            session_ref=session_a, path_ref=path_a,
+            quantity=10, observed_at=_OBS1,
+            commercial_refs=(commercial[tx_a],),
+            session_refs=(index.get(session_a),),
+            path_refs=(index.get(path_a), index.get(other_path)),
+        ),
+    )
+    if problem:
+        problems.append("two paths: %s" % problem)
+    # CONTROL: citing the SAME id twice is redundancy, not
+    # ambiguity -- resolution collapses duplicates deterministically
+    # and the exactly-one citation set stays admissible
+    try:
+        _validate_crafted(
+            index,
+            _raw_observation_command(
+                command_id="am-dup", observation_id="obs-x",
+                transaction_id=tx_a,
+                evidence_refs=(delivery[0], delivery[0]),
+                session_ref=session_a, path_ref=path_a,
+                quantity=10, observed_at=_OBS1,
+                commercial_refs=(commercial[tx_a], commercial[tx_a]),
+                session_refs=(index.get(session_a), index.get(session_a)),
+                path_refs=(index.get(path_a), index.get(path_a)),
+            ),
+        )
+    except UsageLedgerError as error:
+        problems.append(
+            "same-id duplicate citation rejected (%s: %s)"
+            % (error.reason, error.detail)
+        )
+    if problems:
+        results.append(fail(name, "; ".join(problems)))
+        return
+    results.append(ok(name, "multiple distinct commercial/session/path "
+                            "citations fail closed EVIDENCE_AMBIGUOUS in "
+                            "both citation orders (deterministic); same-id "
+                            "duplicates collapse at resolution and stay "
+                            "admissible"))
+
+
+def case_42_idempotency_before_resolution(results: List[Result]) -> None:
+    """PR #121 Architect finding 3: durable observation-level
+    idempotency is decided from the STORED observation ledger
+    BEFORE live-evidence resolution -- a restart with an EVICTED
+    evidence index still replays an exact duplicate as a no-op;
+    conflicting reuse still fails closed; a NEW observation citing
+    the evicted evidence still fails closed EVIDENCE_UNKNOWN."""
+    name = "case_42_idempotency_decided_before_live_evidence"
+    references, session_id, tx, core, manager, integrator = _evidence_fixture()
+    delivery = _delivery_refs(references)
+    ev_session = _session_ref(references)
+    ev_path = _path_ref(references)
+    store = MemoryUsageStore()
+    clock = CountingClock(StepClock(_UT0, _USTEP))
+    ledger = UsageLedger(store=store, clock=clock, evidence=references)
+    out = _observation(
+        ledger, tx, references,
+        command_id="ip-01", observation_id="obs-1",
+        quantity=10, observed_at=_OBS1,
+    )
+    problems: List[str] = []
+    if out.status != "appended" or len(ledger.journal_records()) != 1:
+        problems.append("fixture did not admit the first observation")
+        results.append(fail(name, "; ".join(problems)))
+        return
+    first_event_id = out.event_id
+    # the EVICTED snapshot: the caller rebuilt the index WITHOUT
+    # the platform delivery-evidence citations (aged out of the
+    # current public read); the commercial projection and the
+    # session/path correlations are still present
+    evicted = EvidenceIndex(
+        list(references.by_family(EvidenceFamily.COMMERCIAL))
+        + list(references.by_family(EvidenceFamily.SESSION))
+        + list(references.by_family(EvidenceFamily.NETWORK_PATH))
+        + list(references.by_family(EvidenceFamily.PAYMENT))
+    )
+    if evicted.contains(delivery[0]) or evicted.by_family(
+        EvidenceFamily.DELIVERY_EVIDENCE
+    ):
+        problems.append("eviction fixture failed (citation still present)")
+    # RESTART with the evicted snapshot (journal-first recovery)
+    restart_clock = CountingClock(StepClock("2026-09-02T00:00:00Z", 60))
+    recovered = UsageLedger.load(
+        store=store, clock=restart_clock, evidence=evicted
+    )
+    if recovered.journal_digest() != ledger.journal_digest():
+        problems.append("recovered journal digest diverged")
+    if restart_clock.reads != 0:
+        problems.append("recovery consumed clock reads")
+    # the exact duplicate redelivered under a NEW command id: a
+    # DUPLICATE no-op decided from the STORED observation ledger
+    # BEFORE live-evidence resolution -- NOT an EVIDENCE_UNKNOWN
+    # rejection, even though the cited delivery evidence is gone
+    # from the current index (recorded usage facts are immutable)
+    out = recovered.ingest_observation(
+        command_id="ip-02", observation_id="obs-1",
+        transaction_id=tx,
+        evidence_refs=(delivery[0],),
+        session_ref=ev_session, path_ref=ev_path,
+        quantity=10, unit="MB", observed_at=_OBS1,
+        actor="metering-agent", source="usage-service",
+    )
+    if out.status != "duplicate":
+        problems.append(
+            "exact duplicate after eviction+restart was not a no-op (%s)"
+            % out.status
+        )
+    if out.event_id != first_event_id:
+        problems.append("duplicate returned a different event id")
+    if len(recovered.journal_records()) != 1:
+        problems.append("duplicate grew the journal")
+    if restart_clock.reads != 0:
+        problems.append("duplicate consumed a clock read")
+    if recovered.account(tx).total_quantity != 10:
+        problems.append("duplicate changed the total quantity")
+    # conflicting reuse of the observation identity STILL fails
+    # closed (decided from the stored digest, before resolution)
+    problem = _expect_usage_error(
+        name, UsageReasonCode.OBSERVATION_CONFLICT,
+        recovered.ingest_observation,
+        command_id="ip-03", observation_id="obs-1",
+        transaction_id=tx,
+        evidence_refs=(delivery[0],),
+        session_ref=ev_session, path_ref=ev_path,
+        quantity=99, unit="MB", observed_at=_OBS1,
+        actor="metering-agent", source="usage-service",
+    )
+    if problem:
+        problems.append("conflicting reuse: %s" % problem)
+    # CONTROL -- the eviction is real: a NEW observation citing
+    # the evicted evidence fails closed EVIDENCE_UNKNOWN (new
+    # observations re-validate their citations against the
+    # CURRENT index)
+    problem = _expect_usage_error(
+        name, UsageReasonCode.EVIDENCE_UNKNOWN,
+        recovered.ingest_observation,
+        command_id="ip-04", observation_id="obs-9",
+        transaction_id=tx,
+        evidence_refs=(delivery[0],),
+        session_ref=ev_session, path_ref=ev_path,
+        quantity=5, unit="MB", observed_at=_OBS1,
+        actor="metering-agent", source="usage-service",
+    )
+    if problem:
+        problems.append("new-observation control: %s" % problem)
+    if len(recovered.journal_records()) != 1 or restart_clock.reads != 0:
+        problems.append("rejected commands left phantom state or reads")
+    if problems:
+        results.append(fail(name, "; ".join(problems)))
+        return
+    results.append(ok(name, "restart + evidence eviction: the exact "
+                            "duplicate is a durable no-op (stored "
+                            "observation ledger, no clock read, no journal "
+                            "growth); conflicting reuse still fails closed; "
+                            "a NEW observation on the evicted citation "
+                            "fails closed EVIDENCE_UNKNOWN"))
+
+
+# ---------------------------------------------------------------------------
 # main
 # ---------------------------------------------------------------------------
 
@@ -3082,6 +3588,9 @@ def main() -> int:
         case_37_py_compile,
         case_38_frozen_spec_intact,
         case_39_pr_delta_shape,
+        case_40_cross_transaction_substitution,
+        case_41_evidence_ambiguity,
+        case_42_idempotency_before_resolution,
     ):
         case(results)
     failures = [result for result in results if not result[1]]

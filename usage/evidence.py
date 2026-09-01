@@ -334,7 +334,13 @@ def resolve_references(
     separation in :mod:`usage.validation` -- a payment id cited
     in a delivery-evidence slot resolves as payment-family and
     fails closed ``PAYMENT_NOT_DELIVERY``).  Duplicate ids in
-    one citation collapse deterministically (sorted, unique).
+    one citation collapse deterministically (sorted, unique);
+    admission additionally requires the commercial, session,
+    and network-path citations to be UNAMBIGUOUS (exactly one
+    distinct id of each correlated family) and the commercial
+    citation to be the command's own transaction (fail closed
+    ``EVIDENCE_AMBIGUOUS`` / ``TRANSACTION_MISMATCH`` in
+    :func:`usage.validation.validate_evidence_integrity`).
     """
     resolved: Dict[str, EvidenceReference] = {}
     for reference in references:

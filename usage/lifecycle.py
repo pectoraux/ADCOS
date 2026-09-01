@@ -430,7 +430,8 @@ class UsageLedger:
 
     Construct fresh over an EMPTY store; recover a persisted
     store with :meth:`load`.  Every command submission: dedup
-    (command-level, then observation-level) -> validate (fail
+    (command-level, then observation-level -- BOTH durable,
+    decided before live-evidence admission) -> validate (fail
     closed) -> one clock read -> atomic journal append
     (persist-then-ack) -> fold update -> outcome.
     """
@@ -476,9 +477,15 @@ class UsageLedger:
 
         The evidence index is injected fresh (the caller reads
         the CURRENT public authority state); recorded usage
-        facts are immutable, but future commands re-validate
-        their citations against the current index (an evicted
-        delivery citation fails admission, never silently).
+        facts are immutable, but a NEW observation re-validates
+        its citations against the current index (an evicted
+        delivery citation fails admission, never silently).  An
+        EXACT redelivery of an already-journaled observation is
+        decided from the durable observation ledger BEFORE
+        live-evidence resolution: it stays an idempotent no-op
+        even when its historical citations are no longer present
+        in the current snapshot (restart + evidence eviction is
+        the case_42 regression).
         """
         ledger = cls.__new__(cls)
         if not isinstance(clock, AgentClock):
@@ -598,22 +605,18 @@ class UsageLedger:
         # 2. shape validation (fail closed, no journal growth)
         validate_payload_shape(command)
 
-        # 3. resolve causal references against the injected index
-        #    (fabricated citations fail closed here)
-        resolved = resolve_references(self._evidence, command.references)
-
-        # 4. family rules (the payment/usage separation table)
-        validate_family_rules(command.action, resolved)
-
-        # 5. evidence integrity (delivery window, correlation,
-        #    staleness -- observations only)
-        validate_evidence_integrity(command, resolved)
-
-        # 6. durable observation idempotency: an exact duplicate
-        #    observation redelivered under a different command id
-        #    is a no-op (duplicate observations never
-        #    double-charge); conflicting reuse of an observation
-        #    identity fails closed.
+        # 3. durable observation idempotency BEFORE live-evidence
+        #    resolution: an exact duplicate observation (same
+        #    observation id AND same observation content digest,
+        #    redelivered under a different command id) is decided
+        #    from the STORED observation ledger, never from the
+        #    CURRENT evidence index -- a previously admitted
+        #    observation stays an idempotent no-op even if its
+        #    historical citations have since been evicted from
+        #    the injected snapshot (recorded usage facts are
+        #    immutable; duplicates never double-charge).
+        #    Conflicting reuse of an observation identity still
+        #    fails closed (decided from the stored digest).
         observation_digest = observation_digest_for_command(command)
         if command.action == UsageAction.INGEST_OBSERVATION:
             known_observation = self._journal.known_observation(
@@ -642,6 +645,22 @@ class UsageLedger:
                     to_state=current_state,
                     instant="",
                 )
+
+        # 4. resolve causal references against the injected index
+        #    (fabricated citations fail closed here; a NEW
+        #    observation re-validates its citations against the
+        #    CURRENT index -- an evicted citation fails admission,
+        #    never silently)
+        resolved = resolve_references(self._evidence, command.references)
+
+        # 5. family rules (the payment/usage separation table)
+        validate_family_rules(command.action, resolved)
+
+        # 6. evidence integrity (the unambiguous commercial
+        #    citation BOUND to the command's own transaction, the
+        #    delivery window, the unambiguous session/path
+        #    correlation, staleness -- observations only)
+        validate_evidence_integrity(command, resolved)
 
         # 7. account existence + state gates
         account = self._state.get(command.transaction_id)

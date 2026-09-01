@@ -25,6 +25,19 @@ and no journal growth):
   session/path (public-read facts carried by the commercial
   evidence entry) -- a mismatched correlation fails closed
   ``CORRELATION_MISMATCH``;
+- **admission unambiguity**: exactly ONE commercial-family
+  citation and exactly one session-family and one
+  network-path-family citation are admissible -- the
+  commercial, session, and NetworkPath correlation is
+  unambiguous by construction (multiple distinct citations of
+  a correlated family fail closed ``EVIDENCE_AMBIGUOUS``;
+  duplicate citations of the SAME id collapse deterministically
+  at resolution);
+- **transaction binding**: the commercial citation's identity
+  IS the command's own ``transaction_id`` (the account key) --
+  a command keyed to transaction A citing transaction B's
+  commercial delivery window (cross-transaction substitution)
+  fails closed ``TRANSACTION_MISMATCH``;
 - **evidence staleness**: an observation citing delivery
   evidence recorded AFTER the observation's own metering
   instant fails closed ``EVIDENCE_STALE`` (evidence from the
@@ -306,9 +319,10 @@ def validate_evidence_integrity(
     resolved: Tuple[EvidenceReference, ...],
 ) -> None:
     """The evidence-integrity gate for observation admission
-    (fail closed): family discipline per slot, the commercial
-    delivery window, the session/path correlation, and the
-    staleness timeline.
+    (fail closed): family discipline per slot, the unambiguous
+    commercial citation BOUND to the command's own transaction,
+    the commercial delivery window, the unambiguous session/path
+    correlation, and the staleness timeline.
 
     Runs AFTER family rules (so the payment/usage and
     reservation/usage separations have already fired for the
@@ -364,17 +378,39 @@ def validate_evidence_integrity(
                 % (evidence_id, entry.instant, observed_at),
             )
 
-    # 3. the commercial citation is inside the delivery window
-    commercial = None
-    for ref in resolved:
-        if ref.family == EvidenceFamily.COMMERCIAL:
-            commercial = ref
-            break
-    if commercial is None:
+    # 3. the commercial citation: EXACTLY ONE, bound to the
+    #    command's own transaction id, and inside the delivery
+    #    window (cross-transaction substitution and ambiguous
+    #    citations both fail closed)
+    commercial_refs = tuple(
+        ref for ref in resolved if ref.family == EvidenceFamily.COMMERCIAL
+    )
+    if len(commercial_refs) == 0:
         raise UsageLedgerError(
             UsageReasonCode.EVIDENCE_REQUIRED,
             "ingest_observation requires exactly one commercial-family "
             "citation (the delivery window)",
+        )
+    if len(commercial_refs) > 1:
+        raise UsageLedgerError(
+            UsageReasonCode.EVIDENCE_AMBIGUOUS,
+            "ingest_observation carries %d commercial-family citations "
+            "(%s): exactly one delivery-window citation is admissible (the "
+            "evidence model is unambiguous)"
+            % (
+                len(commercial_refs),
+                sorted(ref.reference_id for ref in commercial_refs),
+            ),
+        )
+    commercial = commercial_refs[0]
+    if commercial.reference_id != command.transaction_id:
+        raise UsageLedgerError(
+            UsageReasonCode.TRANSACTION_MISMATCH,
+            "the commercial citation %r is not the command's own "
+            "transaction %r (cross-transaction substitution fails closed: "
+            "the delivery-window evidence must be the account's own "
+            "WORK-051 transaction)"
+            % (commercial.reference_id, command.transaction_id),
         )
     if commercial.commercial_state in RESERVATION_COMMERCIAL_STATES:
         raise UsageLedgerError(
@@ -395,10 +431,61 @@ def validate_evidence_integrity(
             ),
         )
 
-    # 4. the session/path correlation matches the commercial
+    # 4. the session/path correlation is UNAMBIGUOUS (exactly one
+    #    citation of each correlated family; duplicates of the
+    #    same id collapse at resolution) and is bound to BOTH
+    #    the command's cited correlation and the commercial
     #    transaction's recorded correlation (public-read facts)
+    session_refs = tuple(
+        ref for ref in resolved if ref.family == EvidenceFamily.SESSION
+    )
+    path_refs = tuple(
+        ref for ref in resolved if ref.family == EvidenceFamily.NETWORK_PATH
+    )
+    if len(session_refs) > 1:
+        raise UsageLedgerError(
+            UsageReasonCode.EVIDENCE_AMBIGUOUS,
+            "ingest_observation carries %d session-family citations "
+            "(%s): the session correlation is unambiguous (exactly one "
+            "is admissible)"
+            % (
+                len(session_refs),
+                sorted(ref.reference_id for ref in session_refs),
+            ),
+        )
+    if len(path_refs) > 1:
+        raise UsageLedgerError(
+            UsageReasonCode.EVIDENCE_AMBIGUOUS,
+            "ingest_observation carries %d network-path-family citations "
+            "(%s): the NetworkPath correlation is unambiguous (exactly "
+            "one is admissible)"
+            % (
+                len(path_refs),
+                sorted(ref.reference_id for ref in path_refs),
+            ),
+        )
     session_ref = payload.get("session_ref", "")
     path_ref = payload.get("path_ref", "")
+    for label, cited, unique in (
+        (
+            "session",
+            session_ref,
+            session_refs[0].reference_id if session_refs else "",
+        ),
+        (
+            "path",
+            path_ref,
+            path_refs[0].reference_id if path_refs else "",
+        ),
+    ):
+        if unique and cited != unique:
+            raise UsageLedgerError(
+                UsageReasonCode.CORRELATION_MISMATCH,
+                "cited %s correlation %r does not match the %s-family "
+                "citation %r (the command's cited correlation must be "
+                "the reference actually resolved)"
+                % (label, cited, label, unique),
+            )
     for label, cited, recorded in (
         ("session", session_ref, commercial.session_ref),
         ("path", path_ref, commercial.path_ref),
