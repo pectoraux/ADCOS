@@ -1,0 +1,45 @@
+# ADCOS Work Item authorization record — WORK-052 active implementation.
+# Issued by DEC-0059 after W051 acceptance.
+work_item: WORK-052
+status: active
+authorized: true
+type: implementation
+authorization_id: "WORK-052-CORE-001"
+authorization_decision: DEC-0059
+baseline_sha: fc3ace9c45b77bae36fe757a5629bc197fd906e4
+review_basis: "DEC-0059 accepts W051 on PR #117 exact reviewed head 94743283; W052 issue #84 is the next hard-dependent commercial Work Item."
+dependencies:
+  - WORK-051
+authority_inputs:
+  - "WORK-051 CommercialCore (accepted-merged by DEC-0059)"
+  - "WORK-041 NetworkPath/platform authority (accepted-merged by DEC-0054)"
+  - "WORK-042 journal-first/recovery authority (accepted-merged by DEC-0057)"
+  - "WORK-033 AgentClock seam"
+authority_outputs:
+  - "UsageLedger usage observations, delivery correlation, billable-final snapshots, reconciliation, and compensating refund/reversal/dispute records; never a connectivity, session, path, routing, transport, or payment-provider authority"
+scope:
+  - "usage/"
+  - "tools/usage_selftest.py"
+  - "docs/WORK-052-handoff.md"
+  - "docs/WORK-052-evidence.md"
+  - ".github/workflows/spec-check.yml"
+acceptance_criteria:
+  - "Usage derives only from authoritative delivered-traffic evidence; payment and reservation/lease state never create usage."
+  - "History is append-only, immutable, deterministic, and idempotent; duplicate, conflicting, delayed, and out-of-order observations are explicit."
+  - "Each billable fact correlates to authorized delivery/path evidence; fabricated, stale, unknown, or unauthorized evidence fails closed."
+  - "Billable finality is explicit and immutable; corrections are compensating records."
+  - "Existing authorities are consumed through public interfaces only; no mutation, shadow authority, provider coupling, or physical-evidence promotion."
+out_of_scope:
+  - "WORK-053 and WORK-044 through WORK-051"
+  - "payment rails/custody/payout/KYC/KYB/jurisdiction/marketplace/SDK/client runtime"
+  - "new identity/session/routing/path/transport/federation/policy authority"
+  - "wire-schema or frozen architecture changes"
+  - "modifying spec/architect/ from the implementation PR"
+acceptance_gate:
+  status: "Architect review required after implementation"
+  required_evidence:
+    - "dedicated UsageLedger deterministic battery and replay/hash-seed proofs"
+    - "negative payment-to-usage and reservation-to-usage tests"
+    - "exact delivery SHA, evidence manifest, scope audit, and green existing batteries"
+handoff: docs/WORK-052-handoff.md
+handoff_required: true
