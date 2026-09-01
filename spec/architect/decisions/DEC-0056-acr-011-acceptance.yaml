@@ -1,0 +1,32 @@
+decision_id: DEC-0056
+type: governance
+work_item: null
+acr: ACR-011
+pr: 111
+reviewed_sha: d30b2f7a40ed5ee6abdca7e611fbd6bbba47fcb4
+decision: ACCEPTED
+status: ACCEPTED
+reviewer: Architect (pectoraux)
+timestamp: 2026-09-01T04:42:19Z
+findings:
+  - "ACR-011 correctly identifies the machine-checked registry boundary exposed by the delivered WORK-042 implementation."
+  - "The synchronized extension preserves fail-closed registry, dependency, ledger, authorization, and provenance checks."
+  - "The proposal preserves W040 as an independent physical-validation track and does not authorize any new Work Item implementation."
+blockers: []
+required_corrections: []
+evidence:
+  merge_sha: null
+  ci_run: 33458112038
+  artifacts:
+    - docs/governance/ACR-011-commercial-phase-registry-reconciliation.md
+accepted_scope:
+  - "ACR-011 registry extension from WORK-041 through the canonical commercial phase, including WORK-042 and WORK-044..WORK-053, with WORK-043 remaining retired."
+  - "Synchronized updates to the frozen Work Item registry, dependency graph, machine-checked registry expectations, and persistent governance records described by PR #111."
+rejected_scope:
+  - "Acceptance of WORK-042."
+  - "Activation or implementation authorization of WORK-044 through WORK-053."
+  - "Any change to W040 physical evidence requirements or acceptance."
+downstream_effect:
+  - "ACR-011 is accepted and its reviewed proposal PR #111 may now be merged."
+  - "The extended registry becomes the canonical representation of the next architectural/program phase once PR #111 is merged."
+resolved_by: null
