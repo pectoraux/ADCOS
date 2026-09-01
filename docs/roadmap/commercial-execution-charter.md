@@ -37,7 +37,7 @@ For Work Items participating in this lane:
 3. When the Architect accepts a merged Work Item, the Architect may perform the **acceptance → successor activation** persistence as a single post-merge governance transition. A second governance PR is not required merely to carry the state from one accepted item to its already-declared successor.
 4. The successor is selected from the canonical dependency DAG and this charter. Chat selection is not authoritative.
 5. The next authorization is created directly from the successor's canonical Work Item contract and this charter. Its scope, dependencies, acceptance criteria, and evidence rules are not invented during the transition.
-6. The single-active-authorization invariant remains absolute: the prior authorization is superseded in the same transition that activates the successor. There is never two active implementation authorizations and never an active implementation mode with no authorization.
+6. The single-active-authorization invariant remains absolute: the prior authorization is superseded in the same transition that activates the successor. There are never two active implementation authorizations and never an active implementation mode with no authorization.
 7. A Work Item that is not the declared successor remains unauthorized even if its dependencies are satisfied. The Architect may deliberately skip it, but that exception must be recorded as a durable decision.
 8. A separate governance PR is reserved for actual governance changes, architecture changes, or non-routine reconciliation—not for ordinary movement along an already-accepted execution lane.
 
