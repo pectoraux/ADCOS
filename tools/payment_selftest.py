@@ -3907,15 +3907,17 @@ def case_38_scope_audit(results: List[Result]) -> None:
     )
 
 
-#: The accepted authority families that must stay byte-identical.
+#: The accepted authority code families that must stay
+#: byte-identical (docs/tools/spec are covered by the scope
+#: check and the dedicated spec/ check).
 _SIBLING_PREFIXES = (
     "commercial", "usage", "allocation", "agent", "identity", "sessions",
     "routing", "networkpath", "transport", "platform", "policy", "protocol",
-    "topology", "management", "mobile", "tools", "docs", "spec",
+    "topology", "management", "mobile",
     "conformance", "adapters", "appliance", "capabilities", "discovery",
     "edge", "energy", "federation", "imt", "intent", "interop", "mobility",
     "multipath", "resources", "scale", "services", "simulator", "telemetry",
-    "upgrade", "edge",
+    "upgrade",
 )
 
 
@@ -3953,14 +3955,26 @@ def _is_ancestor(ancestor: str, descendant: str) -> bool:
 
 
 def _audit_ref() -> Optional[str]:
-    """The honest scope-audit reference: the exact authorized
-    implementation baseline when its commit object is available;
-    else origin/main when HEAD descends from it (the CI merge
-    context); else None (skip)."""
-    if _commit_available(_BASELINE_SHA):
-        return _BASELINE_SHA
+    """The honest scope-audit reference.
+
+    Merge-commit context (the CI PR checkout refs/pull/N/merge,
+    and any GitHub-direction merge whose FIRST parent is the
+    base): ``HEAD^1`` -- the delta is exactly this PR's files.
+    Branch context (HEAD descends from the authorized baseline,
+    no merge): the exact baseline SHA -- the delta is the whole
+    implementation as the Architect reviews it.  Base-less
+    context: None (skip; CI enforces provenance separately).
+    """
+    if _commit_available("HEAD^2"):
+        # a merge commit: the first parent is the base the PR is
+        # evaluated against (GitHub merge direction)
+        return "HEAD^1"
     if _origin_main_available() and _is_ancestor("origin/main", "HEAD"):
         return "origin/main"
+    if _commit_available(_BASELINE_SHA) and _is_ancestor(
+        _BASELINE_SHA, "HEAD"
+    ):
+        return _BASELINE_SHA
     return None
 
 
