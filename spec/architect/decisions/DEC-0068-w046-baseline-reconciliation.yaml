@@ -12,26 +12,26 @@ status: ACCEPTED
 reviewer: "Architect (pectoraux)"
 timestamp: 2026-09-02T20:14:05Z
 findings:
-  - "PR #134 is the governance-only baseline reconciliation after DEC-0067; its exact reviewed head was 803337735ada805635fe1862cb1f1c66cda0ff45 and it merged as e3b2c48441725b42a22f1bd82a73fae10d25c5f2."
-  - "This record advances the persistent Architect snapshot from the pre-reconciliation mainline 3db7500d7b79a8cd3e3a651e1461fbb320efd67e3 to the exact post-DEC-0067 governance mainline e3b2c48441725b42a22f1bd82a73fae10d25c5f2 and keeps WORK-047 authorization provenance aligned to the same accepted mainline."
+  - "PR #134 was the governance-only baseline reconciliation after DEC-0067; its exact reviewed head was 803337735ada805635fe1862cb1f1c66cda0ff45 and its actual Git merge commit is 825f48f814926223665c1761beaba6cbdd2c2640."
+  - "This record advances the persistent Architect snapshot from the pre-reconciliation mainline 3db7500d7b79a8cd3e3a651e1461fbb320efd67e3 to the exact post-DEC-0067 governance mainline 825f48f814926223665c1761beaba6cbdd2c2640 without changing any work-item contract, acceptance fact, dependency, or frozen architecture/protocol semantic."
   - "WORK-047 remains implementation-empty and the sole active authorized execution track; W040 remains independent, in-review, and unaccepted; W048-W050 remain unauthorized candidates."
 blockers: []
 required_corrections: []
 evidence:
-  merge_sha: e3b2c48441725b42a22f1bd82a73fae10d25c5f2
+  merge_sha: 825f48f814926223665c1761beaba6cbdd2c2640
   ci_run: null
   artifacts:
     - "spec/architect/decisions/DEC-0067-work-046-acceptance-w047-activation.yaml"
     - "docs/WORK-047-handoff.md"
 accepted_scope:
-  - "Baseline reconciliation only: persistent snapshot and WORK-047 authorization provenance align with the exact post-DEC-0067 governance mainline."
+  - "Baseline reconciliation only: persistent snapshot and WORK-047 authorization provenance align with the exact post-DEC-0067 governance mainline 825f48f814926223665c1761beaba6cbdd2c2640."
 rejected_scope:
   - "Any implementation code or W047 delivery."
   - "Any frozen architecture/protocol semantic change."
   - "Any W040 physical evidence acceptance or obligation closure."
   - "Any activation of W048-W050."
 downstream_effect:
-  - "WORK-047-CORE-001 baseline_sha remains e3b2c48441725b42a22f1bd82a73fae10d25c5f2 as the exact DEC-0067 governance mainline from which W047 is authorized."
-  - "The persistent execution-state and execution-ledger snapshots are reconciled to the exact post-DEC-0067 governance mainline by the follow-up transition that records the actual governance merge lineage."
+  - "WORK-047-CORE-001 baseline_sha is 825f48f814926223665c1761beaba6cbdd2c2640, matching the exact post-DEC-0067 governance mainline."
+  - "The persistent execution-state and execution-ledger snapshots are reconciled to 825f48f814926223665c1761beaba6cbdd2c2640 by DEC-0068 / LEDGER-RECON-015."
   - "No prior work-item history is rewritten."
 resolved_by: null
