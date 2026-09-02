@@ -22,8 +22,7 @@ authority_inputs:
 authority_outputs:
   - "deterministic, eligibility-filtered, privacy-preserving marketplace discovery and candidate selection proposals; no path activation authority"
 scope:
-  - "marketplace/"
-  - "developer-facing/discovery surfaces as defined by issue #91"
+  - "marketplace discovery/proximity/path-selection implementation defined by issue #91"
   - "tools/work-047 self-test battery and evidence"
   - "docs/WORK-047-handoff.md"
   - ".github/workflows/spec-check.yml"
@@ -50,4 +49,4 @@ acceptance_gate:
     - "NetworkPath handoff composition proofs and forbidden-authority boundary audit"
     - "exact reviewed delivery SHA, evidence manifest, CI/provenance, replay and determinism evidence"
 handoff: docs/WORK-047-handoff.md
-handoff_required: true\n
+handoff_required: true
