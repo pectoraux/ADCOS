@@ -1,0 +1,39 @@
+# ADCOS Architect decision record.
+# schema: spec/architect/decision-record-template.md; verified by tools/spec_check.py (ARCH-04).
+# Baseline-advancement-only reconciliation (the DEC-0063-established convention)
+# for the WORK-046 activation issued by DEC-0065.
+decision_id: DEC-0066
+type: governance
+work_item: WORK-046
+acr: null
+pr: 130
+reviewed_sha: 3db7500d7b79a8cd3e3a651e1461fbb320efd67e
+decision: ACCEPTED
+status: ACCEPTED
+reviewer: "Architect (pectoraux)"
+timestamp: 2026-09-02T14:59:16Z
+findings:
+  - "The DEC-0065 governance transition itself was merged as PR #130 (head fb41efaa23, base a789d9b, merge commit 3db7500d7b79a8cd3e3a651e1461fbb320efd67e, merged 2026-09-02T14:59:16Z under the single-Architect merge authority of review-protocol §7), so the repository's actual mainline became 3db7500 while the persistent state referenced the LEDGER-RECON-012 snapshot baseline a789d9b."
+  - "DEC-0065 authorized WORK-046 against the post-PR-#129 implementation mainline a789d9b (the issuance baseline, recorded when the W045 delivery had just merged); this reconciliation advances the WORK-046 implementation baseline to the exact current main SHA 3db7500 without changing the W046 contract, authorization scope, dependency satisfaction (WORK-051, WORK-052, WORK-053, WORK-044, and WORK-045 stay accepted-merged), or prior acceptance facts."
+  - "The PR #130 delta is verified governance-only: 7 files, +197/-50, exactly the spec/architect/ transition surface (the DEC-0065 decision record, the WORK-045.yaml supersession with verbatim provenance, the new WORK-046.yaml authorization, the execution-ledger W045/W046 reconciliation with LEDGER-RECON-012, the execution-state activation, current-state.md, and the decisions README); no implementation file, frozen architecture document, protocol schema, registry file, or W040 obligation was touched."
+  - "The official specification-consistency run on the PR #130 head (33645393176, pull_request) stops at the already-known inherited mainline condition (ARCH-02 schema drift in pre-existing historical records; ARCH-06 open-obligation visibility) with ARCH-03/ARCH-04 PASS — the failure set is byte-identical to the clean main baseline with zero new failures; the inherited conditions remain out of scope and unchanged by this reconciliation."
+blockers: []
+required_corrections: []
+evidence:
+  merge_sha: 3db7500d7b79a8cd3e3a651e1461fbb320efd67e
+  ci_run: null
+  artifacts:
+    - "spec/architect/execution-ledger.yaml"
+accepted_scope:
+  - "The baseline-advancement-only reconciliation of the WORK-046-CORE-001 implementation baseline and the persistent snapshot to the exact post-transition governance mainline 3db7500d7b79a8cd3e3a651e1461fbb320efd67e (the PR #130 governance merge that carries DEC-0065 / LEDGER-RECON-012)."
+  - "The synchronized execution-ledger.yaml, execution-state.yaml, WORK-046.yaml, current-state.md, and decisions README updates that record this advancement."
+rejected_scope:
+  - "Any WORK-046 implementation, API/SDK/webhook code, or scope change (the WORK-046-CORE-001 contract is unchanged from its DEC-0065 issuance)."
+  - "Any modification to frozen architecture or protocol semantics, registry files, or implementation artifacts."
+  - "Any acceptance or closure of W040 physical evidence obligations EVID-007/EVID-008."
+downstream_effect:
+  - "The WORK-046-CORE-001 authorization baseline and the execution snapshot advance a789d9b -> 3db7500 (LEDGER-RECON-013) in lockstep, so ARCH-03 and ARCH-05 hold at the reconciled state; the W046 implementation branch is to be cut from the exact reconciled authorized baseline 3db7500 (the mainline that carries the DEC-0065 governance transition)."
+  - "The WORK-046 registered-only ledger entry note records the DEC-0066 baseline advancement while the original DEC-0065 issuance baseline a789d9b remains recorded; no delivery field becomes claimable and no W046 delivery exists."
+  - "DEC-0065 remains authoritative historical evidence for the W045 acceptance and the W046 activation; no prior work-item history is rewritten and no W045/W044/W053/W052/W051 fact changes."
+  - "W040 remains independent, in-review, and unaccepted; its physical evidence obligations remain OPEN and W040-owned."
+resolved_by: null

@@ -4,8 +4,8 @@ package: "persistent-architect"
 last_updated: "2026-09-02"
 repository:
   canonical: "github.com/pectoraux/ADCOS"
-  main_sha: a789d9b403d0e2a6e05276bb3cdc2b7d092c6d88
-  main_sha_semantics: "Actual post-PR-#129 mainline: DEC-0065 / LEDGER-RECON-012 accept WORK-045 (reviewed correction head 827234ec, merge a789d9b2) and record WORK-046 as the active implementation track at this exact issuance baseline. Per the DEC-0063-established convention, the follow-up baseline-advancement-only reconciliation moves this recorded mainline to the exact post-transition governance commit once the governance transition PR merges, so the W046 implementation branch is cut from the mainline that carries the transition."
+  main_sha: 3db7500d7b79a8cd3e3a651e1461fbb320efd67e
+  main_sha_semantics: "Exact post-transition governance mainline: PR #130 merged the DEC-0065 / LEDGER-RECON-012 governance transition (accept WORK-045 at reviewed correction head 827234ec / merge a789d9b2; activate WORK-046) at 3db7500 (2026-09-02T14:59:16Z), and DEC-0066 / LEDGER-RECON-013 advance this recorded mainline and the WORK-046-CORE-001 authorization baseline to that exact governance commit, so the W046 implementation branch is cut from the mainline that carries the transition."
 versions:
   architecture_version_reference: "1.0"
   architecture_version_authority: "spec/architecture.md ## Status (single declaration site)"
@@ -15,10 +15,9 @@ execution:
   mode: "implementing"
   active_work_item: WORK-046
   active_authorization: "WORK-046-CORE-001"
-  halted_reason: "W046 is active-authorized; Z.ai may implement from the post-transition governance mainline once the DEC-0066 baseline reconciliation records it."
+  halted_reason: "W046 is active-authorized at the reconciled post-transition governance baseline 3db7500; Z.ai may implement from this exact mainline."
   next_required_decisions:
     - "Review the WORK-046 delivery PR on its exact head against the acceptance gate (versioned API schema with backward-compatibility guarantees; sandbox/production isolation; idempotency keys under retries and duplicates; scoped application credentials; signed webhooks with replay/duplicate/out-of-order protection; webhook state observational only; API success never implying physical connectivity; canonical reason codes visible at the developer boundary; SDK semantics matching the canonical server model)."
-    - "Record the post-transition governance mainline as the WORK-046 implementation baseline via the follow-up baseline-advancement-only reconciliation decision before the implementation branch is cut."
     - "After W046 acceptance, evaluate the next eligible commercial Work Item (W047) from the canonical dependency graph."
 in_review:
   - work_item: WORK-040

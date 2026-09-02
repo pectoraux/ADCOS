@@ -1,13 +1,16 @@
 # ADCOS Work Item authorization record — WORK-046 active implementation.
-# Issued by DEC-0065 after W045 acceptance.
+# Issued by DEC-0065 after W045 acceptance; baseline advanced to the exact
+# post-transition governance mainline by the DEC-0066 baseline-advancement-
+# only reconciliation (the DEC-0063-established convention).
 work_item: WORK-046
 status: active
 authorized: true
 type: implementation
 authorization_id: "WORK-046-CORE-001"
 authorization_decision: DEC-0065
-baseline_sha: a789d9b403d0e2a6e05276bb3cdc2b7d092c6d88
-review_basis: "DEC-0065 accepts W045 on PR #129 exact reviewed head 827234ec (merged a789d9b); W046 issue #90 is the deterministic next commercial Work Item in the accepted execution lane, with hard dependencies WORK-051, WORK-052, WORK-053, WORK-044, and WORK-045 all accepted-merged in the execution ledger. The issuance baseline is the actual current main a789d9b (the post-PR-#129 mainline); per the DEC-0063-established baseline-reconciliation convention, the baseline advances to the exact post-transition governance mainline by the follow-up baseline-advancement-only reconciliation decision so the W046 implementation branch is cut from the mainline that carries this governance transition. The scope surface below follows the frozen registry definition (spec/work-items.md WORK-046), the operative issue #90 contract, and the repository's sibling package convention (commercial/, usage/, allocation/, payment/, eligibility/); no W046 implementation delivery exists."
+baseline_sha: 3db7500d7b79a8cd3e3a651e1461fbb320efd67e
+baseline_reconciliation_decision: DEC-0066
+review_basis: "DEC-0065 activation (issuance baseline a789d9b2, the post-PR-#129 mainline) with the DEC-0066 baseline reconciliation to the exact post-transition governance mainline 3db7500 (the PR #130 governance merge that carries DEC-0065 / LEDGER-RECON-012); the W046 implementation branch is cut from the exact reconciled authorized baseline 3db7500. W046 issue #90 is the deterministic next commercial Work Item in the accepted execution lane, with hard dependencies WORK-051, WORK-052, WORK-053, WORK-044, and WORK-045 all accepted-merged in the execution ledger. The scope surface below follows the frozen registry definition (spec/work-items.md WORK-046), the operative issue #90 contract, and the repository's sibling package convention (commercial/, usage/, allocation/, payment/, eligibility/); no W046 implementation delivery exists."
 dependencies:
   - WORK-051
   - WORK-052

@@ -26,6 +26,7 @@ The acceptance records are DEC-0001..DEC-0039 for WORK-001..WORK-039, plus DEC-0
 | DEC-0063 | governance | WORK-044 | ACCEPTED | ACCEPTED | W044 baseline reconciliation to actual current main |
 | DEC-0064 | governance | WORK-044 | ACCEPTED | ACCEPTED | W044 payment adapters acceptance → W045 activation |
 | DEC-0065 | governance | WORK-045 | ACCEPTED | ACCEPTED | W045 eligibility acceptance → W046 activation |
+| DEC-0066 | governance | WORK-046 | ACCEPTED | ACCEPTED | W046 baseline reconciliation to the post-transition mainline |
 
 ## Rules
 
