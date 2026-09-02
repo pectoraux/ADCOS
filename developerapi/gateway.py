@@ -15,12 +15,21 @@ W046 frozen contract's interface boundary):
          -- the FINALITY POINT: the canonical mutation result
          and its response are final from here
       -> append the DURABLE webhook observation obligation
-         (the delivery obligation survives a process crash;
-         contained: a failure here can never change the
-         response)
+         (the delivery obligation survives a process crash).
+         The obligation is part of the SUCCESSFUL-ADMISSION
+         CONTRACT: it must be durable BEFORE the response is
+         returned.  If the obligation cannot be durably
+         recorded, the boundary fails DETERMINISTICALLY
+         (store-failed, 500) and NEVER claims successful
+         admission of a mutation whose required observation
+         obligation was not established -- no rollback, no
+         re-execution; the durable mutation stays durable, and
+         the SAME request retried with the SAME idempotency
+         key completes the admission and then receives the
+         canonical stored response byte-identically
       -> return the canonical response envelope
       -> webhook queue writes + delivery attempts STRICTLY
-         AFTER the response is final and fully contained: a
+         AFTER the obligation is durable and fully contained: a
          webhook queue or delivery failure may affect only
          webhook observability/retry state, never the
          response -- and never the loss of the durable
@@ -60,22 +69,30 @@ audit):
   public reads, queued before delivery, and delivered through
   the injectable transport seam; delivery state never feeds
   back into any business state.  The observation phase runs
-  strictly AFTER the mutation's finality point and is fully
-  contained: a webhook queue or delivery persistence failure
-  can never turn an admitted mutation into an API failure,
-  never alter the canonical mutation result, never cause a
-  duplicate canonical mutation, never invalidate idempotency,
-  and never act as a hidden transaction coordinator for the
-  commercial plane (battery case 42 failure-injects exactly
-  this).  The DELIVERY OBLIGATION, however, is a durable
-  operational obligation of the observation channel itself:
-  it is persisted BEFORE the API response is returned and
-  survives a process crash, so a queue-write failure (or a
-  crash between the obligation and the queue phase) loses
-  nothing -- restart recovery re-queues the still-missing
-  endpoints exactly once (battery case 43 failure-injects
-  the crash).  The delivery STATE stays observational; the
-  delivery OBLIGATION is durable.  That distinction is the
+  strictly AFTER the mutation's finality point, and its queue
+  and delivery steps are fully contained: a webhook queue or
+  delivery persistence failure can never turn an admitted
+  mutation into an API failure, never alter the canonical
+  mutation result, never cause a duplicate canonical mutation,
+  never invalidate idempotency, and never act as a hidden
+  transaction coordinator for the commercial plane (battery
+  case 42 failure-injects exactly this).  The DELIVERY
+  OBLIGATION, however, is a durable operational obligation of
+  the observation channel itself: it is persisted BEFORE the
+  API response is returned and survives a process crash, so a
+  queue-write failure (or a crash between the obligation and
+  the queue phase) loses nothing -- restart recovery re-queues
+  the still-missing endpoints exactly once (battery case 43
+  failure-injects the crash).  The obligation write itself is
+  part of the admission contract, NOT contained best effort:
+  when it fails the boundary returns the deterministic
+  admission failure instead of a false success, the durable
+  mutation is neither rolled back nor re-executed, and the
+  same-key retry completes the admission BEFORE the stored
+  response is replayed (battery case 44 failure-injects the
+  obligation write, the crash, and the healing retry).  The
+  delivery STATE stays observational; the delivery OBLIGATION
+  is durable and admission-gating.  That distinction is the
   whole reliability contract.
 
 Durability (the idempotency contract): every mutation's
@@ -375,6 +392,53 @@ def match_route(method: str, route: str) -> Tuple[RouteSpec, List[str]]:
     )
 
 
+@dataclass(frozen=True)
+class _MutationEmission:
+    """One observation emission an admitted API mutation owes
+    (INTERNAL to the boundary -- never exported, never journal
+    state by itself).
+
+    The eight primary members are the COMPLETE observation
+    payload: they are exactly what the durable obligation record
+    (:class:`journal.WebhookObligationRecord`) and the queue
+    records persist.  ``developer_id`` and ``endpoints`` are
+    empty until the audience is RESOLVED at admission time
+    (post-finality: the mutation record is durable, the response
+    is final, and the audience lives in the folded endpoint
+    index); :meth:`resolved` returns the admission-ready
+    emission.  Building the spec re-executes NOTHING: every
+    member comes from the mutation's own executed result."""
+
+    event_type: str
+    event_id: str
+    occurred_at: str
+    resource_kind: str
+    resource_id: str
+    resource_version: int
+    correlation: str
+    data: Mapping[str, Any]
+    developer_id: str = ""
+    endpoints: Tuple[str, ...] = ()
+
+    def resolved(
+        self, developer_id: str, endpoints: Tuple[str, ...]
+    ) -> "_MutationEmission":
+        """The admission-ready emission: the observation payload
+        with its resolved audience attached."""
+        return _MutationEmission(
+            event_type=self.event_type,
+            event_id=self.event_id,
+            occurred_at=self.occurred_at,
+            resource_kind=self.resource_kind,
+            resource_id=self.resource_id,
+            resource_version=self.resource_version,
+            correlation=self.correlation,
+            data=self.data,
+            developer_id=developer_id,
+            endpoints=endpoints,
+        )
+
+
 class DeveloperApiService:
     """The developer platform request boundary (frozen public
     surface).
@@ -447,19 +511,19 @@ class DeveloperApiService:
             )
         self._index = ApiIndex()
         # Post-finality webhook containment state (health data
-        # ONLY -- never business state).  The DURABLE recovery
-        # truth for webhook observations is the journal's
-        # obligation records (folded into the index at load);
-        # this in-process buffer is the honest residual for the
-        # one case the journal cannot cover: an observation
-        # whose OBLIGATION WRITE itself failed is retained here
-        # for best-effort in-process recovery through the
-        # delivery pump (the journal is the only durable medium;
-        # if the process crashes before the store heals, that
-        # observation is lost -- recorded as an incident, never
-        # silently).  Both buffers are process-local; the
-        # incidents are health data only.
-        self._pending_emissions: List[Callable[[], int]] = []
+        # ONLY -- never business state).  The DURABLE truth for
+        # webhook observations is the journal's obligation
+        # records (folded into the index at load): an obligation
+        # write failure is NOT contained -- it fails the
+        # admission deterministically (the boundary never
+        # returns a success whose observation obligation was not
+        # established), and the same-key retry completes the
+        # admission from durable truth alone; a queue or
+        # delivery failure is contained here as incidents and
+        # recovered from the durable obligation through the
+        # delivery pump.  There is NO process-local observation
+        # state: the incidents are process-local health data
+        # only.
         self._observation_incidents: List[Dict[str, Any]] = []
 
     # -----------------------------------------------------------------
@@ -688,8 +752,7 @@ class DeveloperApiService:
         crashed between the obligation and the queue phase -- is
         re-queued for its still-missing endpoints; the delivery
         identity dedupe makes the flush exactly-once), then the
-        in-process residual observations, then the delivery
-        pass.  A still-failing store keeps the obligation
+        delivery pass.  A still-failing store keeps the obligation
         outstanding and records an incident; an observation
         failure never surfaces as an API failure and never
         re-executes the canonical mutation.
@@ -699,7 +762,6 @@ class DeveloperApiService:
         capacity remaining.  Delivered is terminal.  Returns the
         number of attempts performed."""
         self._flush_outstanding_obligations()
-        self._retry_pending_emissions()
         now = self._clock.now()
         performed = 0
         for delivery_id in sorted(self._index.deliveries):
@@ -757,57 +819,78 @@ class DeveloperApiService:
         failures (health DATA only -- never business state, never
         an API response, never the mutation result).
 
-        One incident per contained failure: the phase (queue or
-        obligation write at emission time ``emission`` / the
-        durable obligation recovery flush
-        ``obligation-retry`` / the in-process residual retry
-        ``emission-retry`` / the delivery pass ``delivery``), the
-        error class and message, the boundary reason code when
-        the failure is a boundary error, and the instant.
-        Incidents are process-local health data: they are NOT
-        journal records, they never survive a restart, and
-        durable truth remains the journal alone.  The platform
-        operator reads them to diagnose webhook-plane health;
-        nothing in the commercial plane reads them."""
+        One incident per contained failure: the phase (the queue
+        write at emission time ``emission`` / the durable
+        obligation recovery flush ``obligation-retry`` / the
+        delivery pass ``delivery``), the error class and message,
+        the boundary reason code when the failure is a boundary
+        error, and the instant.  Incidents are process-local
+        health data: they are NOT journal records, they never
+        survive a restart, and durable truth remains the journal
+        alone.  The platform operator reads them to diagnose
+        webhook-plane health; nothing in the commercial plane
+        reads them.  An OBLIGATION-write failure is deliberately
+        absent from this surface: it is not contained health
+        data but the deterministic admission failure the caller
+        receives (and the same-key retry heals)."""
         return tuple(
             dict(incident) for incident in self._observation_incidents
         )
 
-    def _observe_after_finality(self, emission: Callable[[], int]) -> None:
-        """Run the webhook observation phase of one mutation,
-        strictly after the mutation's finality point, fully
-        contained.
+    def _observe_after_finality(
+        self, emission: _MutationEmission
+    ) -> None:
+        """Run the contained webhook queue and delivery phase of
+        one mutation, strictly after the mutation's finality
+        point AND strictly after the observation obligation is
+        durable.
 
         Containment semantics (the frozen W046 invariant): the
-        emission first persists the DURABLE observation
-        obligation and then queues the per-endpoint deliveries;
-        a failure at either step retains the observation for
-        recovery (the durable obligation when its write
-        succeeded, the in-process residual otherwise) and
-        records an incident; a delivery-pass failure records an
-        incident.  NOTHING raised here ever reaches the caller:
-        the mutation response was finalized before this method
-        is entered, and this method must never raise.  The
-        webhook system is an observer, never a transaction
-        coordinator for the commercial plane."""
+        per-endpoint queue writes (dedupe by delivery identity)
+        and the delivery pass may fail freely -- a queue-write
+        failure is recorded as an incident and the DURABLE
+        obligation keeps the observation recoverable (the pump
+        re-queues the still-missing endpoints exactly once); a
+        delivery-pass failure is recorded as an incident and the
+        pump retries the due delivery.  NOTHING raised here ever
+        reaches the caller: the mutation response was finalized
+        before this method is entered, and this method must never
+        raise.  The webhook system is an observer, never a
+        transaction coordinator for the commercial plane."""
         try:
-            emission()
+            self._queue_observation(
+                event_id=emission.event_id,
+                event_type=emission.event_type,
+                occurred_at=emission.occurred_at,
+                developer_id=emission.developer_id,
+                resource_kind=emission.resource_kind,
+                resource_id=emission.resource_id,
+                resource_version=emission.resource_version,
+                correlation=emission.correlation,
+                data=emission.data,
+                endpoints=emission.endpoints,
+            )
         except Exception as error:
-            # the obligation write or a queue write failed: the
-            # observation is retained for recovery -- durably if
-            # the obligation record landed (restart recovery
-            # owns it), in-process as the honest residual
-            # otherwise; the incident is webhook health data only
+            # a queue write failed: the observation obligation is
+            # DURABLE, so the observation is recoverable -- the
+            # delivery pump's obligation flush re-queues the
+            # still-missing endpoints exactly once; the incident
+            # is webhook health data only.  The inline delivery
+            # pass is SKIPPED (the pump owns the recovery; the
+            # operator runs it).
             self._record_observation_incident("emission", error)
-            self._pending_emissions.append(emission)
             return
+        self._run_delivery_pass()
+
+    def _run_delivery_pass(self) -> None:
+        """The inline delivery pass (contained: a failure is
+        recorded as an incident, never raised to the caller)."""
         try:
             self.process_due_deliveries()
         except Exception as error:
-            # the delivery pass failed after the observation
-            # queued: the queue record is durable and the pump
-            # will retry the delivery; the incident is health
-            # data only
+            # the delivery pass failed: the queue records are
+            # durable and the pump will retry the due deliveries;
+            # the incident is health data only
             self._record_observation_incident("delivery", error)
 
     def _flush_outstanding_obligations(self) -> int:
@@ -859,32 +942,401 @@ class DeveloperApiService:
                 )
         return queued
 
-    def _retry_pending_emissions(self) -> int:
-        """Retry the retained in-process residual observations
-        (contained: never raises).
+    def _admit_observation(
+        self, emission: _MutationEmission, *, key: str, request_id: str
+    ) -> None:
+        """The ADMISSION GATE for the durable observation
+        obligation (the W046 successful-admission contract).
 
-        These are observations whose DURABLE obligation write
-        itself failed (the journal is the only durable medium):
-        a still-failing store keeps the observation pending and
-        records an incident; a healthy store flushes it (the
-        queue dedupe by delivery identity makes this
-        exactly-once even after a partial multi-endpoint
-        emission).  Returns the number of observations flushed."""
-        if not self._pending_emissions:
-            return 0
-        still_pending: List[Callable[[], int]] = []
-        flushed = 0
-        for emission in self._pending_emissions:
-            try:
-                emission()
-                flushed += 1
-            except Exception as error:
-                self._record_observation_incident(
-                    "emission-retry", error
+        Sequence: resolve the observation's audience from the
+        folded endpoint index (a public read; no audience means
+        no obligation exists and the contract is trivially
+        satisfied); append the DURABLE obligation record -- this
+        write is NOT contained: when it fails the boundary raises
+        the deterministic admission failure (:meth:`_admission_failure`)
+        and NEVER returns the success whose required observation
+        obligation was not established; only after the obligation
+        is durable does the fully contained queue + delivery
+        phase run (:meth:`_observe_after_finality`).  The mutation
+        itself stays durable either way: no rollback, no
+        re-execution (the same-key retry completes the admission
+        through :meth:`_complete_prior_admission`)."""
+        try:
+            audience = self._resolve_observation_audience(emission)
+            if audience is not None:
+                developer_id, endpoints = audience
+                resolved = emission.resolved(developer_id, endpoints)
+                self._append_observation_obligation(resolved)
+        except Exception as error:
+            raise self._admission_failure(key, request_id, error) from error
+        if audience is None:
+            # no audience: no delivery obligation exists (the
+            # admission contract is trivially satisfied).  The
+            # inline delivery pass still runs -- every mutation
+            # emission is the pump's deterministic turn (the
+            # healthy-path journal stream is clock-stable).
+            self._run_delivery_pass()
+            return
+        # the obligation is durable: the admission contract is
+        # satisfied for this response
+        self._observe_after_finality(resolved)
+
+    def _resolve_observation_audience(
+        self, emission: _MutationEmission
+    ) -> Optional[Tuple[str, Tuple[str, ...]]]:
+        """Resolve one emission's audience: the owning developer
+        (or the platform-level marker) and the endpoints
+        subscribed to the event type, from the folded endpoint
+        index ONLY (the audience at admission time).  Returns
+        None when no audience exists (no delivery obligation)."""
+        developer_id = self._resource_owner(
+            emission.resource_kind, emission.resource_id
+        )
+        if developer_id is None:
+            return None
+        endpoints = tuple(
+            endpoint_id
+            for endpoint_id in sorted(self._index.endpoints)
+            if self._index.endpoints[endpoint_id].get("developer_id")
+            == developer_id
+            and emission.event_type
+            in self._index.endpoints[endpoint_id].get("event_types", ())
+        )
+        if not endpoints:
+            return None
+        return developer_id, endpoints
+
+    def _append_observation_obligation(
+        self, resolved: _MutationEmission
+    ) -> None:
+        """Append the durable observation obligation record
+        (idempotent by obligation identity; persist-then-ack).
+
+        The single obligation-write site for EVERY admission path
+        (the API mutation gate, the same-key admission completion,
+        and the platform-side observation surface).  CAN raise:
+        the caller owns the failure semantics -- in the API
+        mutation path a failure here is the deterministic
+        admission failure, never a contained incident."""
+        obligation_id = webhook_platform.derive_obligation_id(
+            self._environment, resolved.event_id
+        )
+        if obligation_id in self._index.obligations:
+            return
+        record = WebhookObligationRecord.build(
+            sequence=self._journal.tail_sequence() + 1,
+            prev_record_id=self._journal.tail_record_id(),
+            obligation_id=obligation_id,
+            event_id=resolved.event_id,
+            event_type=resolved.event_type,
+            occurred_at=resolved.occurred_at,
+            environment=self._environment,
+            developer_id=resolved.developer_id,
+            resource_kind=resolved.resource_kind,
+            resource_id=resolved.resource_id,
+            resource_version=resolved.resource_version,
+            correlation=resolved.correlation,
+            data=resolved.data,
+            endpoints=resolved.endpoints,
+        )
+        self._journal.append(record)
+        self._index.apply(record)
+
+    def _admission_failure(
+        self, key: str, request_id: str, error: BaseException
+    ) -> DeveloperApiError:
+        """The deterministic admission-failure error for a
+        mutation whose required observation obligation could not
+        be durably recorded.
+
+        The boundary reason is preserved from the underlying
+        boundary failure (store-failed stays store-failed; an
+        unexpected error class is classified store-failed); the
+        detail states the contract truthfully: the canonical
+        mutation is durable and was NOT rolled back or
+        re-executed, the response is NOT a success, and the SAME
+        request retried with the SAME idempotency key completes
+        the admission and receives the canonical stored
+        response."""
+        if isinstance(error, DeveloperApiError):
+            return DeveloperApiError(
+                error.reason,
+                "the webhook observation obligation for the admitted "
+                "mutation (idempotency key %r) could not be durably "
+                "recorded: %s.  The canonical mutation is durable and "
+                "was NOT rolled back or re-executed; retry the SAME "
+                "request with the SAME idempotency key to complete "
+                "the admission and receive the canonical response"
+                % (key, error.detail),
+                request_id=request_id,
+            )
+        return DeveloperApiError(
+            DeveloperApiReasonCode.STORE_FAILED,
+            "the webhook observation obligation for the admitted "
+            "mutation (idempotency key %r) could not be durably "
+            "recorded: %r.  The canonical mutation is durable and "
+            "was NOT rolled back or re-executed; retry the SAME "
+            "request with the SAME idempotency key to complete "
+            "the admission and receive the canonical response"
+            % (key, error),
+            request_id=request_id,
+        )
+
+    def _complete_prior_admission(
+        self,
+        request: ApiRequest,
+        request_id: str,
+        version: ApiVersionSpec,
+        spec: RouteSpec,
+        positional: List[str],
+        credential: ApplicationCredential,
+        prior: MutationRecord,
+    ) -> None:
+        """Complete the admission of a prior mutation whose
+        observation obligation was not established (the first
+        attempt returned the deterministic admission failure).
+
+        The emission is re-derived from DURABLE truth alone
+        (:meth:`_reconstruct_emission`: the prior record's stored
+        resource and canonical response, the canonical
+        subsystems' PUBLIC journals, and the retry request itself
+        -- the digest match guarantees the request is
+        byte-identical); the audience is resolved; the obligation
+        is appended through the SAME admission gate.  The cached
+        canonical response is replayed by the caller ONLY after
+        this gate passes -- a replay is therefore never a false
+        success either.  No re-execution anywhere.  The queue +
+        delivery recovery of any still-missing endpoints is the
+        delivery pump's own machinery (the durable obligation
+        owns it), never the request path."""
+        emission = self._reconstruct_emission(
+            request, version, spec, positional, credential, prior
+        )
+        if emission is None:
+            return
+        try:
+            audience = self._resolve_observation_audience(emission)
+            if audience is None:
+                return
+            developer_id, endpoints = audience
+            self._append_observation_obligation(
+                emission.resolved(developer_id, endpoints)
+            )
+        except Exception as error:
+            raise self._admission_failure(
+                prior.idempotency_key, request_id, error
+            ) from error
+
+    def _reconstruct_emission(
+        self,
+        request: ApiRequest,
+        version: ApiVersionSpec,
+        spec: RouteSpec,
+        positional: List[str],
+        credential: ApplicationCredential,
+        prior: MutationRecord,
+    ) -> Optional[_MutationEmission]:
+        """Deterministically re-derive the observation emission an
+        admitted prior mutation owes, from durable truth alone.
+
+        Sources (all public reads; nothing re-executes): the
+        prior mutation record's stored resource projection (the
+        developerapi-owned mutations), its stored canonical
+        response (the observation payload -- the event data IS
+        the mutation's own response data), the canonical
+        subsystems' PUBLIC journals (the event identity and
+        instant of the command the idempotency key derives), and
+        the retry request itself (the correlation, re-derived
+        over the byte-identical body the digest match
+        guarantees).  Returns None when the operation owes no
+        emission; fails closed JOURNAL_CORRUPT when the durable
+        truth is inconsistent."""
+        body = request.canonical_body()
+        developer = credential.developer_id
+        key = prior.idempotency_key
+        stored = _json_loads(prior.response_body)
+        data = stored.get("data") if isinstance(stored, Mapping) else None
+
+        if spec.operation == "offer_publish":
+            resource = prior.resource_dict()
+            offer_id = prior.resource_id
+            return _MutationEmission(
+                event_type="offer.published",
+                event_id=webhook_platform.derive_api_event_id(
+                    self._environment,
+                    "offer",
+                    offer_id,
+                    "offer.published",
+                    1,
+                ),
+                occurred_at=str(resource.get("created_at", "")),
+                resource_kind="offer",
+                resource_id=offer_id,
+                resource_version=1,
+                correlation=derive_request_id(
+                    self._environment,
+                    version.version,
+                    request.method,
+                    request.route,
+                    body,
+                ),
+                data=resource,
+            )
+
+        if spec.operation == "endpoint_register":
+            resource = prior.resource_dict()
+            endpoint_id = prior.resource_id
+            return _MutationEmission(
+                event_type="webhook_endpoint.registered",
+                event_id=webhook_platform.derive_api_event_id(
+                    self._environment,
+                    "webhook_endpoint",
+                    endpoint_id,
+                    "webhook_endpoint.registered",
+                    1,
+                ),
+                occurred_at=str(resource.get("created_at", "")),
+                resource_kind="webhook_endpoint",
+                resource_id=endpoint_id,
+                resource_version=1,
+                correlation="",
+                data=resource,
+            )
+
+        if spec.operation in ("intent_create", "reservation_create"):
+            command_id = derive_api_command_id(
+                self._environment, developer, key
+            )
+            record = self._find_core_record(command_id)
+            if record is None:
+                raise DeveloperApiError(
+                    DeveloperApiReasonCode.JOURNAL_CORRUPT,
+                    "prior mutation %r references canonical command %r "
+                    "that the core journal does not hold"
+                    % (key, command_id),
                 )
-                still_pending.append(emission)
-        self._pending_emissions = still_pending
-        return flushed
+            if not isinstance(data, Mapping):
+                raise DeveloperApiError(
+                    DeveloperApiReasonCode.JOURNAL_CORRUPT,
+                    "prior mutation %r stores a malformed canonical "
+                    "response body" % key,
+                )
+            event = record.event.to_dict()
+            if spec.operation == "intent_create":
+                return self._intent_emission_from_core(
+                    event, data, request, version
+                )
+            return self._reservation_emission_from_core(
+                event, data, request, version, positional
+            )
+
+        if spec.operation == "policy_register":
+            command_id = derive_api_command_id(
+                self._environment, developer, key
+            )
+            record = self._find_allocation_record(command_id)
+            if record is None:
+                raise DeveloperApiError(
+                    DeveloperApiReasonCode.JOURNAL_CORRUPT,
+                    "prior mutation %r references canonical command %r "
+                    "that the allocation journal does not hold"
+                    % (key, command_id),
+                )
+            if not isinstance(data, Mapping):
+                raise DeveloperApiError(
+                    DeveloperApiReasonCode.JOURNAL_CORRUPT,
+                    "prior mutation %r stores a malformed canonical "
+                    "response body" % key,
+                )
+            return _MutationEmission(
+                event_type="economic_policy.registered",
+                event_id=record.event.event_id,
+                occurred_at=record.event.instant,
+                resource_kind="economic_policy",
+                resource_id="%s@%s"
+                % (record.command.policy_id, record.command.policy_version),
+                resource_version=1,
+                correlation=derive_request_id(
+                    self._environment,
+                    version.version,
+                    request.method,
+                    request.route,
+                    body,
+                ),
+                data=data,
+            )
+
+        return None
+
+    def _intent_emission_from_core(
+        self,
+        event: Mapping[str, Any],
+        data: Mapping[str, Any],
+        request: ApiRequest,
+        version: ApiVersionSpec,
+    ) -> _MutationEmission:
+        """The ``connectivity_intent.created`` emission for one
+        admitted intent, built from the canonical event and the
+        mutation's own response data (the single derivation
+        shared by the crash-window admission and the
+        admission-completion reconstruction)."""
+        return _MutationEmission(
+            event_type="connectivity_intent.created",
+            event_id=str(event.get("event_id", "")),
+            occurred_at=str(event.get("instant", "")),
+            resource_kind="intent",
+            resource_id=str(event.get("transaction_id", "")),
+            resource_version=_event_count_of(data),
+            correlation=derive_request_id(
+                self._environment,
+                version.version,
+                request.method,
+                request.route,
+                request.canonical_body(),
+            ),
+            data=data,
+        )
+
+    def _reservation_emission_from_core(
+        self,
+        event: Mapping[str, Any],
+        data: Mapping[str, Any],
+        request: ApiRequest,
+        version: ApiVersionSpec,
+        positional: List[str],
+    ) -> _MutationEmission:
+        """The ``reservation.held`` emission for one admitted
+        reservation, built from the canonical event and the
+        mutation's own response data (the single derivation
+        shared by the crash-window admission and the
+        admission-completion reconstruction)."""
+        transaction_id = str(event.get("transaction_id", ""))
+        if not transaction_id and positional:
+            transaction_id = positional[0]
+        return _MutationEmission(
+            event_type="reservation.held",
+            event_id=str(event.get("event_id", "")),
+            occurred_at=str(event.get("instant", "")),
+            resource_kind="intent",
+            resource_id=transaction_id,
+            resource_version=_event_count_of(data),
+            correlation=derive_request_id(
+                self._environment,
+                version.version,
+                request.method,
+                request.route,
+                request.canonical_body(),
+            ),
+            data=data,
+        )
+
+    def _find_allocation_record(self, command_id: str) -> Optional[Any]:
+        """Find one command's record in the economic-allocation
+        PUBLIC journal (read-only; never re-executes)."""
+        for record in self._allocation.journal_records():
+            if record.command.command_id == command_id:
+                return record
+        return None
 
     def _record_observation_incident(
         self, phase: str, error: BaseException
@@ -1290,6 +1742,18 @@ class DeveloperApiService:
                     "idempotency key %r was already admitted with a "
                     "materially different request" % key,
                 )
+            # the admission-completion gate: a prior mutation whose
+            # observation obligation was never established (its
+            # first attempt returned the deterministic admission
+            # failure) is completed HERE, from durable truth alone,
+            # BEFORE the cached canonical response is replayed --
+            # a replay is therefore never a false success either.
+            # When the obligation is already durable (the common
+            # case) this gate is a pure read and grows nothing.
+            self._complete_prior_admission(
+                request, request_id, version, spec, positional,
+                credential, prior,
+            )
             # byte-identical canonical prior response
             body_out = _json_loads(prior.response_body)
             return self._response(
@@ -1347,24 +1811,33 @@ class DeveloperApiService:
 
         # FINALITY POINT: the canonical mutation is admitted, its
         # idempotency record is durable, and the envelope above is
-        # THE response.  The webhook observation phase runs
-        # strictly after finality and is fully contained: a queue
-        # or delivery failure may affect only webhook
-        # observability/retry state.  It can NEVER turn an
-        # admitted mutation into an API failure, alter the
-        # canonical mutation result, cause a duplicate canonical
-        # mutation, invalidate idempotency, or act as a hidden
-        # transaction coordinator for the commercial plane (the
-        # W046 frozen observational-only invariant; battery case
-        # 42 failure-injects the exact sequence).  Inside that
-        # contained phase the observation's DELIVERY OBLIGATION
-        # is made DURABLE FIRST (a journal record carrying the
-        # full event payload and the resolved audience): the
-        # obligation survives a process crash and restart
-        # recovery re-queues its still-missing endpoints exactly
-        # once (battery case 43 failure-injects the crash).
+        # THE response.  From here the webhook observation phase
+        # runs: its queue and delivery steps are fully contained
+        # (a queue or delivery failure may affect only webhook
+        # observability/retry state; it can NEVER turn an admitted
+        # mutation into an API failure, alter the canonical
+        # mutation result, cause a duplicate canonical mutation,
+        # invalidate idempotency, or act as a hidden transaction
+        # coordinator for the commercial plane -- the W046 frozen
+        # observational-only invariant; battery case 42
+        # failure-injects the exact sequence).  The observation's
+        # DELIVERY OBLIGATION, however, is part of the
+        # SUCCESSFUL-ADMISSION CONTRACT: it is made DURABLE HERE
+        # (a journal record carrying the full event payload and
+        # the resolved audience), BEFORE this response is
+        # returned.  The obligation write is NOT contained: when
+        # it fails the boundary raises the deterministic
+        # admission failure (store-failed, 500 -- never a false
+        # 200), the durable mutation is neither rolled back nor
+        # re-executed, and the obligation survives a process
+        # crash so the same-key retry completes the admission
+        # (battery case 43 failure-injects the queue-write crash;
+        # battery case 44 failure-injects the OBLIGATION-write
+        # failure, the crash, and the healing retry).
         if emission is not None:
-            self._observe_after_finality(emission)
+            self._admit_observation(
+                emission, key=key, request_id=request_id
+            )
         return envelope
 
     def _execute_mutation(
@@ -1376,17 +1849,24 @@ class DeveloperApiService:
         credential: ApplicationCredential,
         key: str,
     ) -> Tuple[
-        Any, str, str, Mapping[str, Any], Optional[Callable[[], int]]
+        Any, str, str, Mapping[str, Any], Optional[_MutationEmission]
     ]:
         """Execute one mutation: adapt to the canonical subsystem
         or the developerapi-owned projection.  Returns
         (response data, resource kind, resource id, resource
-        mapping, webhook emission callable).
+        mapping, webhook emission spec).
 
-        Adapted mutations carry empty resource mappings (the
-        truth stays in the canonical subsystem journal); the
-        crash-window idempotency is the canonical subsystem's
-        own (command id derived from the idempotency key)."""
+        The emission spec is a plain frozen value built from the
+        mutation's own executed result (the audience is resolved
+        later, at admission time); the crash-window duplicate
+        branches owe the SAME emission, re-derived from the
+        canonical subsystem's PUBLIC journal reads -- every
+        admission door is gated by the same durable-obligation
+        contract.  Adapted mutations carry empty resource
+        mappings (the truth stays in the canonical subsystem
+        journal); the crash-window idempotency is the canonical
+        subsystem's own (command id derived from the idempotency
+        key)."""
         body = request.canonical_body()
         developer = credential.developer_id
         source = "developerapi:%s" % credential.application_id
@@ -1417,31 +1897,30 @@ class DeveloperApiService:
                 if member in body:
                     resource[member] = body[member]
 
-            def emit() -> int:
-                return self._emit_event(
-                    event_type="offer.published",
-                    event_id=webhook_platform.derive_api_event_id(
-                        self._environment,
-                        "offer",
-                        offer_id,
-                        "offer.published",
-                        1,
-                    ),
-                    occurred_at=resource["created_at"],
-                    resource_kind="offer",
-                    resource_id=offer_id,
-                    resource_version=1,
-                    correlation=derive_request_id(
-                        self._environment,
-                        version.version,
-                        request.method,
-                        request.route,
-                        body,
-                    ),
-                    data=dict(resource),
-                )
+            emission = _MutationEmission(
+                event_type="offer.published",
+                event_id=webhook_platform.derive_api_event_id(
+                    self._environment,
+                    "offer",
+                    offer_id,
+                    "offer.published",
+                    1,
+                ),
+                occurred_at=resource["created_at"],
+                resource_kind="offer",
+                resource_id=offer_id,
+                resource_version=1,
+                correlation=derive_request_id(
+                    self._environment,
+                    version.version,
+                    request.method,
+                    request.route,
+                    body,
+                ),
+                data=dict(resource),
+            )
 
-            return dict(resource), "offer", offer_id, resource, emit
+            return dict(resource), "offer", offer_id, resource, emission
 
         if spec.operation == "endpoint_register":
             url, event_types = webhook_platform.validate_endpoint_registration(
@@ -1464,25 +1943,24 @@ class DeveloperApiService:
                 ),
             }
 
-            def emit_endpoint() -> int:
-                return self._emit_event(
-                    event_type="webhook_endpoint.registered",
-                    event_id=webhook_platform.derive_api_event_id(
-                        self._environment,
-                        "webhook_endpoint",
-                        endpoint_id,
-                        "webhook_endpoint.registered",
-                        1,
-                    ),
-                    occurred_at=resource["created_at"],
-                    resource_kind="webhook_endpoint",
-                    resource_id=endpoint_id,
-                    resource_version=1,
-                    correlation="",
-                    data=dict(resource),
-                )
+            emission = _MutationEmission(
+                event_type="webhook_endpoint.registered",
+                event_id=webhook_platform.derive_api_event_id(
+                    self._environment,
+                    "webhook_endpoint",
+                    endpoint_id,
+                    "webhook_endpoint.registered",
+                    1,
+                ),
+                occurred_at=resource["created_at"],
+                resource_kind="webhook_endpoint",
+                resource_id=endpoint_id,
+                resource_version=1,
+                correlation="",
+                data=dict(resource),
+            )
 
-            return dict(resource), "webhook_endpoint", endpoint_id, resource, emit_endpoint
+            return dict(resource), "webhook_endpoint", endpoint_id, resource, emission
 
         if spec.operation == "intent_create":
             intent = body.get("intent")
@@ -1507,7 +1985,13 @@ class DeveloperApiService:
             if outcome.status == "duplicate":
                 # the crash window: the canonical subsystem holds
                 # the command; reconstruct the canonical prior
-                # result from its PUBLIC journal reads
+                # result from its PUBLIC journal reads.  The
+                # reconstructed mutation owes the SAME observation
+                # emission (the canonical event is already durable
+                # in the core journal): the admission gate below
+                # establishes its obligation before this response
+                # is returned -- no admission door bypasses the
+                # contract.
                 record = self._find_core_record(command_id)
                 if record is None:
                     raise DeveloperApiError(
@@ -1518,38 +2002,37 @@ class DeveloperApiService:
                 data = self._intent_resource_at_creation(
                     record, developer
                 )
+                emission = self._intent_emission_from_core(
+                    record.event.to_dict(), data, request, version
+                )
                 return (
                     data,
                     "",
                     "",
                     {},
-                    None,
+                    emission,
                 )
             transaction = self._core.transaction(outcome.transaction_id)
             data = self._intent_resource_from(transaction)
-            event_id = outcome.event_id
 
-            def emit_intent() -> int:
-                return self._emit_event(
-                    event_type="connectivity_intent.created",
-                    event_id=event_id,
-                    occurred_at=outcome.instant,
-                    resource_kind="intent",
-                    resource_id=outcome.transaction_id,
-                    resource_version=transaction.to_dict().get(
-                        "event_count", 1
-                    ),
-                    correlation=derive_request_id(
-                        self._environment,
-                        version.version,
-                        request.method,
-                        request.route,
-                        body,
-                    ),
-                    data=dict(data),
-                )
+            emission = _MutationEmission(
+                event_type="connectivity_intent.created",
+                event_id=outcome.event_id,
+                occurred_at=outcome.instant,
+                resource_kind="intent",
+                resource_id=outcome.transaction_id,
+                resource_version=_event_count_of(data),
+                correlation=derive_request_id(
+                    self._environment,
+                    version.version,
+                    request.method,
+                    request.route,
+                    body,
+                ),
+                data=dict(data),
+            )
 
-            return data, "", "", {}, emit_intent
+            return data, "", "", {}, emission
 
         if spec.operation == "reservation_create":
             transaction_id = positional[0]
@@ -1584,6 +2067,8 @@ class DeveloperApiService:
             except CommercialError as error:
                 raise self._adapted_error(error, request_id="") from error
             if outcome.status == "duplicate":
+                # the crash window (same contract as intent_create:
+                # the reconstructed mutation owes the same emission)
                 record = self._find_core_record(command_id)
                 if record is None:
                     raise DeveloperApiError(
@@ -1594,30 +2079,31 @@ class DeveloperApiService:
                 data = self._reservation_resource_at_creation(
                     record, developer
                 )
-                return data, "", "", {}, None
+                emission = self._reservation_emission_from_core(
+                    record.event.to_dict(), data, request, version, positional
+                )
+                return data, "", "", {}, emission
             held = self._core.transaction(transaction_id)
             data = self._reservation_resource_from(held)
-            event_id = outcome.event_id
 
-            def emit_reservation() -> int:
-                return self._emit_event(
-                    event_type="reservation.held",
-                    event_id=event_id,
-                    occurred_at=outcome.instant,
-                    resource_kind="intent",
-                    resource_id=transaction_id,
-                    resource_version=held.to_dict().get("event_count", 1),
-                    correlation=derive_request_id(
-                        self._environment,
-                        version.version,
-                        request.method,
-                        request.route,
-                        body,
-                    ),
-                    data=dict(data),
-                )
+            emission = _MutationEmission(
+                event_type="reservation.held",
+                event_id=outcome.event_id,
+                occurred_at=outcome.instant,
+                resource_kind="intent",
+                resource_id=transaction_id,
+                resource_version=_event_count_of(data),
+                correlation=derive_request_id(
+                    self._environment,
+                    version.version,
+                    request.method,
+                    request.route,
+                    body,
+                ),
+                data=dict(data),
+            )
 
-            return data, "", "", {}, emit_reservation
+            return data, "", "", {}, emission
 
         if spec.operation == "policy_register":
             required = (
@@ -1663,28 +2149,26 @@ class DeveloperApiService:
                 payload["policy_id"], payload["version"]
             )
             data = self._policy_resource(policy)
-            event_id = outcome.event_id
 
-            def emit_policy() -> int:
-                return self._emit_event(
-                    event_type="economic_policy.registered",
-                    event_id=event_id,
-                    occurred_at=outcome.instant,
-                    resource_kind="economic_policy",
-                    resource_id="%s@%s"
-                    % (payload["policy_id"], payload["version"]),
-                    resource_version=1,
-                    correlation=derive_request_id(
-                        self._environment,
-                        version.version,
-                        request.method,
-                        request.route,
-                        body,
-                    ),
-                    data=dict(data),
-                )
+            emission = _MutationEmission(
+                event_type="economic_policy.registered",
+                event_id=outcome.event_id,
+                occurred_at=outcome.instant,
+                resource_kind="economic_policy",
+                resource_id="%s@%s"
+                % (payload["policy_id"], payload["version"]),
+                resource_version=1,
+                correlation=derive_request_id(
+                    self._environment,
+                    version.version,
+                    request.method,
+                    request.route,
+                    body,
+                ),
+                data=dict(data),
+            )
 
-            return data, "", "", {}, emit_policy
+            return data, "", "", {}, emission
 
         raise DeveloperApiError(
             DeveloperApiReasonCode.ROUTE_UNKNOWN,
@@ -1711,57 +2195,42 @@ class DeveloperApiService:
         per-endpoint queue writes (dedupe by delivery identity:
         the same event never queues twice).
 
-        Called post-finality-and-pre-response from the API
-        mutation path (contained there) and directly from the
-        platform-side observation surface (failures raise to
-        the operator, never to a developer response)."""
-        developer_id = self._resource_owner(resource_kind, resource_id)
-        if developer_id is None:
-            return 0
-        endpoints = tuple(
-            endpoint_id
-            for endpoint_id in sorted(self._index.endpoints)
-            if self._index.endpoints[endpoint_id].get("developer_id")
-            == developer_id
-            and event_type
-            in self._index.endpoints[endpoint_id].get("event_types", ())
-        )
-        if not endpoints:
-            # no audience: no delivery obligation exists
-            return 0
-        obligation_id = webhook_platform.derive_obligation_id(
-            self._environment, event_id
-        )
-        if obligation_id not in self._index.obligations:
-            record = WebhookObligationRecord.build(
-                sequence=self._journal.tail_sequence() + 1,
-                prev_record_id=self._journal.tail_record_id(),
-                obligation_id=obligation_id,
-                event_id=event_id,
-                event_type=event_type,
-                occurred_at=occurred_at,
-                environment=self._environment,
-                developer_id=developer_id,
-                resource_kind=resource_kind,
-                resource_id=resource_id,
-                resource_version=resource_version,
-                correlation=correlation,
-                data=data,
-                endpoints=endpoints,
-            )
-            self._journal.append(record)
-            self._index.apply(record)
-        return self._queue_observation(
-            event_id=event_id,
+        The PLATFORM-side observation surface (the operator's
+        transaction-observation emission): an obligation-write or
+        queue-write failure raises to the OPERATOR, never to a
+        developer response (there is no developer response on
+        this path -- the observed transaction's state is already
+        canonical and final).  The API mutation path never calls
+        this method: it drives the same shared pieces through
+        the admission gate (:meth:`_admit_observation`)."""
+        emission = _MutationEmission(
             event_type=event_type,
+            event_id=event_id,
             occurred_at=occurred_at,
-            developer_id=developer_id,
             resource_kind=resource_kind,
             resource_id=resource_id,
             resource_version=resource_version,
             correlation=correlation,
             data=data,
-            endpoints=endpoints,
+        )
+        audience = self._resolve_observation_audience(emission)
+        if audience is None:
+            # no audience: no delivery obligation exists
+            return 0
+        developer_id, endpoints = audience
+        resolved = emission.resolved(developer_id, endpoints)
+        self._append_observation_obligation(resolved)
+        return self._queue_observation(
+            event_id=resolved.event_id,
+            event_type=resolved.event_type,
+            occurred_at=resolved.occurred_at,
+            developer_id=resolved.developer_id,
+            resource_kind=resolved.resource_kind,
+            resource_id=resolved.resource_id,
+            resource_version=resolved.resource_version,
+            correlation=resolved.correlation,
+            data=resolved.data,
+            endpoints=resolved.endpoints,
         )
 
     def _queue_observation(
@@ -2381,6 +2850,19 @@ def _json_loads(text: str) -> Any:
     import json
 
     return json.loads(text)
+
+
+def _event_count_of(data: Mapping[str, Any]) -> int:
+    """The observed resource version from the mutation's own
+    response data (``event_count``; the projection member the
+    emission captured at execution time -- byte-faithful for the
+    reconstruction from the stored canonical response)."""
+    value = data.get("event_count", 1)
+    if isinstance(value, int) and not isinstance(value, bool) and (
+        value >= 1
+    ):
+        return value
+    return 1
 
 
 def _require_int(value: object, label: str) -> int:

@@ -99,7 +99,17 @@ platform journal):
   the same-key retry remains an idempotent replay -- the
   delivery OBLIGATION is durable operational state of the
   observation channel, while the delivery STATE stays
-  observational only);
+  observational only), and the obligation-write ADMISSION GATE
+  (the webhook OBLIGATION append itself fails, AFTER the
+  mutation is durable and BEFORE the response: the boundary
+  returns the deterministic admission failure -- 500
+  store-failed, never a false 200 -- the durable mutation is
+  neither rolled back nor re-executed, the process crashes,
+  and the same-key retry completes the admission from durable
+  truth alone BEFORE the byte-identical stored response is
+  replayed, after which the delivery pump delivers exactly
+  once: the durable obligation is part of the
+  successful-admission contract, never best effort);
 - **delivery discipline**: frozen public API surface, frozen
   spec surfaces intact, PR delta confined to the authorized
   W046 scope (+ the sanctioned additive-only CI wiring).
@@ -723,6 +733,35 @@ class _QueueFailingApiStore(MemoryApiStore):
             raise DeveloperApiError(
                 DeveloperApiReasonCode.STORE_FAILED,
                 "injected webhook queue append failure",
+            )
+        super().append_line(line)
+
+
+class _ObligationFailingApiStore(MemoryApiStore):
+    """A store that fails the first N appends of webhook
+    OBLIGATION records (kind-selected failure injection) and
+    heals afterwards: the failure site is the durable
+    observation-obligation write itself -- the step that must
+    precede the successful API response under the W046 admission
+    contract -- position-independent, so the injection is stable
+    across the pre-correction and corrected gateways (the
+    obligation-write admission-gate proof)."""
+
+    def __init__(self, failures: int = 1) -> None:
+        super().__init__()
+        self._remaining = failures
+        self.failures = 0
+
+    def append_line(self, line: str) -> None:
+        if (
+            self._remaining > 0
+            and '"record_kind":"webhook-obligation"' in line
+        ):
+            self._remaining -= 1
+            self.failures += 1
+            raise DeveloperApiError(
+                DeveloperApiReasonCode.STORE_FAILED,
+                "injected webhook obligation append failure",
             )
         super().append_line(line)
 
@@ -4521,6 +4560,426 @@ def case_43_durable_webhook_obligation_crash_recovery(
         )
 
 
+def case_44_obligation_write_admission_gate(
+    results: List[Result],
+) -> None:
+    """The obligation-write ADMISSION GATE (the W046
+    successful-admission contract, failure-injected at the
+    durable webhook-obligation append itself): a success response
+    is returned ONLY when the observation obligation is durable;
+    a failed obligation write never becomes a false success, and
+    the obligation is never lost to a crash.
+
+    The exact required sequence:
+
+    1. the developer submits an audience-carrying mutation
+       (intent create with a subscribed endpoint) under an
+       idempotency key;
+    2. the business mutation executes and the mutation /
+       idempotency record is DURABLE (the boundary journal AND
+       the canonical core journal -- finality is untouched);
+    3. the webhook OBLIGATION journal append FAILS (the injected
+       store failure, kind-selected at the obligation record);
+    4. the API does NOT claim success: the deterministic
+       admission failure (500 store-failed) is returned -- no
+       canonical resource, no queue record, and NOT a contained
+       incident (the failure is the response itself; the message
+       states the durable-not-rolled-back truth and the same-key
+       retry contract);
+    5. the process CRASHES (the crashed instance, including any
+       in-process state, is discarded; both planes are
+       reconstructed from the durable stores);
+    6. the durable truth survived: the mutation record replays,
+       the canonical core journal is intact, and the obligation
+       is still absent (honestly: it was never established --
+       nothing fabricated it);
+    7. the developer RETRIES the same request (same key, same
+       body: the digest match);
+    8. the retry completes the admission BEFORE any success: the
+       obligation is established durably from durable truth alone
+       (the prior record's stored canonical response, the core's
+       public journal, the retry request) -- exactly one
+       obligation record carrying the subscribed endpoint, with
+       no canonical re-execution (the core journal count is
+       unchanged);
+    9. ONLY THEN the retry returns the byte-identical stored
+       canonical response (200, replay header; the response
+       content is the stored envelope, not a re-execution);
+    10. the observation completes through the delivery pump:
+        the queue write and the delivery deliver the event to
+        the consumer exactly once (verified by signature), the
+        obligation is satisfied (derived, never stored), a
+        further retry is a pure replay (zero journal growth),
+        and the journal verifies.
+
+    Scenario B repeats the same gate through the
+    developerapi-owned mutation (offer publish), whose emission
+    reconstruction comes from the prior record's stored resource
+    projection alone."""
+    problems: List[str] = []
+
+    # -- scenario A: the adapted commercial mutation (intent) with
+    # the webhook OBLIGATION record append failing ---------------
+    store = _ObligationFailingApiStore(failures=1)
+    core_store = MemoryCommercialStore()
+    service, core, usage, allocation, world = _compose_service(
+        store=store, core_store=core_store
+    )
+    runtime, peer, session_id, manager, integrator, shared = world
+    app = _full_app(service, "dev-admit", "admit")
+    endpoint_resp = service.handle(
+        _req(
+            "POST",
+            "/api/1.0/webhook-endpoints",
+            app,
+            body={
+                "url": "https://consumer-admit.test/hook",
+                "event_types": ["connectivity_intent.created"],
+            },
+            idempotency_key="admit-ep-1",
+        )
+    )
+    if endpoint_resp.status != 200:
+        problems.append(
+            "endpoint registration failed: %d" % endpoint_resp.status
+        )
+    endpoint_id = endpoint_resp.body["data"]["id"]
+
+    intent_body = {"intent": {"subscriber": "admit-gate"}}
+    # (1) + (3) + (4): the mutation executes, the obligation write
+    # fails, and the boundary does NOT claim success
+    first = service.handle(
+        _req(
+            "POST",
+            "/api/1.0/intents",
+            app,
+            body=intent_body,
+            idempotency_key="admit-intent-1",
+        )
+    )
+    if first.status != 500 or (
+        first.body.get("error", {}).get("reason") != "store-failed"
+    ):
+        problems.append(
+            "obligation-write failure did not fail admission: "
+            "status %s reason %r"
+            % (first.status, first.body.get("error", {}).get("reason"))
+        )
+    else:
+        message = first.body["error"].get("message", "")
+        if "admit-intent-1" not in message:
+            problems.append(
+                "admission failure message lost the idempotency key"
+            )
+        if "NOT rolled back or re-executed" not in message:
+            problems.append(
+                "admission failure message lost the durability truth"
+            )
+        if "SAME idempotency key" not in message:
+            problems.append(
+                "admission failure message lost the retry contract"
+            )
+    if first.body.get("data") is not None:
+        problems.append("admission failure carried a canonical resource")
+    # (2) the mutation and its idempotency record ARE durable
+    if "admit-intent-1" not in service.index().mutations:
+        problems.append("durable idempotency record missing after the admission failure")
+    if len(core.journal_records()) != 1 or len(core.transactions()) != 1:
+        problems.append(
+            "canonical mutation not durable: %d/%d"
+            % (len(core.journal_records()), len(core.transactions()))
+        )
+    # (3) the injection fired exactly once, at the obligation write
+    if store.failures != 1:
+        problems.append(
+            "injection did not fire at the obligation append (failures=%d)"
+            % store.failures
+        )
+    # (4) nothing was fabricated: no obligation, no queue record,
+    # no contained incident (the failure is the response)
+    if service.index().obligations:
+        problems.append("obligation recorded despite the failed write")
+    if service.index().deliveries:
+        problems.append("phantom delivery after the admission failure")
+    if service.webhook_observation_incidents():
+        problems.append("admission failure misclassified as a contained incident")
+
+    # (5) the CRASH: both planes reconstructed from durable stores;
+    # the crashed instance (with any in-process state) is discarded
+    core2 = CommercialCore.load(
+        store=core_store,
+        clock=shared,
+        references=_references(manager, integrator, session_id),
+    )
+    reloaded = DeveloperApiService.load(
+        environment="sandbox",
+        core=core2,
+        usage=usage,
+        allocation=allocation,
+        store=store,
+        clock=shared,
+        issuance_key=b"w046-platform-issuance-key",
+    )
+    # (6) the durable truth survived; the obligation is STILL
+    # absent (never established, never fabricated)
+    if "admit-intent-1" not in reloaded.index().mutations:
+        problems.append("idempotency did not survive the crash")
+    if reloaded.index().obligations:
+        problems.append("reload fabricated an obligation")
+    if reloaded.pending_webhook_obligations():
+        problems.append("reload reported a pending obligation")
+    if len(core2.journal_records()) != 1:
+        problems.append("crash recovery re-executed the canonical mutation")
+
+    # (7) the developer retries the SAME request
+    retry = reloaded.handle(
+        _req(
+            "POST",
+            "/api/1.0/intents",
+            app,
+            body=intent_body,
+            idempotency_key="admit-intent-1",
+        )
+    )
+    # (8) the admission is completed BEFORE any success: exactly
+    # one durable obligation, carrying the subscribed endpoint and
+    # the canonical event identity, with NO re-execution
+    obligations_after = [
+        record
+        for record in reloaded.journal_records()
+        if record.to_dict().get("record_kind") == "webhook-obligation"
+    ]
+    if len(obligations_after) != 1:
+        problems.append(
+            "healed obligation count %d (expected exactly one)"
+            % len(obligations_after)
+        )
+    else:
+        healed = obligations_after[0].to_dict()
+        if endpoint_id not in tuple(healed.get("endpoints", ())):
+            problems.append("healed obligation lost the subscribed endpoint")
+        if healed.get("event_type") != "connectivity_intent.created":
+            problems.append(
+                "healed obligation event type %r" % healed.get("event_type")
+            )
+        core_event = core2.journal_records()[0].event.to_dict()
+        if healed.get("event_id") != core_event.get("event_id"):
+            problems.append(
+                "healed obligation event id diverged from the canonical event"
+            )
+        if healed.get("resource_id") != core_event.get("transaction_id"):
+            problems.append(
+                "healed obligation resource diverged from the canonical transaction"
+            )
+    if len(core2.journal_records()) != 1:
+        problems.append("healing retry re-executed the canonical mutation")
+    # (9) ONLY THEN the response: the byte-identical STORED
+    # canonical response with the replay header
+    prior = reloaded.index().mutations["admit-intent-1"]
+    stored_body = json.loads(prior.response_body)
+    if retry.status != 200 or (
+        retry.headers.get("X-ADCOS-Idempotent-Replay") != "true"
+    ):
+        problems.append(
+            "healing retry not a 200 replay: %s" % retry.status
+        )
+    if retry.canonical_body_bytes() != canonical_json_bytes(stored_body):
+        problems.append(
+            "replayed response diverged from the stored canonical response"
+        )
+    transaction_id = stored_body.get("data", {}).get("id", "")
+    if not transaction_id:
+        problems.append("stored canonical response lost the transaction id")
+
+    # (10) the observation completes through the delivery pump,
+    # exactly once; a further retry is a pure replay
+    consumer = _Consumer(reloaded.endpoint_signing_secret(endpoint_id))
+    reloaded._transports[endpoint_id] = consumer
+    reloaded.process_due_deliveries()
+    queue_records = [
+        record
+        for record in reloaded.journal_records()
+        if isinstance(record, WebhookQueueRecord)
+    ]
+    if len(queue_records) != 1:
+        problems.append(
+            "healed observation queued %d times (expected exactly one)"
+            % len(queue_records)
+        )
+    deliveries = [
+        state
+        for state in reloaded.index().deliveries.values()
+        if state.endpoint_id == endpoint_id
+    ]
+    if len(deliveries) != 1 or deliveries[0].last_status != "delivered":
+        problems.append(
+            "healed delivery not delivered: %s"
+            % [s.last_status for s in deliveries]
+        )
+    if len(consumer.deliveries) != 1:
+        problems.append(
+            "consumer received %d events (expected exactly one)"
+            % len(consumer.deliveries)
+        )
+    elif (
+        consumer.deliveries[0][0].get("event_type")
+        != "connectivity_intent.created"
+        or consumer.deliveries[0][0].get("resource_id") != transaction_id
+    ):
+        problems.append("healed event content diverged")
+    # exactly-once: a second pump pass is a no-op
+    journal_before_second = len(reloaded.journal_records())
+    reloaded.process_due_deliveries()
+    if len(reloaded.journal_records()) != journal_before_second:
+        problems.append("second pump pass grew the journal")
+    if len(consumer.deliveries) != 1:
+        problems.append("second pump pass re-delivered the event")
+    # the obligation is retired exactly when satisfied (derived)
+    if reloaded.pending_webhook_obligations():
+        problems.append("satisfied obligation still reported pending")
+    # a FURTHER retry is a pure replay (zero growth anywhere)
+    journal_before_again = len(reloaded.journal_records())
+    again = reloaded.handle(
+        _req(
+            "POST",
+            "/api/1.0/intents",
+            app,
+            body=intent_body,
+            idempotency_key="admit-intent-1",
+        )
+    )
+    if (
+        again.status != 200
+        or again.headers.get("X-ADCOS-Idempotent-Replay") != "true"
+        or again.canonical_body_bytes() != retry.canonical_body_bytes()
+    ):
+        problems.append("post-heal retry diverged from the canonical replay")
+    if len(reloaded.journal_records()) != journal_before_again:
+        problems.append("post-heal retry grew the journal")
+    if len(core2.journal_records()) != 1:
+        problems.append("post-heal retry re-executed the mutation")
+    if core2.transaction(transaction_id).to_dict().get("event_count") != 1:
+        problems.append("canonical transaction mutated during healing")
+    reloaded.verify_integrity()
+
+    # -- scenario B: the developerapi-owned mutation (offer) with
+    # the webhook OBLIGATION record append failing ---------------
+    store_b = _ObligationFailingApiStore(failures=1)
+    service_b, core_b, *_ = _compose_service(store=store_b)
+    app_b = _full_app(service_b, "dev-admit-b", "admit-b")
+    endpoint_b = service_b.handle(
+        _req(
+            "POST",
+            "/api/1.0/webhook-endpoints",
+            app_b,
+            body={
+                "url": "https://consumer-admit-b.test/hook",
+                "event_types": ["offer.published"],
+            },
+            idempotency_key="admit-b-ep-1",
+        )
+    )
+    endpoint_b_id = endpoint_b.body["data"]["id"]
+
+    offer_body = _offer_body("Admission gate offer", amount=911)
+    first_b = service_b.handle(
+        _req(
+            "POST",
+            "/api/1.0/offers",
+            app_b,
+            body=offer_body,
+            idempotency_key="admit-b-offer-1",
+        )
+    )
+    if first_b.status != 500 or (
+        first_b.body.get("error", {}).get("reason") != "store-failed"
+    ):
+        problems.append(
+            "offer obligation-write failure did not fail admission: "
+            "status %s" % first_b.status
+        )
+    if "admit-b-offer-1" not in service_b.index().mutations:
+        problems.append("boundary idempotency record missing (B)")
+    if store_b.failures != 1:
+        problems.append(
+            "injection B did not fire at the obligation append (failures=%d)"
+            % store_b.failures
+        )
+    if service_b.index().obligations or service_b.index().deliveries:
+        problems.append("fabricated obligation/delivery (B)")
+
+    # the crash + the healing retry (the emission reconstruction
+    # comes from the prior record's stored resource projection)
+    reload_b = DeveloperApiService.load(
+        environment="sandbox",
+        core=core_b,
+        usage=service_b._usage,
+        allocation=service_b._allocation,
+        store=store_b,
+        clock=service_b._clock,
+        issuance_key=b"w046-platform-issuance-key",
+    )
+    retry_b = reload_b.handle(
+        _req(
+            "POST",
+            "/api/1.0/offers",
+            app_b,
+            body=offer_body,
+            idempotency_key="admit-b-offer-1",
+        )
+    )
+    obligations_b = [
+        record
+        for record in reload_b.journal_records()
+        if record.to_dict().get("record_kind") == "webhook-obligation"
+    ]
+    if len(obligations_b) != 1:
+        problems.append(
+            "healed obligation count (B) %d" % len(obligations_b)
+        )
+    elif endpoint_b_id not in tuple(obligations_b[0].to_dict().get("endpoints", ())):
+        problems.append("healed obligation lost the endpoint (B)")
+    prior_b = reload_b.index().mutations["admit-b-offer-1"]
+    if (
+        retry_b.status != 200
+        or retry_b.headers.get("X-ADCOS-Idempotent-Replay") != "true"
+        or retry_b.canonical_body_bytes()
+        != canonical_json_bytes(json.loads(prior_b.response_body))
+    ):
+        problems.append("healing retry diverged from the stored response (B)")
+    consumer_b = _Consumer(reload_b.endpoint_signing_secret(endpoint_b_id))
+    reload_b._transports[endpoint_b_id] = consumer_b
+    reload_b.process_due_deliveries()
+    if len(consumer_b.deliveries) != 1:
+        problems.append(
+            "consumer (B) received %d events (expected exactly one)"
+            % len(consumer_b.deliveries)
+        )
+    elif (
+        consumer_b.deliveries[0][0].get("event_type") != "offer.published"
+    ):
+        problems.append("healed event content diverged (B)")
+    reload_b.verify_integrity()
+
+    if problems:
+        results.append(
+            fail(
+                "44 obligation-write admission gate",
+                "; ".join(problems),
+            )
+        )
+    else:
+        results.append(
+            ok(
+                "44 obligation-write admission gate",
+                "obligation append fails: no false 200, the durable "
+                "mutation survives the crash, the same-key retry "
+                "establishes the obligation BEFORE the byte-identical "
+                "stored response, and the pump delivers exactly once",
+            )
+        )
+
+
 def case_35_determinism_two_run(results: List[Result]) -> None:
     """Two fresh in-process runs of the golden scenario produce
     byte-identical digest streams."""
@@ -4900,6 +5359,7 @@ def main() -> int:
         case_41_pr_delta_shape,
         case_42_post_finality_webhook_isolation,
         case_43_durable_webhook_obligation_crash_recovery,
+        case_44_obligation_write_admission_gate,
     ):
         case(results)
     failures = [result for result in results if not result[1]]

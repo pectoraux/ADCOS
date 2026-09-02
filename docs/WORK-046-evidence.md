@@ -2,10 +2,10 @@
 
 **Authorization:** WORK-046-CORE-001 (active; DEC-0065; baseline advanced to the exact post-transition governance mainline `3db7500d7b79a8cd3e3a651e1461fbb320efd67e` by DEC-0066)
 **Baseline:** `3db7500d7b79a8cd3e3a651e1461fbb320efd67e` (the exact branch point of this delivery; per the W044-established delivery-cycle convention, the implementation branch is cut from the recorded baseline while `main` additionally carries the DEC-0066 baseline-reconciliation governance merge `a1fa795` — the branch-point offset is governance-only and is the honest delta the Architect reviews; CI evaluates the merge ref)
-**Review state:** CORRECTION ROUND DELIVERED (round 3) — **NOT claimed accepted**. The Architect's re-review of round 2 (PR #132, head `b19cfcb`) confirmed the original P0 (webhook failure changing the API mutation result) is **genuinely fixed**, and returned one new acceptance blocker (P1): the queue-failure recovery buffer was process-local, so a crash between the admitted mutation and the webhook queue phase could permanently lose a webhook observation (no durable record said the observation must still be emitted). This manifest records the round-3 correction (section 12); the disposition remains the Architect's.
-**Repository surface:** `developerapi/` (12 modules, 85 frozen exports), `tools/developerapi_selftest.py` (43 deterministic cases), this manifest, and one additive CI step.
-**Battery result:** PASS 43/43 (branch context; hash-seed contexts 0/1/7919/unset; the case-43 negative control against the pre-correction gateway `b19cfcb` fails exactly on the P1 — the obligation is lost with the process, the observation is never queued, the consumer never receives the event).
-**Golden stream:** `sha256:a78847deaa3eb446289cb5e304846466930519c00c2d29e0e0028ad210b9877a` (journal digest; RE-PINNED by this correction — the journal now carries the durable webhook observation obligations: `journal_length` 20 → 25, exactly one obligation record per audience-carrying emission in the golden scenario; **every other stream member is byte-identical** to the round-2 value — mutation digests, credentials, offers, endpoints, deliveries, transactions, reservation state, policy id — the healthy-path business semantics are unchanged). The full 12-key deterministic scenario stream is reproduced byte-identically across two fresh in-process runs and all four PYTHONHASHSEED contexts.
+**Review state:** CORRECTION ROUND DELIVERED (round 4) — **NOT claimed accepted**. The Architect's re-review of round 3 (PR #132, head `8245c78`) confirmed the round-3 P1 (queue-loss-after-restart) is genuinely closed — the durable `WebhookObligationRecord` reconstructs the obligation and recovery re-queues without re-execution — and returned one remaining acceptance blocker (P1): the OBLIGATION WRITE itself was still contained best effort, so a failed obligation journal append still returned the already-finalized 200 with the obligation surviving only in the process-local buffer; a crash then permanently lost the observation. This manifest records the round-4 correction (section 13); the disposition remains the Architect's.
+**Repository surface:** `developerapi/` (12 modules, 85 frozen exports), `tools/developerapi_selftest.py` (44 deterministic cases), this manifest, and one additive CI step.
+**Battery result:** PASS 44/44 (branch context; hash-seed contexts 0/1/7919/unset; the case-44 negative control against the pre-correction gateway `8245c78` fails exactly on the blocker — the boundary returns 200 for a mutation whose required observation obligation was never established, the retry never heals it, and the consumer never receives the event).
+**Golden stream:** `sha256:a78847deaa3eb446289cb5e304846466930519c00c2d29e0e0028ad210b9877a` (journal digest; **UNCHANGED from the round-3 pin — byte-identical, every one of the 12 stream members**: this correction changes ONLY the failure-path semantics of the obligation write; the healthy path, its journal order, its clock-read consumption, and all business surfaces are untouched). The full 12-key deterministic scenario stream is reproduced byte-identically across two fresh in-process runs and all four PYTHONHASHSEED contexts.
 
 ## 0. Boundary statement (mandatory)
 
@@ -43,8 +43,8 @@ physical evidence (case 4).
 | Environments | `developerapi/environments.py` — sandbox/production as non-interchangeable namespaces; one service instance is bound to exactly one environment with its own journal, credentials, and authority instances (isolation by construction); honest evidence classification (`sandbox-simulation`) | 04, 22, 31 |
 | Scoped credentials | `developerapi/credentials.py` — the 12-capability vocabulary, environment-bound application credentials, constant-time secret-digest verification, expiry/revocation discipline, issuance through the platform administration surface (secret shown exactly once; only the digest is journaled) | 05, 06, 07 |
 | Deterministic identifiers | `developerapi/identifiers.py` — content-derived `sha256:` fingerprints over (environment, kind, developer, key material) for boundary-owned resources; adapted resources CITE the canonical subsystem ids unchanged; request correlation ids are content-derived over the full request attribution | 04, 08, 17 |
-| Durable idempotency | `developerapi/journal.py` — one atomic mutation record per admitted API mutation (idempotency key + canonical request digest + the canonical response bytes), hash-chained, persist-then-ack, restart-safe; the durable `webhook-obligation` records (the observation channel's delivery obligations — full payload + resolved audience, derived satisfaction); the crash window between an adapted authority's append and the boundary record is resolved through the authority's own durable command idempotency + public-journal reconstruction (never re-execution) | 08–12, 33, 34, 42, 43 |
-| Request boundary | `developerapi/gateway.py` — the single admission path: authenticate → version → rate-limit → capability → idempotency ledger → adapt (typed public command surfaces only) or project → atomic journal append (finality) → durable webhook obligation → canonical envelope → contained queue/delivery; the frozen 21-route REST surface with native ADCOS terminology | 01–16, 26, 27, 42, 43 |
+| Durable idempotency | `developerapi/journal.py` — one atomic mutation record per admitted API mutation (idempotency key + canonical request digest + the canonical response bytes), hash-chained, persist-then-ack, restart-safe; the durable `webhook-obligation` records (the observation channel's delivery obligations — full payload + resolved audience, derived satisfaction); the crash window between an adapted authority's append and the boundary record is resolved through the authority's own durable command idempotency + public-journal reconstruction (never re-execution) | 08–12, 33, 34, 42–44 |
+| Request boundary | `developerapi/gateway.py` — the single admission path: authenticate → version → rate-limit → capability → idempotency ledger → adapt (typed public command surfaces only) or project → atomic journal append (finality) → durable webhook obligation (the ADMISSION GATE: not contained — a failed obligation write is the deterministic admission failure, never a false 200; the same-key retry completes the admission before the stored response is replayed) → canonical envelope → contained queue/delivery; the frozen 21-route REST surface with native ADCOS terminology | 01–16, 26, 27, 42–44 |
 | Deterministic pagination | `developerapi/pagination.py` — canonical id-ascending order, opaque context-bound cursors (environment/kind/developer/filters), deterministic invalid-cursor rejection, equality filtering, tenant isolation | 15 |
 | Rate limiting | `developerapi/ratelimit.py` — per-application token bucket over the injected clock; 429 + exact `retry_after`; process-local (never journaled, never business state) | 16 |
 | Webhook platform | `developerapi/webhooks.py` — HMAC-SHA256 signing over the canonical envelope (key id + timestamp + delivery id + payload), constant-time verification, the 300s replay window, the frozen backoff schedule (60/300/1800/7200/21600s; 6 max attempts), version+sequence ordering metadata, environment-bound event identities, and the content-derived obligation identity (the durable delivery-obligation namespace) | 18–22, 25, 34, 42, 43 |
@@ -130,14 +130,15 @@ issuance key and never journaled (case 37).
   even reach an authority mutation surface).
 - Post-finality isolation (case 42, the round-2 P0 fix): the webhook
   observation phase runs STRICTLY AFTER the mutation's finality point (durable
-  idempotency record appended) and is fully contained in
-  `DeveloperApiService._observe_after_finality`: a webhook queue-write failure
-  retains the observation for recovery (durably through the obligation record
-  once its write succeeded; the in-process residual otherwise) and records a
-  process-local health incident; a delivery-pass failure records an incident;
-  NOTHING in the webhook phase can turn an admitted mutation into an API
-  failure, alter the canonical mutation result, cause a duplicate canonical
-  mutation, invalidate idempotency, or act as a hidden transaction coordinator
+  idempotency record appended) and its queue/delivery steps are fully
+  contained in `DeveloperApiService._observe_after_finality`: a webhook
+  queue-write failure is recorded as a process-local health incident while
+  the DURABLE obligation keeps the observation recoverable (the pump's
+  obligation flush re-queues the still-missing endpoints exactly once); a
+  delivery-pass failure records an incident; NOTHING in the contained
+  phase can turn an admitted mutation into an API failure, alter the
+  canonical mutation result, cause a duplicate canonical mutation,
+  invalidate idempotency, or act as a hidden transaction coordinator
   for the commercial plane. Case 42 failure-injects BOTH failure sites (the
   queue write after a commercial `submit_intent`; the delivery attempt record
   after a boundary-owned offer publish) and proves the exact required sequence:
@@ -163,6 +164,26 @@ issuance key and never journaled (case 37).
   restarted view, and the replayed fold agree by construction, and the
   delivery-identity dedupe makes the recovery flush exactly-once (a partial
   multi-endpoint queue phase resumes, never repeats).
+- Obligation-write admission gate (case 44, the round-4 P1 fix): the durable
+  obligation is part of the SUCCESSFUL-ADMISSION CONTRACT, never best
+  effort. The obligation journal append is NOT contained: when it fails the
+  boundary returns the deterministic admission failure (500 `store-failed`,
+  the message stating the durable-not-rolled-back truth and the same-key
+  retry contract) and NEVER claims successful admission of a mutation whose
+  required observation obligation was not established; the durable mutation
+  is neither rolled back nor re-executed. The same-key retry completes the
+  admission BEFORE the cached canonical response is replayed — the emission
+  is re-derived from durable truth alone (the prior record's stored resource
+  projection and canonical response, the canonical subsystems' public
+  journals, and the byte-identical retry request the digest match
+  guarantees), so the obligation is never lost to a crash even when its
+  first write failed. The crash-window duplicate admissions (the adapted
+  mutations' core-duplicate reconstruction paths) owe the SAME emission
+  through the SAME gate — no admission door bypasses the contract. When no
+  audience exists no obligation exists and the contract is trivially
+  satisfied. The queue/delivery recovery of a healed obligation remains the
+  delivery pump's own machinery (the request path establishes the obligation
+  only), so a normal replay of a fully-admitted mutation grows nothing.
 
 ### AC-4 "API success never implies physical connectivity success; developer-facing errors preserve canonical ADCOS reason codes."
 
@@ -276,6 +297,22 @@ request-and-response-per-mutation):
   → delivery succeeds (the consumer receives the event once) → the canonical
   mutation was never re-executed → the same-key API retry is a byte-identical
   idempotent replay with zero journal growth.
+- **Obligation-write admission gate** (case 44, the round-4 correction): a
+  kind-selected store failure at the webhook OBLIGATION append itself
+  (`_ObligationFailingApiStore`) plus the same simulated process crash proves
+  the admission contract end-to-end: the business mutation executes and the
+  mutation/idempotency record is durable (finality untouched) → the obligation
+  append fails → the API returns the deterministic admission failure (500
+  `store-failed`, the durable-not-rolled-back truth and the same-key retry
+  contract in the message; no canonical resource; no queue record; no
+  contained incident — the failure IS the response) → the process crashes →
+  the durable truth survives and the obligation is still honestly absent →
+  the same-key retry re-derives the emission from durable truth alone (the
+  stored canonical response, the core's public journal, the retry request)
+  and establishes the obligation BEFORE any success → the retry returns the
+  byte-identical stored canonical response (200, replay header) → the pump
+  queues and delivers the event exactly once → a further retry is a pure
+  replay with zero growth; `verify_integrity` holds.
 - **Determinism** (cases 35, 36): the golden scenario stream (journal digest,
   mutation digests, credential/offer/endpoint/delivery counts, the transaction
   state) is byte-identical across two fresh in-process runs and across
@@ -285,11 +322,13 @@ request-and-response-per-mutation):
 
 | Context | Result |
 |---|---|
-| Branch context (this working tree) | `python3 tools/developerapi_selftest.py` → PASS 43/43 |
+| Branch context (this working tree) | `python3 tools/developerapi_selftest.py` → PASS 44/44 |
 | Case-42 negative control | against the round-1 `gateway.py` the case fails exactly on the P0 (error envelope, no `data` member); against the corrected gateway it passes |
 | Case-43 negative control | against the round-2 head `b19cfcb` the case fails exactly on the P1 (no durable obligation in the journal; the reloaded service exposes no obligation surface — the obligation was lost with the process; the observation is never queued, the consumer never receives the event) while the first four steps still pass (the P0 finality containment of round 2 is intact); against the corrected gateway it passes |
-| Hash-seed subprocesses | PYTHONHASHSEED=0/1/7919/unset → PASS 43/43 with the byte-identical golden stream (case 36) |
-| `python3 tools/spec_check.py` | 14/17 — the three failures (ARCH-02, ARCH-06, ARCH-08) are byte-identical at the round-2 head `b19cfcb` and at this correction head; the two baseline conditions are the INHERITED ones; ARCH-08 is the branch's authorization-provenance condition present since the first implementation push; zero new failures introduced |
+| Case-44 negative control | against the round-3 head `8245c78` the case fails exactly on the P1 (the boundary returns 200 — a FALSE success — for a mutation whose required observation obligation was never established; the failure is misclassified as a contained incident; the same-key retry replays the cached response without healing; the healed obligation count is 0; the consumer receives 0 events — the observation is permanently lost with the process) while all 43 other cases pass (the round-2/round-3 semantics are intact); against the corrected gateway it passes |
+| Hash-seed subprocesses | PYTHONHASHSEED=0/1/7919/unset → PASS 44/44 with the byte-identical golden stream (case 36) |
+| `python3 tools/spec_check.py` | 14/17 — the three failures (ARCH-02, ARCH-06, ARCH-08) are byte-identical at the round-2 head `b19cfcb`, at the round-3 head `8245c78`, and at this correction head; the two baseline conditions are the INHERITED ones; ARCH-08 is the branch's authorization-provenance condition present since the first implementation push; zero new failures introduced |
+| Golden-stream diff vs the round-3 head | ALL 12 stream members byte-identical (`git worktree` at `8245c78`, pre-fix vs post-fix `--determinism-stream` diff is empty): the healthy path — journal order, record contents, clock-read consumption, every business surface — is untouched by this correction |
 | Frozen-family integrity | case 40: spec/architect, spec/work-items.md, tools/spec_check.py, and the unrelated families byte-identical to HEAD |
 
 Inherited known failures (NOT remediable from this work item — honestly preserved,
@@ -650,6 +689,201 @@ PR delta remains confined to the authorized paths (case 41); the CI step
 remains the single additive wiring; `tools/spec_check.py` reports the exact
 same three conditions (ARCH-02, ARCH-06, ARCH-08) as at the round-2 head
 `b19cfcb` — zero new failures.
+
+**Out of scope: NO. Physical evidence claimed: NO. W040 modified: NO.
+Acceptance: NOT claimed — the disposition remains the Architect's.**
+
+## 13. Correction round record — round 4 (PR #132, CHANGES REQUIRED)
+
+**The finding (Architect's independent re-review of the round-3 head
+`8245c78`):** the remaining acceptance blocker (P1) — the durable
+obligation was NOT guaranteed durable before the 200. The round-3
+sequence contained the obligation write:
+
+```text
+mutation journal append            (finality)
+        ↓
+observe_after_finality()           (contained: catches EVERY exception)
+        ↓
+_emit_event()
+        ↓
+WebhookObligationRecord.append()   ← may FAIL
+        ↓
+queue records
+        ↓
+return 200                          ← returned regardless
+```
+
+When the OBLIGATION journal append itself failed, `_observe_after_finality`
+caught the exception, parked the callable in the process-local
+`_pending_emissions` buffer, and returned normally — so the API still
+returned the already-finalized 200, and the only surviving copy of the
+obligation was the process-local callable. A crash then permanently lost
+the observation. The round-3 code even acknowledged the hole ("if the
+process crashes before the store heals, that observation is lost"), which
+is incompatible with the contract that the obligation is persisted BEFORE
+the API response is returned and survives a process crash. Case 43 proved
+`obligation persisted → queue fails → crash → reload → obligation
+recovered` but NOT `obligation persistence fails → API semantics remain
+correct → process crashes → no obligation loss` — and under the round-3
+implementation that second property was false. The round-3 fix had moved
+the P1 boundary one layer deeper; it had not eliminated the fundamental
+failure mode. Verdict: CHANGES REQUIRED — HOLD PR #132, do not merge, do
+not authorize W047.
+
+**The corrected semantics (the explicit admission rule the Architect
+required):**
+
+```text
+business mutation durable
+        ↓
+durable mutation/idempotency record        (the finality point)
+        ↓
+durable observation obligation             (the ADMISSION GATE: NOT contained)
+        ↓
+ONLY THEN the successful API response
+        ↓
+queue (contained; recoverable from the obligation)
+        ↓
+delivery (contained; observational)
+```
+
+If the obligation cannot be durably recorded, the boundary fails
+deterministically and never falsely claims successful admission. The
+failure handling preserves the already-established canonical
+mutation/idempotency semantics: NO rollback, NO re-execution, NO new
+reason vocabulary — the boundary returns the existing `store-failed`
+class (500) with a deterministic message stating that the canonical
+mutation is durable and was not rolled back or re-executed and that the
+SAME request retried with the SAME idempotency key completes the
+admission and receives the canonical stored response. The retry contract
+is exactly that: the same-key retry re-derives the owed emission from
+durable truth alone (the prior record's stored resource projection and
+canonical response, the canonical subsystems' public journals, and the
+byte-identical retry request the digest match guarantees) and
+establishes the obligation BEFORE the cached response is replayed — so
+neither a first admission nor a replay can ever be a false success, and
+the obligation is never lost to a crash even when its first write
+failed.
+
+**The fix (narrowly contained — `developerapi/gateway.py` only, plus the
+battery and this manifest):**
+
+- `_execute_mutation` now returns a plain frozen emission SPEC
+  (`_MutationEmission`: the complete observation payload, no callable)
+  built from the mutation's own executed result; the audience is
+  resolved later, at admission time. The crash-window duplicate
+  branches (the adapted mutations' core-duplicate reconstruction paths)
+  owe the SAME emission, built from the canonical event and the
+  reconstructed response data — no admission door bypasses the
+  contract.
+- `_admit_observation` is the ADMISSION GATE: resolve the audience
+  (no audience ⇒ no obligation exists, the contract is trivially
+  satisfied); append the durable obligation record — this write is NOT
+  contained, its failure raises the deterministic admission failure
+  through `_admission_failure` (the boundary reason preserved from the
+  underlying store failure; the honest detail message); only after the
+  obligation is durable does the contained queue + delivery phase run.
+  The `_pending_emissions` process-local buffer is REMOVED entirely:
+  there is no longer any observation state that exists only in-process
+  (an obligation either is durable or the request failed
+  deterministically; a queue failure is recoverable from the durable
+  obligation).
+- `_complete_prior_admission` (called from the idempotent-replay branch
+  BEFORE the cached response is returned) completes the admission of a
+  prior mutation whose obligation was never established: it
+  re-derives the emission from durable truth alone
+  (`_reconstruct_emission`, per operation: the offer/endpoint
+  projections from the prior record's stored resource; the intent /
+  reservation / policy emissions from the command the idempotency key
+  derives, found in the canonical subsystems' public journals, with the
+  payload from the stored canonical response), resolves the audience,
+  and appends the obligation through the SAME gate. When the obligation
+  is already durable (the common case) this is a pure read: the normal
+  replay grows nothing. The queue/delivery recovery of a healed
+  obligation is the delivery pump's own machinery (the request path
+  establishes the obligation only), preserving the case-42/43 pinned
+  intermediate states.
+- `_emit_event` (the platform-side operator surface) is refactored onto
+  the same shared pieces (`_resolve_observation_audience` +
+  `_append_observation_obligation` + `_queue_observation`); its
+  operator-visible failure semantics are unchanged. The inline delivery
+  pass still runs for every mutation emission (audience or not), so the
+  healthy-path clock-read consumption — and therefore the entire golden
+  stream — is byte-identical to the round-3 pin.
+- `developerapi/journal.py`, `developerapi/webhooks.py`, and
+  `developerapi/__init__.py` are UNCHANGED by this round: the
+  `WebhookObligationRecord` family, the obligation identity, and the 85
+  frozen exports are exactly the round-3 surface (the architect
+  confirmed the record is structurally sound; the defect was only WHO
+  owns its write failure).
+
+**The proof (case 44, `tools/developerapi_selftest.py`):** the exact
+10-step failure-injection sequence the Architect's missing proof
+demands, using `_ObligationFailingApiStore` (kind-selected — it fails
+the webhook OBLIGATION append itself wherever it falls, so the failure
+site is identical in the round-3 and corrected gateways) and the same
+simulated process crash as case 43:
+
+1. the developer submits an audience-carrying mutation (intent create
+   with a subscribed endpoint) under an idempotency key;
+2. the business mutation executes and the mutation/idempotency record
+   is DURABLE (both journals; finality untouched);
+3. the webhook OBLIGATION journal append fails (the injected failure);
+4. the API does NOT claim success: the deterministic admission failure
+   (500 `store-failed`; no canonical resource; no queue record; NOT a
+   contained incident — the message states the durable truth and the
+   same-key retry contract);
+5. the process crashes (both planes reconstructed from the durable
+   stores; every in-process buffer discarded);
+6. the durable truth survived and the obligation is still honestly
+   absent (nothing fabricated it);
+7. the developer retries the same request;
+8. the retry completes the admission BEFORE any success: exactly one
+   obligation record, carrying the subscribed endpoint and the
+   canonical event identity, with zero canonical re-execution;
+9. ONLY THEN the retry returns the byte-identical stored canonical
+   response (200, replay header);
+10. the delivery pump queues and delivers the event exactly once (the
+    consumer verifies the signature); the satisfied obligation
+    retires; a second pump pass is a no-op; a further retry is a pure
+    replay with zero journal growth; `verify_integrity` holds.
+
+Scenario B repeats the gate through the developerapi-owned mutation
+(offer publish), whose reconstruction comes from the prior record's
+stored resource projection alone.
+
+**The negative control:** running case 44 against the round-3 head
+`8245c78` (via a git worktree at that head) fails exactly on the
+blocker — the boundary returns **status 200** (the false success) with
+the canonical resource, the failure is misclassified as a contained
+incident, the same-key retry replays the cached response without
+healing anything (healed obligation count 0), and the consumer never
+receives the event (0 deliveries — the observation was permanently
+lost with the process) — while all 43 other cases pass, proving the
+round-2/round-3 semantics are intact and the case pins precisely this
+defect.
+
+**Golden-stream honesty:** NO re-pin. The healthy-path stream — all 12
+members, including the journal digest
+`sha256:a78847deaa3eb446289cb5e304846466930519c00c2d29e0e0028ad210b9877a`
+and `journal_length` 25 — is byte-identical to the round-3 value (the
+pre-fix/post-fix `--determinism-stream` diff over a worktree at
+`8245c78` is empty). The correction changes only the failure-path
+semantics of the obligation write.
+
+**Scope discipline of the correction:** the delta is confined to
+`developerapi/gateway.py` (the emission spec, the admission gate, the
+admission-completion reconstruction, the removed process-local buffer),
+`tools/developerapi_selftest.py` (case 44 + the `_ObligationFailingApiStore`
+injectable + the registration + the header docstring), and this
+manifest — all inside the WORK-046-CORE-001 authorized set. No journal
+record kind, no export, no route, no schema, no reason vocabulary, no
+event type, and no spec/architect surface changed (cases 01/38/40); the
+PR delta remains confined to the authorized paths (case 41); the CI
+step remains the single additive wiring; `tools/spec_check.py` reports
+the exact same three conditions (ARCH-02, ARCH-06, ARCH-08) as at the
+round-2 and round-3 heads — zero new failures.
 
 **Out of scope: NO. Physical evidence claimed: NO. W040 modified: NO.
 Acceptance: NOT claimed — the disposition remains the Architect's.**
