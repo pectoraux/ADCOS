@@ -1,0 +1,165 @@
+name: one-shot-w046-acceptance
+on:
+  push:
+    branches:
+      - governance/w046-accept-w047
+permissions:
+  contents: write
+jobs:
+  persist:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Persist DEC-0067 W046 acceptance and W047 activation
+        env:
+          BRANCH: governance/w046-accept-w047
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          root = Path('.')
+          REVIEWED = '09960ea24315e5d0ccfd516d3bdca0802b62d8b7'
+          MERGE = 'f45be6dd0544a2fd6cbc910805def28bbe0c71eb'
+          BASE = '3db7500d7b79a8cd3e3a651e1461fbb320efd67e'
+          TS = '2026-09-02T19:59:40Z'
+
+          def replace_once(path, old, new):
+              p = root / path
+              text = p.read_text()
+              n = text.count(old)
+              if n != 1:
+                  raise SystemExit(f'{path}: expected 1 exact match, got {n}: {old[:100]!r}')
+              p.write_text(text.replace(old, new, 1))
+
+          # W046 authorization -> provenance only.
+          replace_once('spec/architect/authorizations/WORK-046.yaml',
+              'status: active\nauthorized: true\ntype: implementation\nauthorization_id: "WORK-046-CORE-001"\nauthorization_decision: DEC-0065',
+              'status: superseded\nauthorized: false\nsuperseded_by: "WORK-047-CORE-001"\nsupersession_decision: DEC-0067\ntype: implementation\nauthorization_id: "WORK-046-CORE-001"\nauthorization_decision: DEC-0065')
+
+          # W046 ledger delivery fact -> accepted-merged.
+          lp = root / 'spec/architect/execution-ledger.yaml'
+          ledger = lp.read_text()
+          pat = r'  - work_item: WORK-046\n.*?(?=\n  - work_item:|\nreconciliations:)'
+          m = re.search(pat, ledger, flags=re.S)
+          if not m:
+              raise SystemExit('WORK-046 ledger block not found')
+          block = m.group(0)
+          for old, new in [
+              ('branch: null', 'branch: "work-046-developer-api"'),
+              ('baseline_sha: null', f'baseline_sha: {BASE}'),
+              ('pr: null', 'pr: 132'),
+              ('pr_head: null', f'pr_head: {REVIEWED}'),
+              ('reviewed_sha: null', f'reviewed_sha: {REVIEWED}'),
+              ('merge_sha: null', f'merge_sha: {MERGE}'),
+              ('merged_at: null', f'merged_at: {TS}'),
+              ('review_rounds: null', 'review_rounds: 5'),
+              ('acceptance_decision: null', 'acceptance_decision: DEC-0067'),
+              ('lifecycle: registered', 'lifecycle: accepted-merged'),
+          ]:
+              if old not in block:
+                  raise SystemExit(f'WORK-046 block missing expected field: {old!r}')
+              block = block.replace(old, new, 1)
+          block = re.sub(r'    note: .*',
+              '    note: "delivery accepted by DEC-0067 on exact reviewed head 09960ea24315e5d0ccfd516d3bdca0802b62d8b7 after five Architect review rounds; the final correction established durable webhook observation-admission state with frozen historical audience semantics, closing the P0/P1 admission, crash-recovery, and idempotent-replay defects. PR #132 merged at f45be6dd0544a2fd6cbc910805def28bbe0c71eb. W046 remains SOFTWARE-only; W040 physical obligations remain independent and open. The inherited ARCH-02/ARCH-06 mainline conditions are unchanged and remain separately disclosed. No architecture or protocol semantics changed.",',
+              block, count=1)
+          ledger = ledger[:m.start()] + block.rstrip(',') + ledger[m.end():]
+
+          # W047 registered -> active authorized.
+          m2 = re.search(r'  - work_item: WORK-047\n.*?(?=\n  - work_item:|\nreconciliations:)', ledger, flags=re.S)
+          if not m2:
+              raise SystemExit('WORK-047 ledger block not found')
+          b = m2.group(0)
+          substitutions = [
+              ('branch: null', 'branch: "work-047-marketplace-discovery"'),
+              ('baseline_sha: null', f'baseline_sha: {MERGE}'),
+              ('pr: null', 'pr: null'),
+              ('pr_head: null', 'pr_head: null'),
+              ('reviewed_sha: null', 'reviewed_sha: null'),
+              ('merge_sha: null', 'merge_sha: null'),
+              ('merged_at: null', 'merged_at: null'),
+              ('acceptance_decision: null', 'acceptance_decision: null'),
+              ('lifecycle: registered', 'lifecycle: authorized'),
+          ]
+          for old, new in substitutions:
+              if old in b and old != new:
+                  b = b.replace(old, new, 1)
+          b = re.sub(r'    note: .*',
+              '    note: "active implementation authorization WORK-047-CORE-001 issued by DEC-0067 after W046 acceptance. Hard dependencies WORK-051, WORK-044, WORK-045, and WORK-046 are accepted-merged. Registration is representation only; this transition supplies the sole active implementation authorization. No W047 implementation delivery exists.",',
+              b, count=1)
+          ledger = ledger[:m2.start()] + b.rstrip(',') + ledger[m2.end():]
+
+          # Append reconciliation once only.
+          if 'reconciliation_id: LEDGER-RECON-014' in ledger:
+              raise SystemExit('LEDGER-RECON-014 already present')
+          ledger += f'''\n  - reconciliation_id: LEDGER-RECON-014\n    recorded_by: DEC-0067\n    recorded_at: {TS}\n    from_main_sha: {BASE}\n    to_main_sha: {MERGE}\n    reason: "W046 implementation acceptance and W047 activation: PR #132 delivered the authorized WORK-046 implementation at exact reviewed head {REVIEWED} and merged at {MERGE}. DEC-0067 records acceptance of W046, supersedes WORK-046-CORE-001, and transfers the single active execution slot to WORK-047-CORE-001 from the W046 merge mainline."\n    history: "No prior work-item history is rewritten. W040 remains independent, in-review, unaccepted, and its physical obligations remain open. W047 remains implementation-empty but becomes the sole active authorized commercial Work Item. W048-W050 remain unauthorized candidates. No frozen architecture/protocol semantics or evidence-class rules change."\n'''
+          lp.write_text(ledger)
+
+          # Execution-state authoritative snapshot.
+          ep = root / 'spec/architect/execution-state.yaml'
+          state = ep.read_text()
+          state = state.replace('main_sha: 3db7500d7b79a8cd3e3a651e1461fbb320efd67e3', f'main_sha: {MERGE}', 1)
+          state = state.replace('active_work_item: WORK-046', 'active_work_item: WORK-047', 1)
+          state = state.replace('active_authorization: "WORK-046-CORE-001"', 'active_authorization: "WORK-047-CORE-001"', 1)
+          state = state.replace('halted_reason: "W046 is active-authorized at the reconciled post-transition governance baseline 3db7500; Z.ai may implement from this exact mainline."', 'halted_reason: "W047 is active-authorized at the exact W046 acceptance mainline f45be6d; Z.ai may implement from this exact mainline."', 1)
+          old = '    - "Review the WORK-046 delivery PR on its exact head against the acceptance gate (versioned API schema with backward-compatibility guarantees; sandbox/production isolation; idempotency keys under retries and duplicates; scoped application credentials; signed webhooks with replay/duplicate/out-of-order protection; webhook state observational only; API success never implying physical connectivity; canonical reason codes visible at the developer boundary; SDK semantics matching the canonical server model)."\n    - "After W046 acceptance, evaluate the next eligible commercial Work Item (W047) from the canonical dependency graph."'
+          new = '    - "Review the next authorized Work Item delivery against its exact W047 acceptance gate and persist the Architect verdict before downstream work."'
+          if old not in state:
+              raise SystemExit('execution-state next_required_decisions block not found')
+          state = state.replace(old, new, 1)
+          ep.write_text(state)
+
+          # Current-state snapshot.
+          cp = root / 'spec/architect/current-state.md'
+          cur = cp.read_text()
+          cur = cur.replace('Persistent Architect snapshot — W045 accepted; W046 active.', 'Persistent Architect snapshot — W046 accepted; W047 active.', 1)
+          cur = cur.replace('- Active Work Item: `WORK-046`', '- Active Work Item: `WORK-047`', 1)
+          cur = cur.replace('- Active authorization: `WORK-046-CORE-001`', '- Active authorization: `WORK-047-CORE-001`', 1)
+          cur = cur.replace('- Authorization decision: `DEC-0065`', '- Authorization decision: `DEC-0067`', 1)
+          cur = cur.replace('- Implementation baseline for W046: `3db7500d7b79a8cd3e3a651e1461fbb320efd67e` (the exact post-transition governance mainline, reconciled by DEC-0066; original DEC-0065 issuance baseline `a789d9b403d0e2a6e05276bb3cdc2b7d092c6d88` remains recorded as provenance)', f'- Implementation baseline for W047: `{MERGE}` (the exact W046 acceptance mainline recorded by DEC-0067; W046 implementation reviewed at `{REVIEWED}` and merged at `{MERGE}`)', 1)
+          cur = cur.replace('- W046: `', '- W046: `accepted-merged by DEC-0067; PR #132 reviewed at exact correction-round head 09960ea24315e5d0ccfd516d3bdca0802b62d8b7, merged f45be6dd0544a2fd6cbc910805def28bbe0c71eb; 45/45 deterministic battery with durable observation-admission proofs; SOFTWARE-only; no physical evidence accepted`\n- W047: `active authorized by DEC-0067; issue #91; no implementation delivery yet`\n- W048: `registered / unauthorized`', 1) if '- W046: `' in cur else cur
+          cur = cur.replace('`WORK-051 CommercialCore → WORK-052 UsageLedger → WORK-053 EconomicAllocation → WORK-044 Payment Provider Adapters → WORK-045 Connectivity Eligibility → WORK-046 → WORK-047 → WORK-048 → WORK-049`', '`WORK-051 CommercialCore → WORK-052 UsageLedger → WORK-053 EconomicAllocation → WORK-044 Payment Provider Adapters → WORK-045 Connectivity Eligibility → WORK-046 → WORK-047 → WORK-048 → WORK-049`', 1)
+          cur = cur.replace('W051, W052, W053, W044, and W045 are accepted-merged; W046 is the active implementation track; W047-W050 remain future candidates.', 'W051, W052, W053, W044, W045, and W046 are accepted-merged; W047 is the active implementation track; W048-W050 remain future candidates.', 1)
+          cur = cur.replace('W045 accepted; W046 active', 'W046 accepted; W047 active', 1)
+          cur += f'\n\n## W046 Acceptance → W047 Activation\n\nDEC-0067 accepts W046 on PR #132 exact reviewed head `{REVIEWED}` (merge `{MERGE}`) after five Architect review rounds, including durable webhook observation-admission state and historical-audience replay proofs. `WORK-046-CORE-001` is superseded and `WORK-047-CORE-001` is now the sole active implementation authorization. W047 remains implementation-empty; its hard dependencies W051/W044/W045/W046 are all accepted-merged. W040 remains independent and unaccepted.\n'
+          cp.write_text(cur)
+
+          # Decision registry README: append DEC-0067 row and update acceptance summary.
+          rp = root / 'spec/architect/decisions/README.md'
+          readme = rp.read_text()
+          if '| DEC-0067 |' in readme:
+              raise SystemExit('DEC-0067 already registered')
+          anchor = '| DEC-0066 | governance | WORK-046 | ACCEPTED | ACCEPTED | W046 baseline reconciliation to the post-transition mainline |'
+          if anchor not in readme:
+              raise SystemExit('DEC-0066 README anchor not found')
+          readme = readme.replace(anchor, anchor + '\n| DEC-0067 | acceptance | WORK-046 | ACCEPTED | ACCEPTED | W046 Developer API/SDK/Webhook Platform acceptance → W047 activation |', 1)
+          rp.write_text(readme)
+
+          # W047 authorization.
+          wa = root / 'spec/architect/authorizations/WORK-047.yaml'
+          if wa.exists():
+              raise SystemExit('WORK-047 authorization already exists')
+          wa.write_text(f'''# ADCOS Work Item authorization record — WORK-047 active implementation.\n# Issued by DEC-0067 after Architect acceptance of WORK-046.\nwork_item: WORK-047\nstatus: active\nauthorized: true\ntype: implementation\nauthorization_id: "WORK-047-CORE-001"\nauthorization_decision: DEC-0067\nbaseline_sha: {MERGE}\nreview_basis: "DEC-0067 accepts WORK-046 on PR #132 exact reviewed head {REVIEWED}, merged at {MERGE}. W047 issue #91 is the next canonical commercial Work Item; its hard dependencies WORK-051, WORK-044, WORK-045, and WORK-046 are accepted-merged."\ndependencies:\n  - WORK-051\n  - WORK-044\n  - WORK-045\n  - WORK-046\nauthority_inputs:\n  - "WORK-051 CommercialCore public commercial state and transaction resources"\n  - "WORK-044 payment/settlement capability where paid offers are presented"\n  - "WORK-045 eligibility/provider-trust/jurisdiction policy"\n  - "WORK-046 developer API boundary"\n  - "WORK-041 NetworkPath path-validation machinery"\nauthority_outputs:\n  - "deterministic, eligibility-filtered, privacy-preserving marketplace discovery and candidate selection proposals; no path activation authority"\nscope:\n  - "marketplace/"\n  - "developer-facing/discovery surfaces as defined by issue #91"\n  - "tools/work-047 self-test battery and evidence"\n  - "docs/WORK-047-handoff.md"\n  - ".github/workflows/spec-check.yml"\nacceptance_criteria:\n  - "Discovery/ranking is deterministic over identical candidate sets; expired/ineligible/suspended offers are excluded fail-closed."\n  - "Location precision is bounded and never exceeds the product decision's requirement; exact consumer location is not stored by default."\n  - "Stale quality telemetry carries age/confidence and cannot silently become current reachability."\n  - "Candidate selection hands off to accepted NetworkPath validation/activation rather than bypassing it."\n  - "No forbidden imports or mutations of session/routing/transport authorities; no fabricated physical proximity, quality, or availability."\nout_of_scope:\n  - "direct routing or packet transport implementation"\n  - "exact consumer location storage by default"\n  - "monetization logic beyond invoking canonical commercial resources"\n  - "W048/W049 implementation"\n  - "WORK-040 physical evidence"\n  - "frozen architecture/protocol changes"\n  - "modifying spec/architect/ from the implementation PR"\nacceptance_gate:\n  status: "Architect review required after implementation"\n  required_evidence:\n    - "deterministic discovery/ranking battery over identical candidate sets"\n    - "expired/ineligible/suspended fail-closed exclusion proofs"\n    - "privacy/precision and stale-telemetry evidence proofs"\n    - "NetworkPath handoff composition proofs and forbidden-authority boundary audit"\n    - "exact reviewed delivery SHA, evidence manifest, CI/provenance, replay and determinism evidence"\nhandoff: docs/WORK-047-handoff.md\nhandoff_required: true\n''')
+
+          # W047 implementation handoff.
+          hp = root / 'docs/WORK-047-handoff.md'
+          hp.write_text(f'''# WORK-047 Architect Handoff — Connectivity Marketplace Discovery, Proximity & Path Selection\n\n**Authorization:** WORK-047-CORE-001  \n**Decision:** DEC-0067  \n**Baseline:** {MERGE}  \n**Implementer:** Z.ai\n\n## Objective\n\nEnable buyers and applications to discover eligible nearby connectivity offers and select a suitable path using explicit price, quality, reachability, policy, and privacy constraints without turning marketplace discovery into networking authority.\n\n## Frozen boundaries\n\n1. Discovery is not session authority, routing authority, or transport authority.\n2. Discovery proposes candidates; only accepted NetworkPath/path-validation machinery validates and activates paths.\n3. Location precision must never exceed what the product decision requires.\n4. Advertised provider quality is evidence, not authoritative current reachability without validation.\n5. Ranking must not fabricate physical proximity, connectivity quality, or availability.\n6. Eligibility filtering happens before offer presentation and remains fail-closed.\n7. Stale quality observations retain age/confidence metadata and cannot silently become current truth.\n8. Reservation/lease coordination invokes canonical commercial resources; it does not create a second commercial authority.\n9. No direct routing or packet transport implementation.\n10. W040 physical evidence remains outside this Work Item.\n\n## Required scope\n\nImplement the provider/offer discovery API and index, geospatial/proximity abstraction with configurable privacy/accuracy, eligibility filtering, deterministic candidate ranking over price/expected quality/latency/availability/policy/user constraints, NetworkPath candidate handoff, reservation/lease coordination, stale-offer and expired-capacity handling, quality telemetry evidence, privacy-preserving location representations, and fallback/multi-candidate selection as defined by issue #91.\n\n## Verification\n\nThe delivery PR must provide deterministic discovery/ranking tests, fail-closed eligibility/expiry/suspension tests, privacy precision tests, stale telemetry age/confidence tests, NetworkPath handoff composition tests, authority/import audits, replay/recovery determinism, and an explicit no-fabricated-physical-evidence proof.\n\nThe implementation PR must not modify `spec/architect/`. Any required architectural change or authorization change is a separate Architect governance action.\n\n## Acceptance\n\nOne implementation PR only. The Architect reviews the exact delivery SHA, evidence manifest, dependency readiness, authority ownership, failure/recovery semantics, and every invariant above before acceptance. W048/W049 remain unauthorized until subsequent governance transitions.\n''')
+
+          # Remove this one-shot workflow before committing the governance state.
+          temp = root / '.github/workflows/_once_w046_acceptance.yml'
+          temp.unlink()
+
+          # Normalize accidental duplicate blank lines only; preserve all historical text.
+          for p in [lp, ep, cp, rp, wa, hp]:
+              text = p.read_text()
+              p.write_text(text.rstrip() + '\\n')
+          PY
+          git config user.name 'Architect (pectoraux)'
+          git config user.email 'architect@adc.os'
+          git add spec/architect docs/WORK-047-handoff.md
+          git add -u .github/workflows/_once_w046_acceptance.yml || true
+          git commit -m 'Governance: accept W046 and activate W047'
+          git push origin "$BRANCH"
