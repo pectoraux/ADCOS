@@ -2,7 +2,7 @@
 
 **Authorization:** WORK-047-CORE-001  
 **Decision:** DEC-0067  
-**Baseline:** f45be6dd0544a2fd6cbc910805def28bbe0c71eb  
+**Baseline:** 825f48f814926223665c1761beaba6cbdd2c2640  
 **Implementer:** Z.ai
 
 ## Objective
@@ -34,4 +34,4 @@ The implementation PR must not modify `spec/architect/`. Any required architectu
 
 ## Acceptance
 
-One implementation PR only. The Architect reviews the exact delivery SHA, evidence manifest, dependency readiness, authority ownership, failure/recovery semantics, and every invariant above before acceptance. W048/W049 remain unauthorized until subsequent governance transitions.\n
+One implementation PR only. The Architect reviews the exact delivery SHA, evidence manifest, dependency readiness, authority ownership, failure/recovery semantics, and every invariant above before acceptance. W048/W049 remain unauthorized until subsequent governance transitions.
