@@ -22,8 +22,12 @@ authority_inputs:
 authority_outputs:
   - "deterministic, eligibility-filtered, privacy-preserving marketplace discovery and candidate selection proposals; no path activation authority"
 scope:
-  - "marketplace discovery/proximity/path-selection implementation defined by issue #91"
-  - "tools/work-047 self-test battery and evidence"
+  - "marketplace discovery, proximity, and path-selection implementation defined by issue #91"
+  - "provider/offer discovery API and index"
+  - "geospatial/proximity abstraction with configurable accuracy/privacy"
+  - "eligibility filtering, deterministic candidate ranking, stale-offer handling, quality evidence, privacy-preserving location, fallback and multi-candidate selection"
+  - "NetworkPath candidate handoff and reservation/lease coordination"
+  - "tools/developerapi_selftest.py is NOT in W047 scope; use the dedicated W047 verification surface"
   - "docs/WORK-047-handoff.md"
   - ".github/workflows/spec-check.yml"
 acceptance_criteria:
