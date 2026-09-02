@@ -1,0 +1,37 @@
+# ADCOS Architect decision record.
+# schema: spec/architect/decision-record-template.md; verified by tools/spec_check.py (ARCH-04).
+# Baseline-advancement-only reconciliation completing the DEC-0067 W046 acceptance -> W047 activation transition.
+decision_id: DEC-0068
+type: governance
+work_item: WORK-047
+acr: null
+pr: 133
+reviewed_sha: e3b2c48441725b42a22f1bd82a73fae10d25c5f2
+decision: ACCEPTED
+status: ACCEPTED
+reviewer: "Architect (pectoraux)"
+timestamp: 2026-09-02T20:12:02Z
+findings:
+  - "PR #133 is the governance-only DEC-0067 transition and merged at e3b2c48441725b42a22f1bd82a73fae10d25c5f2 after W046 acceptance at implementation merge f45be6dd0544a2fd6cbc910805def28bbe0c71eb."
+  - "This record advances the persistent Architect snapshot and WORK-047 authorization baseline from 3db7500d7b79a8cd3e3a651e1461fbb320efd67e3 to the exact post-transition mainline e3b2c48441725b42a22f1bd82a73fae10d25c5f2 without changing any work-item contract, acceptance fact, dependency, or frozen architecture/protocol semantic."
+  - "WORK-047 remains implementation-empty and the sole active authorized execution track; W040 remains independent, in-review, and unaccepted; W048-W050 remain unauthorized candidates."
+blockers: []
+required_corrections: []
+evidence:
+  merge_sha: e3b2c48441725b42a22f1bd82a73fae10d25c5f2
+  ci_run: null
+  artifacts:
+    - "spec/architect/decisions/DEC-0067-work-046-acceptance-w047-activation.yaml"
+    - "docs/WORK-047-handoff.md"
+accepted_scope:
+  - "Baseline reconciliation only: snapshot main_sha and WORK-047-CORE-001 baseline_sha advance to the exact DEC-0067 governance merge mainline."
+rejected_scope:
+  - "Any implementation code or W047 delivery."
+  - "Any frozen architecture/protocol semantic change."
+  - "Any W040 physical evidence acceptance or obligation closure."
+  - "Any activation of W048-W050."
+downstream_effect:
+  - "WORK-047-CORE-001 baseline_sha becomes e3b2c48441725b42a22f1bd82a73fae10d25c5f2, matching the exact post-transition mainline."
+  - "Persistent execution-state and execution-ledger snapshots become reconciled to e3b2c48441725b42a22f1bd82a73fae10d25c5f2."
+  - "No prior work-item history is rewritten."
+resolved_by: null

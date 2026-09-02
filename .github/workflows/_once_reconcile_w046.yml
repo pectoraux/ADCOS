@@ -1,0 +1,58 @@
+name: one-shot-reconcile-w046
+on:
+  push:
+    branches:
+      - main
+permissions:
+  contents: write
+jobs:
+  reconcile:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Reconcile persistent Architect baseline
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('spec/architect/execution-ledger.yaml')
+          t=p.read_text()
+          marker='schema_version: 1\nmain_sha: 3db7500d7b79a8cd3e3a651e1461fbb320efd67e3'
+          if t.count(marker)!=1: raise SystemExit('ledger marker mismatch')
+          t=t.replace(marker,'schema_version: 1\nmain_sha: e3b2c48441725b42a22f1bd82a73fae10d25c5f2',1)
+          if 'reconciliation_id: LEDGER-RECON-015' in t:
+              raise SystemExit('RECON-015 already present')
+          rec='''\n  - reconciliation_id: LEDGER-RECON-015\n    recorded_by: DEC-0068\n    recorded_at: 2026-09-02T20:12:02Z\n    from_main_sha: 3db7500d7b79a8cd3e3a651e1461fbb320efd67e3\n    to_main_sha: e3b2c48441725b42a22f1bd82a73fae10d25c5f2\n    reason: "Baseline-advancement-only reconciliation completing DEC-0067: PR #133 merged the W046 acceptance/W047 activation governance transition at e3b2c484. The persistent Architect snapshot advances from the pre-transition mainline 3db7500 to the exact post-transition mainline e3b2c484; W047 authorization baseline is reconciled to the same exact mainline by DEC-0068. No work-item contract, acceptance fact, or frozen architecture/protocol semantic changes."\n    history: "No work-item history rewritten. W046 remains accepted-merged at reviewed head 09960ea with implementation merge f45be6d; W047 remains implementation-empty and the sole active authorization; W040 remains independent and unaccepted with its physical obligations open; W048-W050 remain unauthorized."\n'''
+          idx=t.find('\nreconciliations:')
+          if idx<0: raise SystemExit('reconciliations section not found')
+          # place after the existing RECON-014 block, before EOF; reconciliation list is at EOF.
+          t=t.rstrip()+rec
+          p.write_text(t+'\n')
+
+          p=Path('spec/architect/execution-state.yaml')
+          t=p.read_text()
+          old='  main_sha: 3db7500d7b79a8cd3e3a651e1461fbb320efd67e3'
+          if t.count(old)!=1: raise SystemExit('execution-state main_sha mismatch')
+          t=t.replace(old,'  main_sha: e3b2c48441725b42a22f1bd82a73fae10d25c5f2',1)
+          old_sem='  main_sha_semantics: "Persistent snapshot remains at the pre-DEC-0067 governance mainline 3db7500 until the acceptance governance transition itself merges; DEC-0067 / LEDGER-RECON-014 records W046 acceptance at reviewed head 09960ea24315e5d0ccfd516d3bdca0802b62d8b7, merged as f45be6dd0544a2fd6cbc910805def28bbe0c71eb, and activates WORK-047 from that implementation merge. A follow-up baseline reconciliation will advance the snapshot to the exact governance-transition merge mainline."'
+          if t.count(old_sem)!=1: raise SystemExit('execution-state semantic text mismatch')
+          t=t.replace(old_sem,'  main_sha_semantics: "Exact post-DEC-007 governance mainline: PR #133 merged the W046 acceptance/W047 activation transition at e3b2c48441725b42a22f1bd82a73fae10d25c5f2; DEC-0068 / LEDGER-RECON-015 reconcile the snapshot and W047 authorization baseline to this exact mainline."',1)
+          t=t.replace('  halted_reason: "W047 is active-authorized from the exact W046 acceptance mainline f45be6d; Z.ai may implement only after this governance transition merges and the persistent snapshot is reconciled."','  halted_reason: "W047 is active-authorized from the exact post-DEC-007 mainline e3b2c484; Z.ai may implement from this exact reconciled mainline."',1)
+          p.write_text(t.rstrip()+'\n')
+
+          p=Path('spec/architect/current-state.md')
+          t=p.read_text()
+          t=t.replace('- Baseline: `3db7500d7b79a8cd3e3a651e1461fbb320efd67e3` (persistent snapshot remains at the pre-DEC-0067 governance mainline until the acceptance governance transition itself merges; DEC-0067 / LEDGER-RECON-014 records W046 acceptance from the W046 implementation merge `f45be6dd0544a2fd6cbc910805def28bbe0c71eb`)','- Baseline: `e3b2c48441725b42a22f1bd82a73fae10d25c5f2` (exact post-DEC-0067 W046 acceptance/W047 activation governance mainline; reconciled by DEC-0068 / LEDGER-RECON-015)',1)
+          t=t.replace('The persistent snapshot remains at the pre-transition governance baseline until this governance PR merges, following the established baseline-reconciliation convention.','The persistent snapshot is reconciled to the exact post-transition governance mainline by DEC-0068 / LEDGER-RECON-015, following the established baseline-reconciliation convention.',1)
+          p.write_text(t.rstrip()+'\n')
+
+          Path('.github/workflows/_once_reconcile_w046.yml').unlink()
+          PY
+          git config user.name 'Architect (pectoraux)'
+          git config user.email 'architect@adc.os'
+          git add spec/architect
+          git add -u .github/workflows/_once_reconcile_w046.yml || true
+          git commit -m 'Governance: finalize W046 baseline reconciliation'
+          git push origin main
