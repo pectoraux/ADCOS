@@ -1,0 +1,50 @@
+# ADCOS Work Item authorization record — WORK-045 active implementation.
+# Issued by DEC-0064 after W044 acceptance.
+work_item: WORK-045
+status: active
+authorized: true
+type: implementation
+authorization_id: "WORK-045-CORE-001"
+authorization_decision: DEC-0064
+baseline_sha: 90864ac257a3d93d94852cfa3a74577903f508d3
+review_basis: "DEC-0064 accepts W044 on PR #127 exact reviewed head 6720d22 (merged 90864ac2); W045 issue #89 is the deterministic next commercial Work Item in the accepted execution lane, with hard dependencies WORK-051, WORK-053, and WORK-044 all accepted-merged in the execution ledger. The persistent execution snapshot is reconciled to the post-merge mainline by LEDGER-RECON-011, so the W045 implementation baseline is the actual current main 90864ac2. The scope surface below follows the frozen registry definition (spec/work-items.md WORK-045), the operative issue #89 contract, and the repository's sibling package convention (commercial/, usage/, allocation/, payment/); no W045 implementation delivery exists."
+dependencies:
+  - WORK-051
+  - WORK-053
+  - WORK-044
+authority_inputs:
+  - "WORK-051 CommercialCore (accepted-merged by DEC-0059): canonical commercial state, transaction identities, and settlement lifecycle references"
+  - "WORK-052 UsageLedger (accepted-merged by DEC-0060): billable-final usage facts and delivery correlation"
+  - "WORK-053 EconomicAllocation (accepted-merged by DEC-0062): finalized allocations and settlement/reconciliation references"
+  - "WORK-044 Payment Provider Adapters (accepted-merged by DEC-0064): the provider-neutral payment/settlement boundary, payment-provider capability declarations, and settlement references"
+authority_outputs:
+  - "the deterministic connectivity-eligibility/provider-trust/jurisdiction-policy boundary: provider eligibility records and lifecycle, jurisdiction capability/requirement registry, offer-level eligibility checks, device/platform eligibility signals, provider capability declarations (network-sharing mode, metering, geography, supported access types), risk/compliance decision records with explicit provenance and expiry, suspension/reinstatement controls, and versioned deterministic policy evaluation; never a connectivity/session/path authority, a usage or delivery-evidence authority, a payment-settlement authority, or a legal/regulator authority"
+scope:
+  - "eligibility/"
+  - "tools/eligibility_selftest.py"
+  - "docs/WORK-045-evidence.md"
+  - ".github/workflows/spec-check.yml"
+acceptance_criteria:
+  - "Provider eligibility records, jurisdiction capability/requirement registries, offer-level eligibility checks, and device/platform eligibility signals evaluate deterministically under a versioned policy engine."
+  - "Expired/revoked eligibility fails closed; suspension prevents new offers/leases while preserving historical settlement records; reinstatement is explicit."
+  - "Payment-provider approval never implies network-sharing eligibility, and network eligibility never implies payment eligibility (independent authorizations)."
+  - "Jurisdiction-specific requirements are data-driven and auditable; sensitive identity/KYC data remains with the appropriate regulated provider (ADCOS stores references and decision metadata only)."
+  - "Eligibility never silently mutates connectivity/session/path state."
+out_of_scope:
+  - "WORK-046 and later commercial Work Items (W046-W049; W050 advisory capability input)"
+  - "marketplace UI and developer API/SDK/webhook surfaces"
+  - "jurisdiction-specific legal advice engine and regulator authority claims (jurisdiction policy is configuration/evidence, not hardcoded universal law)"
+  - "custody of government IDs or raw KYC documents; KYC/KYB processing"
+  - "payment settlement/custody implementation and live provider onboarding (WORK-044 owns the payment boundary)"
+  - "identity/session/routing/networking/transport/packet authority changes"
+  - "wire-schema or frozen architecture/protocol changes"
+  - "W040 physical evidence and its obligations"
+  - "modifying spec/architect/ from the W045 implementation PR"
+acceptance_gate:
+  status: "Architect review required after implementation"
+  required_evidence:
+    - "dedicated deterministic eligibility battery covering provider/offer/jurisdiction policy evaluation, versioned policy changes without historical rewrites, expired/revoked fail-closed, suspension/reinstatement, and the payment-vs-connectivity authorization independence negative tests"
+    - "negative proofs that eligibility never silently mutates connectivity/session/path state and that sensitive KYC material stays reference-only with the regulated provider"
+    - "exact reviewed delivery SHA, evidence manifest, scope audit, CI/provenance, replay and hash-seed determinism"
+handoff: docs/roadmap/commercial-dependency-model.md
+handoff_required: false

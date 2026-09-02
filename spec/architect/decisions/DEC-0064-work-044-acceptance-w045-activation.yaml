@@ -1,0 +1,45 @@
+# ADCOS Architect decision record.
+# schema: spec/architect/decision-record-template.md; verified by tools/spec_check.py (ARCH-04).
+# Atomic W044 acceptance -> W045 activation transition (lean lane, DEC-0061).
+decision_id: DEC-0064
+type: governance
+work_item: WORK-044
+acr: null
+pr: 127
+reviewed_sha: 6720d220e390999e17707537ab587c1da3b09eb9
+decision: ACCEPTED
+status: ACCEPTED
+reviewer: "Architect (pectoraux)"
+timestamp: 2026-09-02T10:15:00Z
+findings:
+  - "WORK-044 exact reviewed head 6720d220e390999e17707537ab587c1da3b09eb9 satisfies the WORK-044-CORE-001 acceptance criteria: the deterministic payment-adapter battery is 44/44 in both the raw-branch context and the Architect-simulated CI merge-ref context, with two-run and PYTHONHASHSEED determinism and the golden digest stream f0c6258908cdd635b94a0f1344e567a26f044d2487d58c15af41ddd63d386ba2."
+  - "The seven mandatory negative proofs pass: provider success never creates UsageLedger facts and never bypasses BILLABLE_FINAL; callbacks never manufacture delivery evidence; payment on an open account never finalizes usage; payout never manufactures allocations; settled history stays immutable (terminal sealing, append-only compensating records); vendor semantics never cross the adapter boundary; import discipline holds (stdlib, canonicalization, and the clock seam only)."
+  - "Callbacks are signature-verified external observations with a durable anti-replay ledger that become canonical state only through the explicit, validated, journaled apply_observation fold; provider failures are normalized at the boundary; provider/ADCOS divergence reconciliation classifies and records without rewriting either side; payout instructions cite only existing finalized EconomicAllocation citations."
+  - "The delivery is scope-confined and provenance-clean: 16 files, +12206/-0, exactly the authorized scope list with zero spec/ files; ARCH-08 authorization provenance PASSES at the merge ref (the active authorization inherited byte-identically from the base with the exact recorded baseline 66f6c4f0) and the specification-consistency failure set is byte-identical to the clean authorized baseline (zero new failures; the inherited spec/architect ARCH-02/ARCH-06 condition remains the only red)."
+  - "No successful CI run is available on the exact accepted head or the merge commit at this decision time: the recorded specification-consistency run stops at the already-known inherited mainline condition (ARCH-02 schema drift in pre-existing historical records, ARCH-06 open-obligation visibility). Acceptance relies on the exact Architect-reviewed head, the Architect-executed 44/44 battery runs in both contexts, the determinism and negative-proof evidence, and provenance review."
+  - "No physical or W040 evidence is being accepted by this decision: the delivery is SOFTWARE-only and EVID-007/EVID-008 remain OPEN and W040-owned."
+  - "WORK-045 is the deterministic next commercial Work Item in the accepted execution lane: its hard dependencies WORK-051, WORK-053, and WORK-044 are all accepted-merged, and its deterministic connectivity-eligibility/provider-trust/jurisdiction-policy boundary follows the frozen registry definition (issue #89)."
+blockers: []
+required_corrections: []
+evidence:
+  merge_sha: 90864ac257a3d93d94852cfa3a74577903f508d3
+  ci_run: null
+  artifacts:
+    - "docs/WORK-044-evidence.md"
+accepted_scope:
+  - "WORK-044 Payment Provider Adapters & Settlement Gateway as delivered on exact reviewed head 6720d220e390999e17707537ab587c1da3b09eb9 and merged as 90864ac257a3d93d94852cfa3a74577903f508d3."
+  - "The provider-neutral adapter contract, the canonical intent and payout lifecycles, signature-verified callback observation with anti-replay, explicit observation folds, payout emission from finalized allocation citations, provider failure normalization, divergence reconciliation, versioned provider capabilities, the deterministic sandbox provider, and the append-only hash-chained journal with five durable idempotency ledgers evidenced by the delivery record."
+  - "The SOFTWARE evidence classification only; no physical evidence is accepted or implied."
+rejected_scope:
+  - "Any modification to frozen architecture or protocol semantics."
+  - "Any acceptance or closure of W040 physical evidence obligations EVID-007/EVID-008."
+  - "Any W045 implementation, eligibility/policy code, or provider onboarding in this governance transition."
+  - "Any live-money custody, real provider integration, KYC/KYB processing, or regulated funds movement."
+downstream_effect:
+  - "WORK-044-CORE-001 is superseded; its authorization record remains durable provenance."
+  - "WORK-045-CORE-001 is created as the sole active implementation authorization with baseline 90864ac257a3d93d94852cfa3a74577903f508d3 and hard dependencies WORK-051, WORK-053, and WORK-044."
+  - "The single active execution slot transfers from WORK-044 to WORK-045 in this governance transition."
+  - "The WORK-044 execution-ledger entry transitions registered -> accepted-merged with acceptance_decision DEC-0064 (reviewed_sha 6720d22, merge_sha 90864ac2); the WORK-045 registered entry records the active authorization in its note and describes NO delivery."
+  - "W045 implementation remains SOFTWARE-only and must evaluate eligibility deterministically without becoming a connectivity/session/path authority, a usage or delivery-evidence authority, a payment-settlement authority, or a legal/regulator authority; sensitive identity/KYC material stays with the appropriate regulated provider (ADCOS stores references and decision metadata only)."
+  - "W040 remains independent, in-review, and unaccepted; its physical evidence obligations remain OPEN and W040-owned."
+resolved_by: null
