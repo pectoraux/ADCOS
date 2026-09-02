@@ -23,6 +23,7 @@ The acceptance records are DEC-0001..DEC-0039 for WORK-001..WORK-039, plus DEC-0
 | DEC-0060 | governance | WORK-052 | ACCEPTED | ACCEPTED | W052 UsageLedger acceptance → W053 activation |
 | DEC-0061 | governance | null | ACCEPTED | ACCEPTED | Continuous commercial execution lane; lean successor transitions |
 | DEC-0062 | governance | WORK-053 | ACCEPTED | ACCEPTED | W053 EconomicAllocation acceptance → W044 activation |
+| DEC-0063 | governance | WORK-044 | ACCEPTED | ACCEPTED | W044 baseline reconciliation to actual current main |
 
 ## Rules
 

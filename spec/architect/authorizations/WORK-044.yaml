@@ -1,13 +1,22 @@
 # ADCOS Work Item authorization record — WORK-044 active implementation.
 # Issued by DEC-0062 after W053 acceptance.
+#
+# Baseline reconciliation (DEC-0063 / LEDGER-RECON-010, 2026-09-02):
+# baseline_sha moves c9a1f858 -> 66f6c4f0 (post-PR-#125 governance-merge
+# reconciliation, directed by the Architect as a governance-only baseline
+# advancement). The W044 contract, the governing decision (DEC-0062), the
+# dependencies, the acceptance criteria, the scope and out-of-scope
+# boundaries, and every other field are unchanged. No W044 implementation
+# delivery exists.
 work_item: WORK-044
 status: active
 authorized: true
 type: implementation
 authorization_id: "WORK-044-CORE-001"
 authorization_decision: DEC-0062
-baseline_sha: c9a1f8589cddbbeb21756bdd8f72ed57ea515173
-review_basis: "DEC-0062 accepts W053 on PR #124 exact reviewed head 43591667 (merged c9a1f858); W044 issue #88 is the deterministic next commercial Work Item in the accepted execution lane, with hard dependencies WORK-051 and WORK-053 both accepted-merged. The persistent execution snapshot is reconciled to the post-merge mainline by LEDGER-RECON-009."
+baseline_sha: 66f6c4f0ae2c5e4cd4498e6090f876acb1859e45
+baseline_reconciliation_decision: DEC-0063
+review_basis: "DEC-0062 accepts W053 on PR #124 exact reviewed head 43591667 (merged c9a1f858); W044 issue #88 is the deterministic next commercial Work Item in the accepted execution lane, with hard dependencies WORK-051 and WORK-053 both accepted-merged. The persistent execution snapshot is reconciled to the post-merge mainline by LEDGER-RECON-009, and DEC-0063 / LEDGER-RECON-010 advance the W044 implementation baseline to the actual post-PR-#125 mainline 66f6c4f0 as a baseline-advancement-only reconciliation with no change to the W044 contract or scope."
 dependencies:
   - WORK-051
   - WORK-053

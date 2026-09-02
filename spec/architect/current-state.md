@@ -5,7 +5,7 @@
 ## Repository
 
 - Repository: `github.com/pectoraux/ADCOS`
-- Baseline: `c9a1f8589cddbbeb21756bdd8f72ed57ea515173`
+- Baseline: `66f6c4f0ae2c5e4cd4498e6090f876acb1859e45` (actual current main; advanced from `c9a1f8589cddbbeb21756bdd8f72ed57ea515173` by the DEC-0063 baseline reconciliation after the PR #125 governance merge)
 - Architecture version: `1.0`
 - Protocol version: `1.0`
 
@@ -14,7 +14,7 @@
 - Active Work Item: `WORK-044`
 - Active authorization: `WORK-044-CORE-001`
 - Authorization decision: `DEC-0062`
-- Baseline for W044: `c9a1f8589cddbbeb21756bdd8f72ed57ea515173`
+- Baseline for W044: `66f6c4f0ae2c5e4cd4498e6090f876acb1859e45` (advanced from `c9a1f8589cddbbeb21756bdd8f72ed57ea515173` by DEC-0063 — baseline reconciliation only, no scope/dependency/contract change)
 - W053: `accepted-merged` by DEC-0062; PR #124 reviewed at `43591667b226b6239e8197816514b679af1e6154`, merged `c9a1f8589cddbbeb21756bdd8f72ed57ea515173`; 44/44 deterministic battery after a digest-neutral review correction
 - W052: `accepted-merged` by DEC-0060
 - W051: `accepted-merged` by DEC-0059
@@ -34,8 +34,8 @@ W051, W052, and W053 are accepted-merged; W044 is the active implementation trac
 
 ## Governance
 
-DEC-0062 accepts W053 and transfers the single active implementation slot to W044 (lean lane, DEC-0061). The transition changes governance state only; no frozen architecture semantic, protocol schema, or physical evidence obligation changes, and no physical evidence was accepted: W040 physical obligations remain open and W040-owned.
+DEC-0062 accepts W053 and transfers the single active implementation slot to W044 (lean lane, DEC-0061). DEC-0063 records a baseline-advancement-only reconciliation: governance PR #125 itself became a merge commit on the current mainline, so the W044 implementation baseline advances to the actual current main `66f6c4f0ae2c5e4cd4498e6090f876acb1859e45` without changing the W044 contract, authorization scope, dependency satisfaction, or any prior acceptance fact; DEC-0062 remains authoritative historical evidence. These transitions change governance state only; no frozen architecture semantic, protocol schema, or physical evidence obligation changes, and no physical evidence was accepted: W040 physical obligations remain open and W040-owned.
 
 ## Reconciliation
 
-LEDGER-RECON-009 records the historical W053 delivery in the authoritative execution ledger, reconciles the stale WORK-051 entry to its already-decided accepted-merged state (DEC-0059 facts — required because WORK-044's hard dependency WORK-051 must be satisfied in the ledger), and reconciles the persistent snapshot to the current mainline `c9a1f8589cddbbeb21756bdd8f72ed57ea515173`. No other prior work-item history is rewritten; W040 remains independent and unaccepted.
+LEDGER-RECON-010 (DEC-0063) is a baseline reconciliation only: it advances the persistent snapshot and the WORK-044-CORE-001 authorization baseline from `c9a1f8589cddbbeb21756bdd8f72ed57ea515173` to the actual current main `66f6c4f0ae2c5e4cd4498e6090f876acb1859e45` because the PR #125 governance merge advanced the actual mainline; it records that no WORK-044 implementation delivery occurred and that no prior historical work-item fact was rewritten. LEDGER-RECON-009 remains the record of the historical W053 delivery, the WORK-051 dependency reconciliation, and the W053 acceptance/W044 activation transition; the W053 merge fact keeps its merge SHA `c9a1f8589cddbbeb21756bdd8f72ed57ea515173`. No other prior work-item history is rewritten; W040 remains independent and unaccepted.
