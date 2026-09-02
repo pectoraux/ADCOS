@@ -27,7 +27,7 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           OLD_MAIN=fe6e6e35a49cb2113315d0ec1569f7e93a3cf200
           NEW_MAIN=cdd2a9c011f573ba11a7bb39e7dc178e7f150b54
-          test "$(git rev-parse HEAD)" = "$NEW_MAIN"
+          test "$(git rev-parse HEAD^)" = "$NEW_MAIN"
           test "$(grep -c "^main_sha: $OLD_MAIN$" spec/architect/execution-ledger.yaml)" -eq 1
           python3 - <<'PY'
           from pathlib import Path
