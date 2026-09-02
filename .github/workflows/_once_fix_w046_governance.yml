@@ -1,9 +1,10 @@
-# trigger nonce
+# trigger via governance PR creation
 name: one-shot-fix-w046-governance
 on:
-  push:
+  pull_request:
+    types: [opened, synchronize]
     branches:
-      - governance/w046-accept-w047
+      - main
 permissions:
   contents: write
 jobs:
@@ -13,7 +14,10 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          ref: ${{ github.head_ref }}
       - name: Synchronize governance snapshots
+        env:
+          BRANCH: ${{ github.head_ref }}
         run: |
           set -euo pipefail
           python3 - <<'PY'
@@ -36,13 +40,8 @@ jobs:
           if t.count(old)!=1: raise SystemExit('execution-state repository main_sha mismatch')
           t=t.replace(old, '  main_sha: '+MERGE, 1)
           old_sem='  main_sha_semantics: "Exact post-transition governance mainline: PR #130 merged the DEC-0065 / LEDGER-RECON-012 governance transition (accept WORK-045 at reviewed correction head 827234ec / merge a789d9b2; activate WORK-046) at 3db7500 (2026-09-02T14:59:16Z), and DEC-0066 / LEDGER-RECON-013 advance this recorded mainline and the WORK-046-CORE-001 authorization baseline to that exact governance commit, so the W046 implementation branch is cut from the mainline that carries the transition."'
-          new_sem=f'  main_sha_semantics: "Exact post-acceptance mainline: PR #132 merged the Architect-accepted WORK-046 implementation at reviewed head {REVIEWED} as {MERGE} (2026-09-02T19:59:40Z); DEC-0067 / LEDGER-RECON-014 record W046 acceptance and activation of WORK-047 from this exact mainline."'
           if t.count(old_sem)!=1: raise SystemExit('execution-state semantic anchor mismatch')
-          t=t.replace(old_sem,new_sem,1)
-          t=t.replace('  last: "WORK-045"','  last: "WORK-046"',1)
-          t=t.replace('note: "WORK-001..WORK-039, WORK-041, WORK-042, WORK-051, WORK-052, WORK-053, WORK-044, and WORK-045 are accepted-merged; WORK-040 remains in-review and unaccepted."','note: "WORK-001..WORK-039, WORK-041, WORK-042, WORK-051, WORK-052, WORK-053, WORK-044, WORK-045, and WORK-046 are accepted-merged; WORK-040 remains in-review and unaccepted."',1)
-          t=t.replace('  - work_item: WORK-046\n    issue: 90\n    status: "active authorized"\n    contract: "issue #90"\n    authorization: "WORK-046-CORE-001"\n    prerequisite: "W051, W052, W053, W044, and W045 accepted-merged"','  - work_item: WORK-046\n    issue: 90\n    status: "accepted-merged"\n    contract: "issue #90"\n    authorization: "WORK-046-CORE-001 (superseded by DEC-0067)"\n    prerequisite: "accepted by DEC-0067 on PR #132 (reviewed 09960ea, merge f45be6d)"',1)
-          t=t.replace('  - work_item: WORK-047\n    issue: 91\n    status: "ready-candidate"\n    contract: "issue #91"\n    authorization: "none"\n    prerequisite: "W051/W044/W045/W046 accepted-merged"','  - work_item: WORK-047\n    issue: 91\n    status: "active authorized"\n    contract: "issue #91"\n    authorization: "WORK-047-CORE-001"\n    prerequisite: "W051/W044/W045/W046 accepted-merged"',1)
+          t=t.replace(old_sem, f'  main_sha_semantics: "Exact post-acceptance mainline: PR #132 merged the Architect-accepted WORK-046 implementation at reviewed head {REVIEWED} as {MERGE} (2026-09-02T19:59:40Z); DEC-0067 / LEDGER-RECON-014 record W046 acceptance and activation of WORK-047 from this exact mainline."', 1)
           p.write_text(t.rstrip()+'\n')
 
           q=root/'.github/workflows/_once_fix_w046_governance.yml'
@@ -52,5 +51,5 @@ jobs:
           git config user.email 'architect@adc.os'
           git add spec/architect
           git add -u .github/workflows/_once_fix_w046_governance.yml || true
-          git commit -m 'Governance: finalize W046 acceptance snapshot'
-          git push origin governance/w046-accept-w047
+          git commit -m 'Governance: synchronize post-acceptance mainline'
+          git push origin "$BRANCH"
