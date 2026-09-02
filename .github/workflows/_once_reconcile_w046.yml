@@ -1,0 +1,41 @@
+name: one-shot-reconcile-w046
+on:
+  push:
+    branches:
+      - governance/reconcile-w046-acceptance
+permissions:
+  contents: write
+jobs:
+  reconcile:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Reconcile persistent Architect baseline
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('spec/architect/execution-ledger.yaml')
+          t=p.read_text()
+          marker='schema_version: 1\nmain_sha: 3db7500d7b79a8cd3e3a651e1461fbb320efd67e3'
+          if t.count(marker)!=1: raise SystemExit('ledger marker mismatch')
+          t=t.replace(marker,'schema_version: 1\nmain_sha: e3b2c48441725b42a22f1bd82a73fae10d25c5f2',1)
+          marker='  - reconciliation_id: LEDGER-RECON-014\n    recorded_by: DEC-0067'
+          idx=t.find(marker)
+          if idx<0: raise SystemExit('RECON-014 not found')
+          end=t.find('\n  - reconciliation_id:',idx+5)
+          if end<0: end=len(t)
+          rec='''\n  - reconciliation_id: LEDGER-RECON-015\n    recorded_by: DEC-0068\n    recorded_at: 2026-09-02T20:12:02Z\n    from_main_sha: 3db7500d7b79a8cd3e3a651e1461fbb320efd67e3\n    to_main_sha: e3b2c48441725b42a22f1bd82a73fae10d25c5f2\n    reason: "Baseline-advancement-only reconciliation completing DEC-0067: PR #133 merged the W046 acceptance/W047 activation governance transition at e3b2c484. The persistent Architect snapshot advances from the pre-transition mainline 3db7500 to the exact post-transition mainline e3b2c484; W047 authorization baseline is reconciled to the same exact mainline by DEC-0068. No work-item contract, acceptance fact, or frozen architecture/protocol semantic changes."\n    history: "No work-item history rewritten. W046 remains accepted-merged at reviewed head 09960ea with implementation merge f45be6d; W047 remains implementation-empty and the sole active authorization; W040 remains independent and unaccepted with its physical obligations open; W048-W050 remain unauthorized."\n'''
+          t=t[:end]+rec+t[end:]
+          p.write_text(t.rstrip()+'\n')
+
+          Path('.github/workflows/_once_reconcile_w046.yml').unlink()
+          PY
+          git config user.name 'Architect (pectoraux)'
+          git config user.email 'architect@adc.os'
+          git add spec/architect
+          git add -u .github/workflows/_once_reconcile_w046.yml || true
+          git commit -m 'Governance: finalize W046 baseline reconciliation'
+          git push origin governance/reconcile-w046-acceptance
