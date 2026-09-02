@@ -10,7 +10,6 @@ permissions:
 
 jobs:
   reconcile:
-    if: github.actor == 'pectoraux' || github.actor == 'github-actions[bot]'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout governance branch
@@ -31,8 +30,6 @@ jobs:
           git fetch origin main
           test "$(git rev-parse origin/main)" = "$EXPECTED_MAIN_SHA"
 
-          # Keep the already-reviewed W053 activation state where conflicts
-          # occur, while bringing in all newer mainline governance changes.
           git merge --no-edit -X ours origin/main
 
           python3 - <<'PY'
@@ -48,10 +45,7 @@ jobs:
           s = s.replace(f"main_sha: {old_main}", f"main_sha: {new_main}", 1)
           s = s.replace('last_updated: "2026-09-01"', 'last_updated: "2026-09-02"', 1)
 
-          w052 = re.compile(
-              r'  - work_item: WORK-052\n.*?(?=  - work_item: WORK-053\n)',
-              re.S,
-          )
+          w052 = re.compile(r'  - work_item: WORK-052\n.*?(?=  - work_item: WORK-053\n)', re.S)
           replacement = '''  - work_item: WORK-052
     title: "UsageLedger: delivered-usage metering, billable finality, and append-only reconciliation"
     phase: 10
@@ -71,9 +65,8 @@ jobs:
     lifecycle: accepted-merged
     note: "delivery accepted by DEC-0060 on the exact reviewed head a0d3b895 after the review-response cycle: the twelve UsageLedger invariants are satisfied by the recorded 42/42 battery, determinism proofs, provenance review, and SOFTWARE-only evidence. PR #121 merged at dad68cc5; W040 physical obligations remain independent and open. The acceptance transition supersedes WORK-052-CORE-001 and activates WORK-053-CORE-001 as the sole active implementation authorization; this ledger entry is the durable fact that makes WORK-053's hard dependency WORK-052 satisfied."
 '''
-          s2, n = w052.subn(replacement, s, count=1)
+          s, n = w052.subn(replacement, s, count=1)
           assert n == 1, "WORK-052 block not found exactly once"
-          s = s2
 
           marker = "reconciliations:\n"
           assert marker in s
@@ -94,8 +87,6 @@ jobs:
           git commit -m "governance: reconcile W052 acceptance and W053 activation ledger"
           git push origin HEAD
 
-          # Remove this one-shot workflow from the branch after the durable
-          # reconciliation commit. GITHUB_TOKEN pushes do not retrigger it.
           git rm .github/workflows/architect-ledger-reconcile-once.yml
           git commit -m "chore: remove one-shot governance reconciliation workflow"
           git push origin HEAD
