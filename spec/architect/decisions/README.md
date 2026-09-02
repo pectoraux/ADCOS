@@ -10,7 +10,7 @@ Durable Architect decision records live here as `DEC-NNNN-<short-slug>.yaml`. ID
 
 All prior decisions remain authoritative historical records. New decisions are appended; prior decisions are never rewritten.
 
-The acceptance records are DEC-0001..DEC-0039 for WORK-001..WORK-039, plus DEC-0054 for WORK-041, DEC-0057 for WORK-042, DEC-0059 for WORK-051, DEC-0060 for WORK-052, DEC-0062 for WORK-053, DEC-0064 for WORK-044, DEC-0065 for WORK-045, and DEC-0067 for WORK-046. Governance, correction, and architecture decisions DEC-0040..DEC-0053 and DEC-0055/DEC-0056/DEC-0058/DEC-0061/DEC-0066 remain in their original files.
+The acceptance records are DEC-0001..DEC-0039 for WORK-001..WORK-039, plus DEC-0054 for WORK-041, DEC-0057 for WORK-042, DEC-0059 for WORK-051, DEC-0060 for WORK-052, DEC-0062 for WORK-053, DEC-0064 for WORK-044, DEC-0065 for WORK-045, and DEC-0067 for WORK-046. Governance, correction, and architecture decisions DEC-0040..DEC-0053 and DEC-0055/DEC-0056/DEC-0058/DEC-0061/DEC-0066/DEC-0068 remain in their original files.
 
 | ID | Type | Work Item | Verdict | Standing | Subject |
 |---|---|---|---|---|---|
@@ -28,6 +28,7 @@ The acceptance records are DEC-0001..DEC-0039 for WORK-001..WORK-039, plus DEC-0
 | DEC-0065 | governance | WORK-045 | ACCEPTED | ACCEPTED | W045 eligibility acceptance → W046 activation |
 | DEC-0066 | governance | WORK-046 | ACCEPTED | ACCEPTED | W046 baseline reconciliation to the post-transition mainline |
 | DEC-0067 | acceptance | WORK-046 | ACCEPTED | ACCEPTED | W046 Developer API/SDK/Webhook Platform acceptance → W047 activation |
+| DEC-0068 | acceptance | WORK-047 | ACCEPTED | ACCEPTED | W046 acceptance baseline reconciliation / W047 active baseline |
 
 ## Rules
 
