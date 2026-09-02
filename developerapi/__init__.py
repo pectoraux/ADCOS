@@ -43,7 +43,11 @@ Frozen authority boundary (mirrors the W044/W045 discipline):
   lifecycle observation keeps the distinct statements distinct
   and never fabricates or promotes physical evidence.
 - Webhook delivery is an observation channel only: delivery
-  state never becomes canonical business state.
+  state never becomes canonical business state.  The channel's
+  DELIVERY OBLIGATION, however, is durable operational state of
+  the channel itself (persisted before the API response,
+  recovered across restart) -- durability of the obligation,
+  observational purity of the delivery state.
 - Sandbox and production are non-interchangeable, isolated
   namespaces; sandbox results are never production or physical
   evidence.
@@ -106,6 +110,7 @@ from .journal import (
     MemoryApiStore,
     MutationRecord,
     WebhookAttemptRecord,
+    WebhookObligationRecord,
     WebhookQueueRecord,
     derive_record_id,
     derive_request_digest,
@@ -148,6 +153,7 @@ from .webhooks import (
     derive_api_event_id,
     derive_delivery_id,
     derive_endpoint_signing_secret,
+    derive_obligation_id,
     derive_webhook_key_id,
     next_attempt_at,
     sign_delivery,
@@ -205,6 +211,7 @@ __all__ = [
     "MemoryApiStore",
     "MutationRecord",
     "WebhookAttemptRecord",
+    "WebhookObligationRecord",
     "WebhookQueueRecord",
     "derive_record_id",
     "derive_request_digest",
@@ -246,6 +253,7 @@ __all__ = [
     "derive_api_event_id",
     "derive_delivery_id",
     "derive_endpoint_signing_secret",
+    "derive_obligation_id",
     "derive_webhook_key_id",
     "next_attempt_at",
     "sign_delivery",

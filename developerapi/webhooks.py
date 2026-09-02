@@ -262,6 +262,25 @@ def derive_delivery_id(endpoint_id: str, event_id: str) -> str:
     ).hexdigest()
 
 
+def derive_obligation_id(environment: str, event_id: str) -> str:
+    """The content-derived obligation id: one per (environment,
+    event) -- the durable identity of the observation-channel's
+    operational OBLIGATION to deliver one observed event to its
+    resolved audience.  Distinct from the delivery id (which is
+    per endpoint): the obligation is the event-level duty, the
+    deliveries are its per-endpoint satisfactions."""
+    return "sha256:" + hashlib.sha256(
+        canonical_json_bytes(
+            {
+                "namespace": ID_NAMESPACE,
+                "obligation": True,
+                "environment": environment,
+                "event": event_id,
+            }
+        )
+    ).hexdigest()
+
+
 def build_observation_event(
     *,
     event_id: str,

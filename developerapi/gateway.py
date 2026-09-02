@@ -14,11 +14,17 @@ W046 frozen contract's interface boundary):
       -> append the atomic journal record (persist-then-ack)
          -- the FINALITY POINT: the canonical mutation result
          and its response are final from here
-      -> emit webhook observations (queue + attempt) STRICTLY
-         AFTER finality and fully contained: a webhook queue or
-         delivery failure may affect only webhook
-         observability/retry state, never the response
-      -> the canonical response envelope
+      -> append the DURABLE webhook observation obligation
+         (the delivery obligation survives a process crash;
+         contained: a failure here can never change the
+         response)
+      -> return the canonical response envelope
+      -> webhook queue writes + delivery attempts STRICTLY
+         AFTER the response is final and fully contained: a
+         webhook queue or delivery failure may affect only
+         webhook observability/retry state, never the
+         response -- and never the loss of the durable
+         obligation to observe
 
 Authority discipline (the frozen boundary -- battery-pinned
 structurally by the import audit and the cross-authority call
@@ -61,7 +67,16 @@ audit):
   duplicate canonical mutation, never invalidate idempotency,
   and never act as a hidden transaction coordinator for the
   commercial plane (battery case 42 failure-injects exactly
-  this).
+  this).  The DELIVERY OBLIGATION, however, is a durable
+  operational obligation of the observation channel itself:
+  it is persisted BEFORE the API response is returned and
+  survives a process crash, so a queue-write failure (or a
+  crash between the obligation and the queue phase) loses
+  nothing -- restart recovery re-queues the still-missing
+  endpoints exactly once (battery case 43 failure-injects
+  the crash).  The delivery STATE stays observational; the
+  delivery OBLIGATION is durable.  That distinction is the
+  whole reliability contract.
 
 Durability (the idempotency contract): every mutation's
 request+response is ONE atomic journal record (the durable
@@ -123,6 +138,7 @@ from .journal import (
     CredentialRecord,
     MutationRecord,
     WebhookAttemptRecord,
+    WebhookObligationRecord,
     WebhookQueueRecord,
     derive_request_digest,
     fold_index,
@@ -431,11 +447,18 @@ class DeveloperApiService:
             )
         self._index = ApiIndex()
         # Post-finality webhook containment state (health data
-        # ONLY -- never business state): observations whose queue
-        # write failed are retained here for in-process recovery
-        # through the delivery pump; the contained failures are
-        # recorded as incidents.  Both are process-local: durable
-        # truth is the journal alone.
+        # ONLY -- never business state).  The DURABLE recovery
+        # truth for webhook observations is the journal's
+        # obligation records (folded into the index at load);
+        # this in-process buffer is the honest residual for the
+        # one case the journal cannot cover: an observation
+        # whose OBLIGATION WRITE itself failed is retained here
+        # for best-effort in-process recovery through the
+        # delivery pump (the journal is the only durable medium;
+        # if the process crashes before the store heals, that
+        # observation is lost -- recorded as an incident, never
+        # silently).  Both buffers are process-local; the
+        # incidents are health data only.
         self._pending_emissions: List[Callable[[], int]] = []
         self._observation_incidents: List[Dict[str, Any]] = []
 
@@ -504,6 +527,12 @@ class DeveloperApiService:
             raise DeveloperApiError(
                 DeveloperApiReasonCode.JOURNAL_CORRUPT,
                 "live credential registry diverges from the journal fold",
+            )
+        if sorted(folded.obligations) != sorted(self._index.obligations):
+            raise DeveloperApiError(
+                DeveloperApiReasonCode.JOURNAL_CORRUPT,
+                "live webhook obligation index diverges from the "
+                "journal fold",
             )
         if sorted(folded.deliveries) != sorted(self._index.deliveries):
             raise DeveloperApiError(
@@ -652,20 +681,24 @@ class DeveloperApiService:
         """Attempt every due webhook delivery (deterministic
         order: delivery id ascending).
 
-        Pending observations retained by a contained post-finality
-        queue-write failure are retried FIRST (in-process
-        recovery): once the store is healthy again the observation
-        queues -- the queue dedupe (delivery identity) makes the
-        retry exactly-once -- and enters this same delivery pass.
-        A still-failing store keeps the observation pending and
-        records an incident; an observation failure never
-        surfaces as an API failure and never re-executes the
-        canonical mutation.
+        The DURABLE outstanding observation obligations are
+        flushed FIRST (obligation-recovery: every obligation
+        whose queue phase did not complete -- whether because a
+        queue write failed in-process or because the process
+        crashed between the obligation and the queue phase -- is
+        re-queued for its still-missing endpoints; the delivery
+        identity dedupe makes the flush exactly-once), then the
+        in-process residual observations, then the delivery
+        pass.  A still-failing store keeps the obligation
+        outstanding and records an incident; an observation
+        failure never surfaces as an API failure and never
+        re-executes the canonical mutation.
 
         Due = pending (never attempted) OR failed with a
         scheduled next attempt that has arrived AND schedule
         capacity remaining.  Delivered is terminal.  Returns the
         number of attempts performed."""
+        self._flush_outstanding_obligations()
         self._retry_pending_emissions()
         now = self._clock.now()
         performed = 0
@@ -684,21 +717,58 @@ class DeveloperApiService:
             performed += 1
         return performed
 
+    def pending_webhook_obligations(self) -> Tuple[Mapping[str, Any], ...]:
+        """The durable webhook observation obligations still
+        outstanding (platform-side, never an HTTP route).
+
+        An obligation is outstanding exactly when at least one
+        of its target endpoints does not yet hold the queue
+        record for its event -- the satisfaction condition is
+        DERIVED from the journal fold (never separately stored),
+        so the live view, a restarted view, and a replayed view
+        agree by construction.  One entry per outstanding
+        obligation: its identity, the full observation payload
+        members, and the endpoints still pending.  This is the
+        surface a restarted service (and the delivery pump)
+        recovers the observation channel from -- operational
+        observation-channel state, never business state."""
+        out: List[Dict[str, Any]] = []
+        for obligation_id in sorted(self._index.obligations):
+            record = self._index.obligations[obligation_id]
+            missing = [
+                endpoint_id
+                for endpoint_id in record.endpoints
+                if webhook_platform.derive_delivery_id(
+                    endpoint_id, record.event_id
+                )
+                not in self._index.deliveries
+            ]
+            if not missing:
+                continue
+            entry = record.to_dict()
+            del entry["sequence"]
+            del entry["record_id"]
+            entry["pending_endpoints"] = tuple(missing)
+            out.append(entry)
+        return tuple(out)
+
     def webhook_observation_incidents(self) -> Tuple[Mapping[str, Any], ...]:
         """The contained post-finality webhook observation
         failures (health DATA only -- never business state, never
         an API response, never the mutation result).
 
-        One incident per contained failure: the phase (queue
-        ``emission`` / pending ``emission-retry`` / the delivery
-        pass ``delivery``), the error class and message, the
-        boundary reason code when the failure is a boundary
-        error, and the instant.  Incidents are process-local
-        health data: they are NOT journal records, they never
-        survive a restart, and durable truth remains the journal
-        alone.  The platform operator reads them to diagnose
-        webhook-plane health; nothing in the commercial plane
-        reads them."""
+        One incident per contained failure: the phase (queue or
+        obligation write at emission time ``emission`` / the
+        durable obligation recovery flush
+        ``obligation-retry`` / the in-process residual retry
+        ``emission-retry`` / the delivery pass ``delivery``), the
+        error class and message, the boundary reason code when
+        the failure is a boundary error, and the instant.
+        Incidents are process-local health data: they are NOT
+        journal records, they never survive a restart, and
+        durable truth remains the journal alone.  The platform
+        operator reads them to diagnose webhook-plane health;
+        nothing in the commercial plane reads them."""
         return tuple(
             dict(incident) for incident in self._observation_incidents
         )
@@ -708,21 +778,26 @@ class DeveloperApiService:
         strictly after the mutation's finality point, fully
         contained.
 
-        Containment semantics (the frozen W046 invariant): a
-        webhook queue-write failure retains the observation in the
-        pending buffer for in-process recovery through the
-        delivery pump and records an incident; a delivery-pass
-        failure records an incident.  NOTHING raised here ever
-        reaches the caller: the mutation response was finalized
-        before this method is entered, and this method must never
-        raise.  The webhook system is an observer, never a
-        transaction coordinator for the commercial plane."""
+        Containment semantics (the frozen W046 invariant): the
+        emission first persists the DURABLE observation
+        obligation and then queues the per-endpoint deliveries;
+        a failure at either step retains the observation for
+        recovery (the durable obligation when its write
+        succeeded, the in-process residual otherwise) and
+        records an incident; a delivery-pass failure records an
+        incident.  NOTHING raised here ever reaches the caller:
+        the mutation response was finalized before this method
+        is entered, and this method must never raise.  The
+        webhook system is an observer, never a transaction
+        coordinator for the commercial plane."""
         try:
             emission()
         except Exception as error:
-            # the queue write failed (or the emission itself
-            # failed): retain the observation for recovery; the
-            # incident is webhook health data only
+            # the obligation write or a queue write failed: the
+            # observation is retained for recovery -- durably if
+            # the obligation record landed (restart recovery
+            # owns it), in-process as the honest residual
+            # otherwise; the incident is webhook health data only
             self._record_observation_incident("emission", error)
             self._pending_emissions.append(emission)
             return
@@ -735,11 +810,62 @@ class DeveloperApiService:
             # data only
             self._record_observation_incident("delivery", error)
 
-    def _retry_pending_emissions(self) -> int:
-        """Retry the retained pending observations (contained:
-        never raises).
+    def _flush_outstanding_obligations(self) -> int:
+        """Flush the durable outstanding observation obligations
+        (contained: never raises).
 
-        A still-failing store keeps the observation pending and
+        For every obligation whose queue phase did not complete
+        (in-process failure or a crash before the queue writes),
+        the still-missing endpoints are queued now (the delivery
+        identity dedupe makes the flush exactly-once; a partial
+        multi-endpoint queue phase resumes, never repeats).  A
+        still-failing store keeps the obligation outstanding and
+        records an incident.  Returns the number of deliveries
+        queued."""
+        if not self._index.obligations:
+            return 0
+        queued = 0
+        for obligation_id in sorted(self._index.obligations):
+            record = self._index.obligations[obligation_id]
+            missing = [
+                endpoint_id
+                for endpoint_id in record.endpoints
+                if webhook_platform.derive_delivery_id(
+                    endpoint_id, record.event_id
+                )
+                not in self._index.deliveries
+            ]
+            if not missing:
+                continue
+            try:
+                queued += self._queue_observation(
+                    event_id=record.event_id,
+                    event_type=record.event_type,
+                    occurred_at=record.occurred_at,
+                    developer_id=record.developer_id,
+                    resource_kind=record.resource_kind,
+                    resource_id=record.resource_id,
+                    resource_version=record.resource_version,
+                    correlation=record.correlation,
+                    data=record.data_dict(),
+                    endpoints=tuple(missing),
+                )
+            except Exception as error:
+                # the obligation is durable: it stays outstanding
+                # and the next pump pass retries; the incident is
+                # webhook health data only
+                self._record_observation_incident(
+                    "obligation-retry", error
+                )
+        return queued
+
+    def _retry_pending_emissions(self) -> int:
+        """Retry the retained in-process residual observations
+        (contained: never raises).
+
+        These are observations whose DURABLE obligation write
+        itself failed (the journal is the only durable medium):
+        a still-failing store keeps the observation pending and
         records an incident; a healthy store flushes it (the
         queue dedupe by delivery identity makes this
         exactly-once even after a partial multi-endpoint
@@ -1230,7 +1356,13 @@ class DeveloperApiService:
         # mutation, invalidate idempotency, or act as a hidden
         # transaction coordinator for the commercial plane (the
         # W046 frozen observational-only invariant; battery case
-        # 42 failure-injects the exact sequence).
+        # 42 failure-injects the exact sequence).  Inside that
+        # contained phase the observation's DELIVERY OBLIGATION
+        # is made DURABLE FIRST (a journal record carrying the
+        # full event payload and the resolved audience): the
+        # obligation survives a process crash and restart
+        # recovery re-queues its still-missing endpoints exactly
+        # once (battery case 43 failure-injects the crash).
         if emission is not None:
             self._observe_after_finality(emission)
         return envelope
@@ -1573,19 +1705,89 @@ class DeveloperApiService:
         correlation: str,
         data: Mapping[str, Any],
     ) -> int:
-        """Queue the observation for every subscribed endpoint
-        of the resource-owning developer (dedupe by delivery
-        identity: the same event never queues twice)."""
+        """Emit one observation: FIRST the durable delivery
+        obligation (the audience resolved at emission time; the
+        obligation survives a process crash), THEN the
+        per-endpoint queue writes (dedupe by delivery identity:
+        the same event never queues twice).
+
+        Called post-finality-and-pre-response from the API
+        mutation path (contained there) and directly from the
+        platform-side observation surface (failures raise to
+        the operator, never to a developer response)."""
         developer_id = self._resource_owner(resource_kind, resource_id)
         if developer_id is None:
             return 0
+        endpoints = tuple(
+            endpoint_id
+            for endpoint_id in sorted(self._index.endpoints)
+            if self._index.endpoints[endpoint_id].get("developer_id")
+            == developer_id
+            and event_type
+            in self._index.endpoints[endpoint_id].get("event_types", ())
+        )
+        if not endpoints:
+            # no audience: no delivery obligation exists
+            return 0
+        obligation_id = webhook_platform.derive_obligation_id(
+            self._environment, event_id
+        )
+        if obligation_id not in self._index.obligations:
+            record = WebhookObligationRecord.build(
+                sequence=self._journal.tail_sequence() + 1,
+                prev_record_id=self._journal.tail_record_id(),
+                obligation_id=obligation_id,
+                event_id=event_id,
+                event_type=event_type,
+                occurred_at=occurred_at,
+                environment=self._environment,
+                developer_id=developer_id,
+                resource_kind=resource_kind,
+                resource_id=resource_id,
+                resource_version=resource_version,
+                correlation=correlation,
+                data=data,
+                endpoints=endpoints,
+            )
+            self._journal.append(record)
+            self._index.apply(record)
+        return self._queue_observation(
+            event_id=event_id,
+            event_type=event_type,
+            occurred_at=occurred_at,
+            developer_id=developer_id,
+            resource_kind=resource_kind,
+            resource_id=resource_id,
+            resource_version=resource_version,
+            correlation=correlation,
+            data=data,
+            endpoints=endpoints,
+        )
+
+    def _queue_observation(
+        self,
+        *,
+        event_id: str,
+        event_type: str,
+        occurred_at: str,
+        developer_id: str,
+        resource_kind: str,
+        resource_id: str,
+        resource_version: int,
+        correlation: str,
+        data: Mapping[str, Any],
+        endpoints: Tuple[str, ...],
+    ) -> int:
+        """Queue one observation for exactly the given target
+        endpoints (the obligation's resolved audience or its
+        still-missing subset at recovery): per-endpoint delivery
+        sequence, deterministic delivery identity, dedupe
+        (never twice).  The single queue-write site for the
+        emission path AND the crash-recovery flush.  The owner
+        is the obligation-recorded audience owner (never
+        re-resolved at recovery)."""
         queued = 0
-        for endpoint_id in sorted(self._index.endpoints):
-            endpoint = self._index.endpoints[endpoint_id]
-            if endpoint.get("developer_id") != developer_id:
-                continue
-            if event_type not in endpoint.get("event_types", ()):
-                continue
+        for endpoint_id in endpoints:
             delivery_id = webhook_platform.derive_delivery_id(
                 endpoint_id, event_id
             )

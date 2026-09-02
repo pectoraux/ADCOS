@@ -83,13 +83,23 @@ platform journal):
   command, duplicate webhook delivery, retry after timeout,
   restart after partial operation, unauthorized operation,
   invalid credential, invalid API version, invalid idempotency
-  request, invalid webhook signature, raising transport, and
-  the post-finality webhook queue/delivery persistence failure
+  request, invalid webhook signature, raising transport, the
+  post-finality webhook queue/delivery persistence failure
   (a webhook failure AFTER the mutation is admitted never
   changes the canonical mutation result: the caller receives
   the canonical success, the idempotent retry replays it
   byte-identically without re-executing the canonical mutation,
-  and the webhook failure stays observational and recoverable);
+  and the webhook failure stays observational and recoverable),
+  and the durable webhook-obligation crash recovery (the
+  webhook queue append fails AFTER the durable obligation is
+  persisted, the process CRASHES, the service is reconstructed
+  from the durable stores: the pending obligation is recovered,
+  the same observation is queued exactly once, delivery
+  succeeds, the canonical mutation is never re-executed, and
+  the same-key retry remains an idempotent replay -- the
+  delivery OBLIGATION is durable operational state of the
+  observation channel, while the delivery STATE stays
+  observational only);
 - **delivery discipline**: frozen public API surface, frozen
   spec surfaces intact, PR delta confined to the authorized
   W046 scope (+ the sanctioned additive-only CI wiring).
@@ -202,6 +212,7 @@ from developerapi.gateway import ApiRequest, ROUTES  # noqa: E402
 from developerapi.journal import (  # noqa: E402
     AppendOnlyApiJournal,
     MutationRecord,
+    WebhookQueueRecord,
     fold_index,
 )
 from developerapi import webhooks as webhook_platform  # noqa: E402
@@ -692,6 +703,30 @@ class _FlakyApiStore(MemoryApiStore):
         super().append_line(line)
 
 
+class _QueueFailingApiStore(MemoryApiStore):
+    """A store that fails the first N appends of webhook QUEUE
+    records (kind-selected failure injection) and heals
+    afterwards: the failure site is the per-endpoint queue write
+    itself, AFTER whatever durable records precede it, in BOTH
+    the pre-correction and corrected gateways (the durable
+    post-finality obligation crash-recovery proof)."""
+
+    def __init__(self, failures: int = 1) -> None:
+        super().__init__()
+        self._remaining = failures
+        self.failures = 0
+
+    def append_line(self, line: str) -> None:
+        if self._remaining > 0 and '"record_kind":"webhook-queue"' in line:
+            self._remaining -= 1
+            self.failures += 1
+            raise DeveloperApiError(
+                DeveloperApiReasonCode.STORE_FAILED,
+                "injected webhook queue append failure",
+            )
+        super().append_line(line)
+
+
 def _compose_service(
     *,
     environment: str = "sandbox",
@@ -701,15 +736,20 @@ def _compose_service(
     delivery_transports: Optional[Mapping[str, Any]] = None,
     issuance_key: bytes = b"w046-platform-issuance-key",
     world=None,
+    core_store=None,
 ):
     """Compose the developer platform service over real
-    authorities (fresh world unless injected)."""
+    authorities (fresh world unless injected).
+
+    ``core_store`` lets a case hold the commercial core's durable
+    store across a simulated process crash (the reconstructed
+    core recovers journal-first through ``CommercialCore.load``)."""
     if world is None:
         world = _world()
     runtime, peer, session_id, manager, integrator, shared = world
     clock = clock or shared
     core = CommercialCore(
-        store=MemoryCommercialStore(),
+        store=core_store if core_store is not None else MemoryCommercialStore(),
         clock=clock,
         references=_references(manager, integrator, session_id),
     )
@@ -3925,8 +3965,9 @@ def case_42_post_finality_webhook_isolation(results: List[Result]) -> None:
     # -- scenario A: the commercial mutation (intent) with the
     # webhook QUEUE write failing post-finality ------------------
     # append calls: 1 credential, 2 endpoint mutation record,
-    # 3 intent boundary mutation record, 4 queue record (FAILS)
-    store = _FlakyApiStore(fail_from=4, fail_until=5)
+    # 3 intent boundary mutation record (FINALITY), 4 the durable
+    # webhook obligation (OK), 5 the queue record (FAILS)
+    store = _FlakyApiStore(fail_from=5, fail_until=6)
     service, core, *_ = _compose_service(store=store)
     app = _full_app(service, "dev-iso", "iso")
     endpoint_resp = service.handle(
@@ -4079,9 +4120,10 @@ def case_42_post_finality_webhook_isolation(results: List[Result]) -> None:
     # -- scenario B: the boundary-owned mutation (offer) with the
     # webhook DELIVERY attempt record failing post-finality ------
     # append calls: 1 credential, 2 endpoint mutation record,
-    # 3 offer boundary mutation record, 4 queue record (OK),
-    # 5 delivery attempt record (FAILS), 6 the retry attempt (OK)
-    store_b = _FlakyApiStore(fail_from=5, fail_until=6)
+    # 3 offer boundary mutation record (FINALITY), 4 the durable
+    # webhook obligation (OK), 5 the queue record (OK),
+    # 6 the delivery attempt record (FAILS), 7 the retry attempt (OK)
+    store_b = _FlakyApiStore(fail_from=6, fail_until=7)
     service_b, *_ = _compose_service(store=store_b)
     app_b = _full_app(service_b, "dev-iso-b", "iso-b")
     endpoint_b = service_b.handle(
@@ -4179,6 +4221,302 @@ def case_42_post_finality_webhook_isolation(results: List[Result]) -> None:
                 "queue-write and attempt-record failures after "
                 "finality: canonical 200 + byte-identical replay + "
                 "no duplicate mutation + observational recovery",
+            )
+        )
+
+
+def case_43_durable_webhook_obligation_crash_recovery(
+    results: List[Result],
+) -> None:
+    """Durable post-finality webhook obligation across a process
+    crash (the W046 observation-channel reliability invariant,
+    failure-injected at the webhook queue append): the obligation
+    to observe is DURABLE -- a crash between the admitted
+    mutation and the webhook queue phase loses NOTHING.
+
+    The exact required sequence:
+
+    1. the mutation succeeds (200 + the canonical resource);
+    2. the mutation + idempotency record are durable (the
+       boundary journal AND the canonical subsystem journal);
+    3. the webhook queue append fails (the injected store
+       failure, strictly AFTER the durable observation
+       obligation);
+    4. the API still returns the canonical 200 (the P0 finality
+       containment is preserved);
+    5. the process is reconstructed from the durable stores (the
+       core through ``CommercialCore.load``, the boundary through
+       ``DeveloperApiService.load`` -- the crashed instance,
+       including its in-process buffers, is discarded);
+    6. the pending webhook obligation IS recovered (durable: it
+       is visible in the reloaded boundary index);
+    7. the same observation is queued EXACTLY ONCE (the
+       delivery-identity dedupe; a second pump pass is a no-op);
+    8. delivery succeeds (the consumer receives the event once,
+       verified by signature);
+    9. the canonical mutation was NEVER re-executed;
+    10. the same-key API retry on the reloaded boundary remains
+        an idempotent replay (byte-identical canonical response,
+        zero journal growth, zero core journal growth).
+
+    The durable obligation does NOT violate the observational
+    invariant: the DELIVERY STATE remains observational (health
+    data; nothing in the commercial plane reads it), while the
+    DELIVERY OBLIGATION is a durable operational obligation of
+    the observation channel itself."""
+    problems: List[str] = []
+
+    # kind-selected injection: the queue write fails wherever it
+    # falls, in both the pre-correction and corrected gateways
+    store = _QueueFailingApiStore(failures=1)
+    core_store = MemoryCommercialStore()
+    service, core, usage, allocation, world = _compose_service(
+        store=store, core_store=core_store
+    )
+    runtime, peer, session_id, manager, integrator, shared = world
+    app = _full_app(service, "dev-oblig", "oblig")
+    endpoint_resp = service.handle(
+        _req(
+            "POST",
+            "/api/1.0/webhook-endpoints",
+            app,
+            body={
+                "url": "https://consumer-oblig.test/hook",
+                "event_types": ["connectivity_intent.created"],
+            },
+            idempotency_key="oblig-ep-1",
+        )
+    )
+    if endpoint_resp.status != 200:
+        problems.append(
+            "endpoint registration failed: %d" % endpoint_resp.status
+        )
+    endpoint_id = endpoint_resp.body["data"]["id"]
+
+    intent_body = {"intent": {"subscriber": "oblig-crash"}}
+    # (1) + (4) the mutation is admitted; the caller receives the
+    # canonical successful response despite the webhook failure
+    first = service.handle(
+        _req(
+            "POST",
+            "/api/1.0/intents",
+            app,
+            body=intent_body,
+            idempotency_key="oblig-intent-1",
+        )
+    )
+    if first.status != 200 or first.body.get("error") is not None:
+        problems.append(
+            "queue-write failure changed the mutation result: "
+            "status %s body %s"
+            % (
+                first.status,
+                first.body.get("error", {}).get("reason", "-"),
+            )
+        )
+    transaction_id = first.body["data"]["id"]
+    if not transaction_id or (
+        first.body["data"].get("state") != "CONNECTIVITY_INTENT"
+    ):
+        problems.append("canonical intent resource missing from response")
+    # (2) both records are durable BEFORE any webhook write
+    if "oblig-intent-1" not in service.index().mutations:
+        problems.append("idempotency record not applied")
+    if len(core.journal_records()) != 1 or len(core.transactions()) != 1:
+        problems.append(
+            "canonical subsystem journal count %d/%d"
+            % (len(core.journal_records()), len(core.transactions()))
+        )
+    # (3) the injected failure fired exactly once, in the webhook
+    # queue phase, AFTER the durable obligation
+    if store.failures != 1:
+        problems.append(
+            "injection did not fire at the queue append (failures=%d)"
+            % store.failures
+        )
+    # the durable observation obligation exists and carries the
+    # intended audience; no queue record was written
+    obligation_records = [
+        record
+        for record in service.journal_records()
+        if record.to_dict().get("record_kind") == "webhook-obligation"
+    ]
+    if len(obligation_records) != 1:
+        problems.append(
+            "expected exactly one durable webhook obligation, found %d"
+            % len(obligation_records)
+        )
+    elif (
+        endpoint_id
+        not in tuple(obligation_records[0].to_dict().get("endpoints", ()))
+    ):
+        problems.append("obligation does not carry the subscribed endpoint")
+    if service.index().deliveries:
+        problems.append("phantom delivery after failed queue write")
+    incidents = service.webhook_observation_incidents()
+    if len(incidents) != 1 or incidents[0]["phase"] != "emission":
+        problems.append(
+            "queue-write failure not recorded as emission incident: %s"
+            % [dict(i)["phase"] for i in incidents]
+        )
+
+    # (5) the CRASH: both the boundary and the canonical core are
+    # reconstructed from their durable stores; the crashed
+    # instance (with every in-process buffer) is discarded
+    core2 = CommercialCore.load(
+        store=core_store,
+        clock=shared,
+        references=_references(manager, integrator, session_id),
+    )
+    reloaded = DeveloperApiService.load(
+        environment="sandbox",
+        core=core2,
+        usage=usage,
+        allocation=allocation,
+        store=store,
+        clock=shared,
+        issuance_key=b"w046-platform-issuance-key",
+    )
+    # the durable mutation truth survived the crash
+    if "oblig-intent-1" not in reloaded.index().mutations:
+        problems.append("idempotency did not survive the crash")
+    # (6) the pending webhook obligation is recovered from the
+    # durable store (NOT from any in-process state)
+    pending_reader = getattr(
+        reloaded, "pending_webhook_obligations", None
+    )
+    if pending_reader is None:
+        problems.append(
+            "the reloaded service exposes no durable webhook "
+            "obligation surface (the obligation was lost with the "
+            "process)"
+        )
+    else:
+        pending = pending_reader()
+        if len(pending) != 1:
+            problems.append(
+                "pending obligation not recovered across the crash: %s"
+                % [dict(p)["event_type"] for p in pending]
+            )
+        else:
+            pending_one = dict(pending[0])
+            if pending_one.get("event_type") != (
+                "connectivity_intent.created"
+            ):
+                problems.append(
+                    "recovered obligation event type %r"
+                    % pending_one.get("event_type")
+                )
+            if pending_one.get("resource_id") != transaction_id:
+                problems.append(
+                    "recovered obligation resource %r"
+                    % pending_one.get("resource_id")
+                )
+            if tuple(pending_one.get("pending_endpoints", ())) != (
+                endpoint_id,
+            ):
+                problems.append(
+                    "recovered obligation pending endpoints %s"
+                    % (pending_one.get("pending_endpoints"),)
+                )
+    # (9-pre) recovery alone re-executed nothing
+    if len(core2.journal_records()) != 1:
+        problems.append("crash recovery re-executed the canonical mutation")
+
+    # the operator re-provisions the transport binding at boot
+    # (transports are process-local injection, never journal
+    # state), then runs the delivery pump
+    consumer = _Consumer(reloaded.endpoint_signing_secret(endpoint_id))
+    reloaded._transports[endpoint_id] = consumer
+    # (7) + (8) the pump queues the observation exactly once and
+    # delivers it
+    reloaded.process_due_deliveries()
+    queue_records = [
+        record
+        for record in reloaded.journal_records()
+        if isinstance(record, WebhookQueueRecord)
+    ]
+    if len(queue_records) != 1:
+        problems.append(
+            "recovered observation queued %d times (expected exactly one)"
+            % len(queue_records)
+        )
+    deliveries = [
+        state
+        for state in reloaded.index().deliveries.values()
+        if state.endpoint_id == endpoint_id
+    ]
+    if len(deliveries) != 1 or deliveries[0].last_status != "delivered":
+        problems.append(
+            "recovered delivery not delivered: %s"
+            % [s.last_status for s in deliveries]
+        )
+    if len(consumer.deliveries) != 1:
+        problems.append(
+            "consumer received %d events (expected exactly one)"
+            % len(consumer.deliveries)
+        )
+    elif consumer.deliveries[0][0].get("event_type") != (
+        "connectivity_intent.created"
+    ) or consumer.deliveries[0][0].get("resource_id") != transaction_id:
+        problems.append("recovered event content diverged")
+    # exactly-once: a second pump pass is a no-op (the queue
+    # dedupe holds; delivered is terminal)
+    journal_before_second = len(reloaded.journal_records())
+    reloaded.process_due_deliveries()
+    if len(reloaded.journal_records()) != journal_before_second:
+        problems.append("second pump pass grew the journal")
+    if len(consumer.deliveries) != 1:
+        problems.append("second pump pass re-delivered the event")
+    # the obligation is retired exactly when satisfied (derived,
+    # never stored: every target endpoint holds its queue record)
+    if pending_reader is not None and pending_reader():
+        problems.append("satisfied obligation still reported pending")
+    # (9) the canonical mutation was never re-executed through
+    # the whole recovery
+    if len(core2.journal_records()) != 1:
+        problems.append("recovery re-executed the canonical mutation")
+    if core2.transaction(transaction_id).to_dict().get("event_count") != 1:
+        problems.append("canonical transaction mutated during recovery")
+    # live == fold after recovery
+    reloaded.verify_integrity()
+    # (10) the same-key retry on the reloaded boundary is an
+    # idempotent replay (byte-identical; zero growth anywhere)
+    journal_before_retry = len(reloaded.journal_records())
+    retry = reloaded.handle(
+        _req(
+            "POST",
+            "/api/1.0/intents",
+            app,
+            body=intent_body,
+            idempotency_key="oblig-intent-1",
+        )
+    )
+    if retry.status != 200 or (
+        retry.headers.get("X-ADCOS-Idempotent-Replay") != "true"
+    ):
+        problems.append("post-crash retry not a 200 replay")
+    if first.canonical_body_bytes() != retry.canonical_body_bytes():
+        problems.append("replay body differs from the canonical response")
+    if len(reloaded.journal_records()) != journal_before_retry:
+        problems.append("replay grew the journal")
+    if len(core2.journal_records()) != 1:
+        problems.append("replay re-executed the canonical mutation")
+
+    if problems:
+        results.append(
+            fail(
+                "43 durable webhook obligation crash recovery",
+                "; ".join(problems),
+            )
+        )
+    else:
+        results.append(
+            ok(
+                "43 durable webhook obligation crash recovery",
+                "queue append fails + process crash: the durable "
+                "obligation recovers, queues exactly once, delivers, "
+                "never re-executes, and the same-key retry replays",
             )
         )
 
@@ -4561,6 +4899,7 @@ def main() -> int:
         case_40_frozen_spec_intact,
         case_41_pr_delta_shape,
         case_42_post_finality_webhook_isolation,
+        case_43_durable_webhook_obligation_crash_recovery,
     ):
         case(results)
     failures = [result for result in results if not result[1]]

@@ -88,6 +88,7 @@ RECORD_KINDS = (
     "mutation",
     "credential-issue",
     "credential-revoke",
+    "webhook-obligation",
     "webhook-queue",
     "webhook-attempt",
 )
@@ -709,12 +710,179 @@ class WebhookAttemptRecord:
         )
 
 
+@dataclass(frozen=True)
+class WebhookObligationRecord:
+    """One DURABLE webhook observation obligation: the complete
+    observation payload and its resolved audience, persisted
+    BEFORE the API response is returned for the admitting
+    mutation (post-finality for the business mutation,
+    pre-response for the caller) so the obligation to observe
+    SURVIVES a process crash.
+
+    The record is the observation channel's own operational
+    state -- never business state: nothing in the commercial,
+    usage, or allocation planes reads it, and it can never
+    change a mutation result.  Satisfaction is DERIVED, never
+    stored: the obligation is retired exactly when every target
+    endpoint holds its queue record (the delivery-identity
+    dedupe), so restart recovery, pump retries, and journal
+    replay agree on the outstanding set by construction."""
+
+    sequence: int
+    record_id: str
+    obligation_id: str = ""
+    event_id: str = ""
+    event_type: str = ""
+    occurred_at: str = ""
+    environment: str = ""
+    developer_id: str = ""
+    resource_kind: str = ""
+    resource_id: str = ""
+    resource_version: int = 0
+    correlation: str = ""
+    data: Tuple[Tuple[str, Any], ...] = ()
+    endpoints: Tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.sequence, int) or isinstance(
+            self.sequence, bool
+        ) or self.sequence < 1:
+            raise DeveloperApiError(
+                DeveloperApiReasonCode.JOURNAL_CORRUPT,
+                "sequence must be an integer >= 1",
+            )
+        for label, value in (
+            ("record_id", self.record_id),
+            ("obligation_id", self.obligation_id),
+            ("event_id", self.event_id),
+            ("event_type", self.event_type),
+            ("occurred_at", self.occurred_at),
+            ("environment", self.environment),
+            ("developer_id", self.developer_id),
+            ("resource_kind", self.resource_kind),
+            ("resource_id", self.resource_id),
+        ):
+            _require_text(value, label)
+        if not isinstance(self.resource_version, int) or isinstance(
+            self.resource_version, bool
+        ) or self.resource_version < 1:
+            raise DeveloperApiError(
+                DeveloperApiReasonCode.JOURNAL_CORRUPT,
+                "resource version must be a positive integer",
+            )
+        if not isinstance(self.correlation, str):
+            raise DeveloperApiError(
+                DeveloperApiReasonCode.JOURNAL_CORRUPT,
+                "correlation must be a string (or empty)",
+            )
+        if not isinstance(self.data, tuple) or not self.data:
+            raise DeveloperApiError(
+                DeveloperApiReasonCode.JOURNAL_CORRUPT,
+                "an obligation must carry the observed data payload",
+            )
+        if not isinstance(self.endpoints, tuple) or not self.endpoints:
+            raise DeveloperApiError(
+                DeveloperApiReasonCode.JOURNAL_CORRUPT,
+                "an obligation must carry its resolved audience",
+            )
+        for endpoint_id in self.endpoints:
+            if not isinstance(endpoint_id, str) or not endpoint_id:
+                raise DeveloperApiError(
+                    DeveloperApiReasonCode.JOURNAL_CORRUPT,
+                    "obligation endpoints must be non-empty strings",
+                )
+
+    # -- the hash-chain content (single site) --------------------------
+
+    def chain_content(self) -> Dict[str, Any]:
+        return {
+            "record_kind": "webhook-obligation",
+            "obligation_id": self.obligation_id,
+            "event_id": self.event_id,
+            "event_type": self.event_type,
+            "occurred_at": self.occurred_at,
+            "environment": self.environment,
+            "developer_id": self.developer_id,
+            "resource_kind": self.resource_kind,
+            "resource_id": self.resource_id,
+            "resource_version": self.resource_version,
+            "correlation": self.correlation,
+            "data": self.data_dict(),
+            "endpoints": list(self.endpoints),
+        }
+
+    def data_dict(self) -> Dict[str, Any]:
+        return dict(self.data)
+
+    def to_dict(self) -> Dict[str, Any]:
+        out = self.chain_content()
+        out["sequence"] = self.sequence
+        out["record_id"] = self.record_id
+        return out
+
+    @classmethod
+    def build(
+        cls,
+        *,
+        sequence: int,
+        prev_record_id: str,
+        obligation_id: str,
+        event_id: str,
+        event_type: str,
+        occurred_at: str,
+        environment: str,
+        developer_id: str,
+        resource_kind: str,
+        resource_id: str,
+        resource_version: int,
+        correlation: str,
+        data: Mapping[str, Any],
+        endpoints: Tuple[str, ...],
+    ) -> "WebhookObligationRecord":
+        proto = cls(
+            sequence=sequence,
+            record_id="pending",
+            obligation_id=obligation_id,
+            event_id=event_id,
+            event_type=event_type,
+            occurred_at=occurred_at,
+            environment=environment,
+            developer_id=developer_id,
+            resource_kind=resource_kind,
+            resource_id=resource_id,
+            resource_version=resource_version,
+            correlation=correlation,
+            data=tuple(sorted(dict(data).items())),
+            endpoints=tuple(endpoints),
+        )
+        record_id = derive_record_id(
+            sequence, proto.chain_content(), prev_record_id
+        )
+        return cls(
+            sequence=sequence,
+            record_id=record_id,
+            obligation_id=obligation_id,
+            event_id=event_id,
+            event_type=event_type,
+            occurred_at=occurred_at,
+            environment=environment,
+            developer_id=developer_id,
+            resource_kind=resource_kind,
+            resource_id=resource_id,
+            resource_version=resource_version,
+            correlation=correlation,
+            data=proto.data,
+            endpoints=proto.endpoints,
+        )
+
+
 #: The record types the journal discriminates.
 RECORD_TYPES = (
     MutationRecord,
     CredentialRecord,
     WebhookQueueRecord,
     WebhookAttemptRecord,
+    WebhookObligationRecord,
 )
 
 
@@ -866,6 +1034,23 @@ def _record_from_dict(data: object) -> Any:
             response_code=data.get("response_code", -1),
             instant=data.get("instant", ""),
             next_attempt_at=data.get("next_attempt_at", ""),
+        )
+    if kind == "webhook-obligation":
+        return WebhookObligationRecord(
+            sequence=sequence,
+            record_id=data.get("record_id", ""),
+            obligation_id=data.get("obligation_id", ""),
+            event_id=data.get("event_id", ""),
+            event_type=data.get("event_type", ""),
+            occurred_at=data.get("occurred_at", ""),
+            environment=data.get("environment", ""),
+            developer_id=data.get("developer_id", ""),
+            resource_kind=data.get("resource_kind", ""),
+            resource_id=data.get("resource_id", ""),
+            resource_version=data.get("resource_version", 0),
+            correlation=data.get("correlation", ""),
+            data=tuple(sorted(dict(data.get("data") or {}).items())),
+            endpoints=tuple(data.get("endpoints") or ()),
         )
     raise DeveloperApiError(
         DeveloperApiReasonCode.JOURNAL_CORRUPT,
@@ -1050,6 +1235,7 @@ class ApiIndex:
         self.mutations: Dict[str, MutationRecord] = {}
         self.offers: Dict[str, Dict[str, Any]] = {}
         self.endpoints: Dict[str, Dict[str, Any]] = {}
+        self.obligations: Dict[str, WebhookObligationRecord] = {}
         self.deliveries: Dict[str, WebhookDeliveryState] = {}
         self.delivery_sequences: Dict[str, int] = {}
         self.attempts_by_delivery: Dict[str, List[WebhookAttemptRecord]] = {}
@@ -1091,6 +1277,14 @@ class ApiIndex:
                         % record.application_id,
                     )
                 entry["status"] = "revoked"
+        elif isinstance(record, WebhookObligationRecord):
+            if record.obligation_id in self.obligations:
+                raise DeveloperApiError(
+                    DeveloperApiReasonCode.JOURNAL_CORRUPT,
+                    "webhook obligation %r recorded twice"
+                    % record.obligation_id,
+                )
+            self.obligations[record.obligation_id] = record
         elif isinstance(record, WebhookQueueRecord):
             if record.delivery_id in self.deliveries:
                 raise DeveloperApiError(
