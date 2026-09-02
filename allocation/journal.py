@@ -77,11 +77,13 @@ import hashlib
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from types import MappingProxyType
+from typing import Any, Dict, List, Mapping, Tuple
 
 from protocol.canonicalization import canonical_json_bytes
 
 from .errors import AllocationError, AllocationReasonCode
+from .immutability import deep_freeze
 from .model import (
     AllocationAction,
     AllocationCommand,
@@ -596,10 +598,10 @@ class AppendOnlyAllocationJournal:
                     "duplicate command id %r in the stored journal"
                     % record.command.command_id,
                 )
-            self._command_ledger[record.command.command_id] = {
+            self._command_ledger[record.command.command_id] = deep_freeze({
                 "command_digest": record.command_digest,
                 "event_id": record.event.event_id,
-            }
+            })
             if record.event.action == AllocationAction.ALLOCATE:
                 if record.event.usage_record_id in self._usage_record_ledger:
                     raise AllocationError(
@@ -610,10 +612,10 @@ class AppendOnlyAllocationJournal:
                     )
                 self._usage_record_ledger[
                     record.event.usage_record_id
-                ] = {
+                ] = deep_freeze({
                     "allocation_digest": record.allocation_digest,
                     "event_id": record.event.event_id,
-                }
+                })
             if record.event.action == AllocationAction.REGISTER_POLICY:
                 key = policy_key(
                     record.command.policy_id,
@@ -625,10 +627,10 @@ class AppendOnlyAllocationJournal:
                         "duplicate policy key %r in the stored journal "
                         "(a policy version registers exactly once)" % key,
                     )
-                self._policy_ledger[key] = {
+                self._policy_ledger[key] = deep_freeze({
                     "policy_digest": record.policy_digest,
                     "event_id": record.event.event_id,
-                }
+                })
             prev_record_id = record.record_id
             expected_sequence += 1
             self._records.append(record)
@@ -680,50 +682,64 @@ class AppendOnlyAllocationJournal:
                 )
         # persist BEFORE acknowledge (no phantom in-memory state)
         self._store.append_journal_line(record.to_line())
-        self._command_ledger[record.command.command_id] = {
+        self._command_ledger[record.command.command_id] = deep_freeze({
             "command_digest": record.command_digest,
             "event_id": record.event.event_id,
-        }
+        })
         if record.event.action == AllocationAction.ALLOCATE:
-            self._usage_record_ledger[record.event.usage_record_id] = {
-                "allocation_digest": record.allocation_digest,
-                "event_id": record.event.event_id,
-            }
+            self._usage_record_ledger[record.event.usage_record_id] = (
+                deep_freeze({
+                    "allocation_digest": record.allocation_digest,
+                    "event_id": record.event.event_id,
+                })
+            )
         if record.event.action == AllocationAction.REGISTER_POLICY:
             key = policy_key(
                 record.command.policy_id,
                 record.command.policy_version,
             )
-            self._policy_ledger[key] = {
+            self._policy_ledger[key] = deep_freeze({
                 "policy_digest": record.policy_digest,
                 "event_id": record.event.event_id,
-            }
+            })
         self._records.append(record)
 
     def known_command(self, command_id: str):
         """The recorded (digest, event_id) for an admitted command
-        id, or None (the durable command-idempotency ledger)."""
+        id, or None (the durable command-idempotency ledger; the
+        entry is a deeply frozen read-only view)."""
         return self._command_ledger.get(command_id)
 
     def known_usage_record(self, usage_record_id: str):
         """The recorded (digest, event_id) for an allocated usage
         record id, or None (the durable usage-record-idempotency
-        ledger: a usage record allocates exactly once)."""
+        ledger: a usage record allocates exactly once; the entry
+        is a deeply frozen read-only view)."""
         return self._usage_record_ledger.get(usage_record_id)
 
     def known_policy(self, key: str):
         """The recorded (digest, event_id) for a registered policy
-        key, or None (the durable policy-identity ledger)."""
+        key, or None (the durable policy-identity ledger; the
+        entry is a deeply frozen read-only view)."""
         return self._policy_ledger.get(key)
 
-    def command_ledger(self) -> Dict[str, Dict[str, str]]:
-        return dict(self._command_ledger)
+    def command_ledger(self) -> Mapping[str, Mapping[str, str]]:
+        """The durable command-idempotency ledger as a LIVE
+        read-only view (deeply frozen: the outer mapping and
+        every entry reject in-place mutation -- the W053
+        review-cycle correction; reads stay live with the
+        journal)."""
+        return MappingProxyType(self._command_ledger)
 
-    def usage_record_ledger(self) -> Dict[str, Dict[str, str]]:
-        return dict(self._usage_record_ledger)
+    def usage_record_ledger(self) -> Mapping[str, Mapping[str, str]]:
+        """The durable usage-record-idempotency ledger as a live
+        read-only (deeply frozen) view."""
+        return MappingProxyType(self._usage_record_ledger)
 
-    def policy_ledger(self) -> Dict[str, Dict[str, str]]:
-        return dict(self._policy_ledger)
+    def policy_ledger(self) -> Mapping[str, Mapping[str, str]]:
+        """The durable policy-identity ledger as a live read-only
+        (deeply frozen) view."""
+        return MappingProxyType(self._policy_ledger)
 
     def records(self) -> Tuple[JournalRecord, ...]:
         return tuple(self._records)

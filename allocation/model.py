@@ -57,6 +57,16 @@ The frozen value records of the economic allocation layer
   projected record derived from an appended journal record, never
   an in-place edit, and an account in a compensating terminal
   state can never be re-projected (no outgoing terminal edges).
+  The projection is DEEPLY immutable (the W053 review-cycle
+  correction): its nested containers (``settlement``,
+  ``compensations`` entries) are frozen at construction
+  (read-only mappings over tuples), and ``command.payload`` is
+  frozen the same way -- no mutable container is reachable
+  through the public surface, so a state change without a
+  journal append is structurally impossible.  ``content()``/
+  ``to_dict()`` materialize DETACHED plain copies (digest-neutral:
+  the canonical bytes of the frozen and plain forms are
+  identical).
 
 - **compute_split** -- the exact integer arithmetic: the
   explicitly modeled adjustment, ADCOS share, and tax are computed
@@ -94,6 +104,8 @@ from __future__ import annotations
 import hashlib
 from dataclasses import dataclass
 from typing import Any, Dict, Mapping, Tuple
+
+from .immutability import deep_freeze, deep_materialize
 
 from protocol.canonicalization import canonical_json_bytes
 
@@ -848,7 +860,7 @@ def command_content(
         "policy_id": policy_id,
         "policy_version": policy_version,
         "references": [reference.to_dict() for reference in references],
-        "payload": dict(payload),
+        "payload": deep_materialize(payload),
         "actor": actor,
         "source": source,
     }
@@ -958,7 +970,7 @@ class AllocationCommand:
     policy_id: str
     policy_version: int
     references: Tuple[FactReference, ...]
-    payload: Dict[str, Any]
+    payload: Mapping[str, Any]
     actor: str
     source: str
 
@@ -1008,7 +1020,17 @@ class AllocationCommand:
                         "strings" % member,
                     )
                 payload[member] = tuple(sorted(set(raw)))
-        object.__setattr__(self, "payload", payload)
+        # the payload is DEEPLY frozen: the command (and every
+        # journaled record carrying it) exposes NO mutable
+        # container through the public surface -- a payload edit
+        # after admission would silently forge future digest and
+        # idempotency-intent comparisons, so in-place mutation
+        # raises instead (state changes only through a NEW
+        # journaled command; the digest basis is the
+        # digest-neutral MATERIALIZED form)
+        object.__setattr__(
+            self, "payload", deep_freeze(payload)
+        )
         for key in payload:
             if not isinstance(key, str) or not key:
                 raise AllocationError(
@@ -1430,8 +1452,8 @@ class AllocationAccount:
     tax_amount: int
     allocation_total: int
     payment_refs: Tuple[str, ...]
-    settlement: Dict[str, Any]
-    compensations: Tuple[Dict[str, Any], ...]
+    settlement: Mapping[str, Any]
+    compensations: Tuple[Mapping[str, Any], ...]
     compensated_amount: int
     last_action: str
     last_instant: str
@@ -1576,6 +1598,21 @@ class AllocationAccount:
                     AllocationReasonCode.EVENT_INVALID,
                     "compensations entries must be mappings",
                 )
+        # DEEP immutability (the W053 review-cycle correction):
+        # the frozen dataclass alone is SHALLOW -- the nested
+        # settlement/compensations dicts behind it were mutable
+        # through the public projection surface, allowing state
+        # changes without a journal append.  They are deeply
+        # frozen here: read-only mappings over tuples, so any
+        # in-place mutation through the public surface raises
+        # (fail closed); content()/to_dict() materialize the
+        # detached, digest-neutral plain form.
+        object.__setattr__(
+            self, "settlement", deep_freeze(self.settlement)
+        )
+        object.__setattr__(
+            self, "compensations", deep_freeze(self.compensations)
+        )
         if self.last_action not in AllocationAction.values():
             raise AllocationError(
                 AllocationReasonCode.EVENT_INVALID,
@@ -1636,8 +1673,10 @@ class AllocationAccount:
             "tax_amount": self.tax_amount,
             "allocation_total": self.allocation_total,
             "payment_refs": list(self.payment_refs),
-            "settlement": dict(self.settlement),
-            "compensations": [dict(entry) for entry in self.compensations],
+            "settlement": deep_materialize(self.settlement),
+            "compensations": [
+                deep_materialize(entry) for entry in self.compensations
+            ],
             "compensated_amount": self.compensated_amount,
             "last_action": self.last_action,
             "last_instant": self.last_instant,

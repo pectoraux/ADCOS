@@ -21,6 +21,15 @@ payment/settlement-vs-allocation separation (payment success,
 reservation state, offer state, and provider callbacks never
 create allocation; payment references never satisfy settlement),
 and journal integrity (tamper, corruption, store failures).
+
+The W053 review cycle added ``FACT_INCOMPLETE``: the
+usage-fact-integrity family separates a THIN command citation
+(legal -- resolution replaces it with the index-authoritative
+record) from an INCOMPLETE index entry (a resolved
+BILLABLE_FINAL record that does not carry the full W052 public
+projection fails closed, naming the unpopulated member; distinct
+from ``USAGE_NOT_FINAL``, which stays the reason for non-final
+usage states).
 """
 
 from __future__ import annotations
@@ -39,6 +48,7 @@ class AllocationReasonCode:
     FACT_REQUIRED = "fact-required"
     FACT_AMBIGUOUS = "fact-ambiguous"
     FACT_FAMILY_INVALID = "fact-family-invalid"
+    FACT_INCOMPLETE = "fact-incomplete"
     USAGE_NOT_FINAL = "usage-not-final"
     USAGE_RECORD_MISMATCH = "usage-record-mismatch"
     TRANSACTION_MISMATCH = "transaction-mismatch"
@@ -74,6 +84,7 @@ class AllocationReasonCode:
             cls.FACT_REQUIRED,
             cls.FACT_AMBIGUOUS,
             cls.FACT_FAMILY_INVALID,
+            cls.FACT_INCOMPLETE,
             cls.USAGE_NOT_FINAL,
             cls.USAGE_RECORD_MISMATCH,
             cls.TRANSACTION_MISMATCH,

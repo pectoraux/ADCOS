@@ -69,6 +69,20 @@ injected immutable fact index:
   (restart + fact-index eviction replays exact duplicates as
   no-ops; conflicting reuse and new citations on evicted facts
   still fail closed).
+- review-correction regressions (the PR #124 review cycle):
+  the resolved BILLABLE_FINAL usage fact must be FULLY
+  POPULATED -- a thin command citation (id + family +
+  provenance only) is legal because the index is the family
+  authority, but an incomplete index entry fails closed
+  FACT_INCOMPLETE naming the unpopulated member (amount,
+  quantity, unit, finalized_at, transaction_id, usage_state),
+  distinct from USAGE_NOT_FINAL (non-final states keep their
+  own reason) -- and the public projections are DEEPLY
+  immutable: settlement/compensations nested containers, the
+  three durable idempotency ledgers, and journaled command
+  payloads all reject in-place mutation (state changes only
+  through journal appends, fail closed, byte-identical digest
+  stream).
 
 Usage:
     python3 tools/allocation_selftest.py
@@ -367,6 +381,7 @@ _ALLOWED_IMPORT_MODULES = {
     "dataclasses",
     "pathlib",
     "typing",
+    "types",
     "protocol",
     "agent.clock",
     "usage",
@@ -1367,7 +1382,7 @@ def case_01_frozen_vocabularies(results: List[Result]) -> None:
         "invalid-input", "command-invalid", "command-duplicate",
         "command-conflict", "allocation-conflict", "account-unknown",
         "fact-unknown", "fact-required", "fact-ambiguous",
-        "fact-family-invalid", "usage-not-final",
+        "fact-family-invalid", "fact-incomplete", "usage-not-final",
         "usage-record-mismatch", "transaction-mismatch",
         "policy-unknown", "policy-conflict", "policy-ineffective",
         "policy-ambiguous", "policy-invalid", "share-out-of-bounds",
@@ -2335,9 +2350,9 @@ def case_13_payment_not_settlement(results: List[Result]) -> None:
     if out.status != "appended":
         problems.append("honest settlement rejected")
     account = ledger.allocation(finality_id)
-    if account.settlement.get("payment_refs") != [_payment_ref()]:
+    if account.settlement.get("payment_refs") != (_payment_ref(),):
         problems.append("payment observations not recorded as settlement "
-                        "DATA")
+                        "DATA (immutable tuple)")
     if problems:
         results.append(fail(name, "; ".join(problems)))
         return
@@ -2364,8 +2379,8 @@ def case_14_settlement_acknowledgement(results: List[Result]) -> None:
     settlement = account.settlement
     if settlement.get("record_id") != out.event_id:
         problems.append("settlement record id wrong")
-    if settlement.get("settlement_refs") != [_settlement_ref()]:
-        problems.append("settlement refs not recorded")
+    if settlement.get("settlement_refs") != (_settlement_ref(),):
+        problems.append("settlement refs not recorded (immutable tuple)")
     if settlement.get("command_id") != "s-01":
         problems.append("settlement command not recorded")
     if settlement.get("acknowledged_at") != out.instant:
@@ -3867,6 +3882,278 @@ def case_42_settlement_data_only(results: List[Result]) -> None:
                             "without provider observations"))
 
 
+def case_43_resolved_fact_population(results: List[Result]) -> None:
+    name = "case_43_resolved_fact_population"
+    facts, finality_id, tx, core, usage_ledger, manager, integrator = (
+        _facts_fixture()
+    )
+    problems: List[str] = []
+    full = facts.get(finality_id)
+    # the fixture's index-authoritative usage-final fact is the
+    # fully-populated W052 public projection (the baseline the
+    # resolved record is held to)
+    if full.usage_state != "BILLABLE_FINAL":
+        problems.append("fixture usage fact is not billable-final")
+    if full.amount < 1 or full.quantity < 1 or not full.finalized_at:
+        problems.append("fixture usage fact is not fully populated")
+    if not problems:
+        # POSITIVE discrimination: the typed surface builds THIN
+        # command citations (id + family + provenance only); a
+        # thin citation against a fully-populated index entry is
+        # LEGAL -- the index is the family authority and
+        # resolution replaces the citation with the full record
+        thin = _fresh_ledger(facts)
+        _register_std_policy(thin)
+        _std_allocate(thin, finality_id, tx)
+        account = thin.allocation(finality_id)
+        if account.billable_amount != full.amount:
+            problems.append("allocation did not consume the index amount")
+        if account.quantity != full.quantity:
+            problems.append("allocation did not consume the index quantity")
+        if account.unit != full.unit:
+            problems.append("allocation did not consume the index unit")
+    # NEGATIVE discrimination: a BILLABLE_FINAL index entry that
+    # is NOT fully populated fails closed FACT_INCOMPLETE -- thin
+    # command citations (legal) and incomplete index entries
+    # (fail closed) are distinct families, the reason names the
+    # unpopulated member, every rejection leaves zero journal
+    # growth, and no clock read is consumed
+    clock = CountingClock(StepClock(_AT0, _ASTEP))
+    template = dict(
+        reference_id=full.reference_id,
+        family=FactFamily.USAGE_FINAL,
+        provenance=full.provenance,
+        usage_state=full.usage_state,
+        transaction_id=full.transaction_id,
+        amount=full.amount,
+        quantity=full.quantity,
+        unit=full.unit,
+        finalized_at=full.finalized_at,
+    )
+    variants = (
+        ("transaction_id", dict(transaction_id="")),
+        ("unit", dict(unit="")),
+        ("amount", dict(amount=0)),
+        ("quantity", dict(quantity=0)),
+        ("finalized_at", dict(finalized_at="")),
+        ("usage_state", dict(usage_state="")),
+    )
+    for member, override in variants:
+        entry = FactReference(**{**template, **override})
+        bad_ledger = AllocationLedger(
+            store=MemoryAllocationStore(), clock=clock,
+            facts=FactIndex((entry,)),
+        )
+        _register_std_policy(bad_ledger)
+        reads_before = clock.reads
+        length_before = bad_ledger.tail_sequence()
+        problem = None
+        try:
+            bad_ledger.allocate(
+                command_id="x-%s" % member,
+                usage_record_id=finality_id,
+                policy_id=_PID, policy_version=_PID_V,
+                developer_share_bps=_DEV_SHARE, adjustment=0,
+                effective_at=_EFFECTIVE_AT, currency=_CCY,
+                actor="economics", source="allocation-service",
+            )
+            problem = "incomplete index entry (%s) was admitted" % member
+        except AllocationError as error:
+            if error.reason != "fact-incomplete":
+                problem = (
+                    "expected fact-incomplete for %s, got %s (%s)"
+                    % (member, error.reason, error.detail)
+                )
+            elif member not in error.detail:
+                problem = (
+                    "reason detail does not name the unpopulated member %s"
+                    % member
+                )
+        if problem is None:
+            if clock.reads != reads_before:
+                problem = "%s rejection consumed a clock read" % member
+            elif bad_ledger.tail_sequence() != length_before:
+                problem = "%s rejection grew the journal" % member
+        if problem:
+            problems.append(problem)
+    # the state gate keeps its own reason: a non-final (but
+    # otherwise populated) entry is USAGE_NOT_FINAL, never
+    # swallowed by the population gate
+    non_final = FactReference(
+        **{**template, **dict(usage_state="OBSERVED")}
+    )
+    non_final_ledger = AllocationLedger(
+        store=MemoryAllocationStore(), clock=clock,
+        facts=FactIndex((non_final,)),
+    )
+    _register_std_policy(non_final_ledger)
+    problem = _expect_error(
+        name, "usage-not-final",
+        non_final_ledger.allocate,
+        command_id="x-nonfinal", usage_record_id=finality_id,
+        policy_id=_PID, policy_version=_PID_V,
+        developer_share_bps=_DEV_SHARE, adjustment=0,
+        effective_at=_EFFECTIVE_AT, currency=_CCY,
+        actor="economics", source="allocation-service",
+    )
+    if problem:
+        problems.append("non-final state: %s" % problem)
+    if problems:
+        results.append(fail(name, "; ".join(problems)))
+        return
+    results.append(
+        ok(name, "resolved BILLABLE_FINAL facts must be fully populated: "
+                 "thin command citations resolve against the index; "
+                 "incomplete index entries fail closed fact-incomplete "
+                 "naming the member; non-final states keep "
+                 "usage-not-final")
+    )
+
+
+def case_44_deep_immutable_projections(results: List[Result]) -> None:
+    name = "case_44_deep_immutable_projections"
+    facts, finality_id, tx, core, usage_ledger, manager, integrator = (
+        _facts_fixture()
+    )
+    ledger = _fresh_ledger(facts)
+    _register_std_policy(ledger)
+    _std_allocate(ledger, finality_id, tx)
+    ledger.acknowledge_settlement(
+        command_id="s-01", usage_record_id=finality_id,
+        settlement_refs=(_settlement_ref(),),
+        payment_refs=(_payment_ref(),),
+        actor="billing", source="settlement-service",
+    )
+    ledger.compensate_refund(
+        command_id="r-01", usage_record_id=finality_id, amount=300,
+        reason="immutable-projection-proof",
+        payment_refs=(_payment_ref(),),
+        actor="billing", source="billing-service",
+    )
+    before_stream = ledger.digest_stream()
+    before_seq = ledger.tail_sequence()
+    account = ledger.allocation(finality_id)
+    problems: List[str] = []
+
+    def _rejects_mutation(label: str, thunk) -> None:
+        try:
+            thunk()
+        except (TypeError, AttributeError):
+            return  # fail-closed rejection of the in-place mutation
+        except Exception as error:  # noqa: BLE001 - wrong rejection type
+            problems.append(
+                "%s: wrong rejection type %s"
+                % (label, type(error).__name__)
+            )
+            return
+        problems.append(
+            "%s: mutation SUCCEEDED (state change without a journal "
+            "append)" % label
+        )
+
+    # the allocation projection's nested containers are deeply
+    # immutable (frozen dataclass fields alone are shallow: the
+    # settlement/compensations dicts behind them are the hole)
+    _rejects_mutation(
+        "account.settlement item assignment",
+        lambda: account.settlement.__setitem__("command_id", "tampered"),
+    )
+    _rejects_mutation(
+        "account.settlement new-key insertion",
+        lambda: account.settlement.__setitem__("injected", "tampered"),
+    )
+    _rejects_mutation(
+        "account.settlement nested list mutation",
+        lambda: account.settlement.get("payment_refs").append("tampered"),
+    )
+    _rejects_mutation(
+        "account.compensations entry mutation",
+        lambda: account.compensations[0].__setitem__("amount", 999999),
+    )
+    _rejects_mutation(
+        "account.compensations slot replacement",
+        lambda: account.compensations.__setitem__(0, {}),
+    )
+    _rejects_mutation(
+        "account.compensations append",
+        lambda: account.compensations.append({}),
+    )
+    _rejects_mutation(
+        "account frozen field assignment",
+        lambda: setattr(account, "state", "REFUNDED"),
+    )
+    # the three durable idempotency ledgers are read-only
+    # through the public surface (their inner entries were
+    # shallow-copies before: shared mutable digests)
+    _rejects_mutation(
+        "command ledger inner digest tamper",
+        lambda: ledger.command_ledger()["p-01"].__setitem__(
+            "command_digest", "tampered"
+        ),
+    )
+    _rejects_mutation(
+        "command ledger entry replacement",
+        lambda: ledger.command_ledger().__setitem__("p-01", {}),
+    )
+    _rejects_mutation(
+        "usage-record ledger tamper",
+        lambda: ledger.usage_record_ledger()[finality_id].__setitem__(
+            "allocation_digest", "tampered"
+        ),
+    )
+    _rejects_mutation(
+        "policy ledger tamper",
+        lambda: ledger.policy_ledger()["std#1"].__setitem__(
+            "policy_digest", "tampered"
+        ),
+    )
+    # journaled command payloads are immutable DATA (a tampered
+    # payload would forge future digests/intents)
+    _rejects_mutation(
+        "journaled command payload tamper",
+        lambda: ledger.journal_records()[0].command.payload.__setitem__(
+            "developer_share_bps", 12345
+        ),
+    )
+    _rejects_mutation(
+        "journaled command payload insertion",
+        lambda: ledger.journal_records()[0].command.payload.__setitem__(
+            "injected", "tampered"
+        ),
+    )
+    # the frozen projections stay READABLE through the public
+    # surface (read paths are unaffected)
+    if account.settlement.get("command_id") != "s-01":
+        problems.append("frozen settlement not readable")
+    if account.compensations[0].get("amount") != 300:
+        problems.append("frozen compensation not readable")
+    # to_dict() materializes a DETACHED plain copy: mutating it
+    # must not touch canonical state
+    detached = account.to_dict()
+    detached["settlement"]["command_id"] = "tampered"
+    detached["compensations"][0]["amount"] = 999999
+    if account.settlement.get("command_id") == "tampered":
+        problems.append("to_dict mutation leaked into live state")
+    if ledger.digest_stream() != before_stream:
+        problems.append("digest stream changed without a journal append")
+    if ledger.tail_sequence() != before_seq:
+        problems.append("journal grew during mutation attempts")
+    try:
+        ledger.verify_integrity()
+    except AllocationError as error:
+        problems.append("integrity verification failed: %s" % error.detail)
+    if problems:
+        results.append(fail(name, "; ".join(problems)))
+        return
+    results.append(
+        ok(name, "public projections are deeply immutable: settlement/"
+                 "compensations nested containers, the three idempotency "
+                 "ledgers, and journaled command payloads reject in-place "
+                 "mutation; state changes only through journal appends "
+                 "(digest stream byte-identical)")
+    )
+
+
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
@@ -3917,6 +4204,8 @@ def main() -> int:
         case_40_effective_date_selection,
         case_41_conservation_matrix,
         case_42_settlement_data_only,
+        case_43_resolved_fact_population,
+        case_44_deep_immutable_projections,
     ):
         case(results)
     failures = [result for result in results if not result[1]]

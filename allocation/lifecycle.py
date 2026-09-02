@@ -59,7 +59,7 @@ mirroring the accepted W052 ``usage.lifecycle`` discipline:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Mapping, Optional, Tuple
 
 from agent.clock import AgentClock
 
@@ -526,13 +526,20 @@ class AllocationLedger:
     def tail_sequence(self) -> int:
         return self._journal.tail_sequence()
 
-    def command_ledger(self) -> Dict[str, Dict[str, str]]:
+    def command_ledger(self) -> Mapping[str, Mapping[str, str]]:
+        """The durable command-idempotency ledger (a live,
+        deeply-frozen read-only view -- in-place mutation
+        raises; reads stay live with the journal)."""
         return self._journal.command_ledger()
 
-    def usage_record_ledger(self) -> Dict[str, Dict[str, str]]:
+    def usage_record_ledger(self) -> Mapping[str, Mapping[str, str]]:
+        """The durable usage-record-idempotency ledger (a live,
+        deeply-frozen read-only view)."""
         return self._journal.usage_record_ledger()
 
-    def policy_ledger(self) -> Dict[str, Dict[str, str]]:
+    def policy_ledger(self) -> Mapping[str, Mapping[str, str]]:
+        """The durable policy-identity ledger (a live,
+        deeply-frozen read-only view)."""
         return self._journal.policy_ledger()
 
     def fact_index(self) -> FactIndex:

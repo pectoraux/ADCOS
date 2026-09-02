@@ -27,7 +27,13 @@ W053 economic gates):
   to the command's own usage record (cross-record substitution
   fails closed ``USAGE_RECORD_MISMATCH``); the cited fact must be
   ``BILLABLE_FINAL`` (open usage accounts fail closed
-  ``USAGE_NOT_FINAL``); the commercial DATA citation must be the
+  ``USAGE_NOT_FINAL``); the RESOLVED (index-authoritative)
+  record must carry the FULL W052 public projection -- a thin
+  command citation is legal (the index is the family authority
+  and resolution replaces it), but an incomplete index entry
+  fails closed ``FACT_INCOMPLETE`` naming the unpopulated
+  member (usage_state, transaction_id, unit, amount, quantity,
+  finalized_at); the commercial DATA citation must be the
   usage fact's own transaction (``TRANSACTION_MISMATCH``);
   multiple distinct usage-final citations fail closed
   ``FACT_AMBIGUOUS`` (order-independent).
@@ -353,8 +359,9 @@ def validate_fact_integrity(
     resolved: Tuple[FactReference, ...],
 ) -> FactReference:
     """The unambiguous usage-fact citation, BOUND to the command's
-    own usage record, BILLABLE_FINAL, with the commercial DATA
-    citation bound to the usage fact's own transaction.
+    own usage record, BILLABLE_FINAL and FULLY POPULATED, with
+    the commercial DATA citation bound to the usage fact's own
+    transaction.
 
     Returns the resolved usage-final fact (the allocation's
     economic input).  Fail-closed gates (allocation commands
@@ -366,8 +373,22 @@ def validate_fact_integrity(
       resolution);
     - the unique citation's id != ``command.usage_record_id`` ->
       ``USAGE_RECORD_MISMATCH`` (cross-record substitution);
+    - the cited fact's state is empty -> ``FACT_INCOMPLETE``
+      (incomplete index entry: the resolved record does not even
+      carry the state fact);
     - the cited fact's state != ``BILLABLE_FINAL`` ->
       ``USAGE_NOT_FINAL`` (open usage accounts never allocate);
+    - the resolved BILLABLE_FINAL record does not carry the FULL
+      W052 public projection -> ``FACT_INCOMPLETE`` naming the
+      unpopulated member (``transaction_id``/``unit``/``amount``/
+      ``quantity``/``finalized_at``; a billable-final record
+      always carries its own transaction, metered unit, POSITIVE
+      metered amount and quantity, and its finality instant --
+      0/empty is the unpopulated default).  Thin COMMAND
+      citations are legal: the index is the family authority and
+      resolution replaces them with the authoritative record;
+      it is the RESOLVED record that must be fully populated
+      (allocation gates on the REAL finality facts);
     - more than one DISTINCT commercial citation ->
       ``FACT_AMBIGUOUS``;
     - a commercial citation whose id != the usage fact's own
@@ -397,13 +418,26 @@ def validate_fact_integrity(
             "record %s (cross-record substitution rejected)"
             % (fact.reference_id, command.usage_record_id),
         )
-    # the resolved (INDEX-AUTHORITATIVE) usage fact must carry
-    # the full W052 public projection facts
-    if not fact.usage_state or not fact.transaction_id or not fact.unit:
+    # the resolved (INDEX-AUTHORITATIVE) usage fact must be
+    # BILLABLE_FINAL and FULLY POPULATED.  Gate order is the
+    # discrimination the W053 review required: the state gate
+    # keeps its own reason (a non-final usage state is
+    # USAGE_NOT_FINAL, never swallowed by the population gate);
+    # an EMPTY state is an incomplete index entry (an honest
+    # open-account snapshot always carries its real state);
+    # and once the record CLAIMS BILLABLE_FINAL it must carry
+    # the full W052 public projection -- thin command citations
+    # are legal (the index is the family authority), but an
+    # incomplete index entry fails closed FACT_INCOMPLETE
+    # naming the unpopulated member
+    if not fact.usage_state:
         raise AllocationError(
-            AllocationReasonCode.FACT_FAMILY_INVALID,
-            "resolved usage-final fact %s carries no public projection "
-            "facts (malformed index entry)" % fact.reference_id,
+            AllocationReasonCode.FACT_INCOMPLETE,
+            "resolved usage-final fact %s is not fully populated "
+            "(incomplete index entry): member 'usage_state' carries "
+            "no state fact (thin command citations resolve against "
+            "the caller-built index; the resolved record must carry "
+            "the W052 public projection)" % fact.reference_id,
         )
     if fact.usage_state != ALLOCATION_REQUIRED_USAGE_STATE:
         raise AllocationError(
@@ -412,6 +446,24 @@ def validate_fact_integrity(
             "consumes only billable-final usage records)"
             % (fact.reference_id, fact.usage_state),
         )
+    for member, populated in (
+        ("transaction_id", bool(fact.transaction_id)),
+        ("unit", bool(fact.unit)),
+        ("amount", fact.amount >= 1),
+        ("quantity", fact.quantity >= 1),
+        ("finalized_at", bool(fact.finalized_at)),
+    ):
+        if not populated:
+            raise AllocationError(
+                AllocationReasonCode.FACT_INCOMPLETE,
+                "resolved usage-final fact %s is not fully populated "
+                "(incomplete index entry): member '%s' is unpopulated "
+                "(a BILLABLE_FINAL record carries the full W052 public "
+                "projection -- its own transaction, metered unit, "
+                "positive metered amount and quantity, and its finality "
+                "instant; 0/empty is the unpopulated default)"
+                % (fact.reference_id, member),
+            )
     commercial_facts = tuple(
         ref for ref in resolved
         if ref.family == FactFamily.COMMERCIAL
