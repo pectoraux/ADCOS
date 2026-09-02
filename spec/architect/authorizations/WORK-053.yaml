@@ -1,0 +1,50 @@
+# ADCOS Work Item authorization record — WORK-053 active implementation.
+# Issued by DEC-0060 after W052 acceptance.
+work_item: WORK-053
+status: active
+authorized: true
+type: implementation
+authorization_id: "WORK-053-CORE-001"
+authorization_decision: DEC-0060
+baseline_sha: cdd2a9c011f573ba11a7bb39e7dc178e7f150b54
+review_basis: "DEC-0060 accepts W052 on PR #121 exact reviewed head a0d3b895; W053 issue #85 is the next hard-dependent commercial Work Item. The persistent execution snapshot has been reconciled to the current mainline by LEDGER-RECON-008 without changing the reviewed W052 facts."
+dependencies:
+  - WORK-052
+authority_inputs:
+  - "WORK-052 UsageLedger (accepted-merged by DEC-0060)"
+  - "WORK-051 CommercialCore (accepted-merged by DEC-0059)"
+  - "WORK-033 AgentClock seam"
+authority_outputs:
+  - "EconomicAllocation policy versions, immutable allocation snapshots, settlement acknowledgements, external payment-reference data, reconciliation references, and append-only compensating allocation events; never a payment-provider or connectivity authority"
+scope:
+  - "allocation/"
+  - "tools/allocation_selftest.py"
+  - "docs/WORK-053-handoff.md"
+  - "docs/WORK-053-evidence.md"
+  - ".github/workflows/spec-check.yml"
+acceptance_criteria:
+  - "Allocation consumes only BILLABLE_FINAL UsageLedger facts; payment, reservation, offer, or provider callbacks never create allocation."
+  - "Every allocation references exactly one immutable policy version and one billable-final usage record."
+  - "Allocation arithmetic is deterministic, idempotent, and exact under explicit currency precision and rounding."
+  - "Settled history is immutable; refunds, reversals, disputes, chargebacks, and payout failures are append-only compensating events."
+  - "Provider/developer/ADCOS allocation conservation holds exactly after explicitly modeled fees, taxes, and adjustments, while payment references remain DATA only and no regulated funds are moved by this Work Item."
+out_of_scope:
+  - "W044 payment-provider adapters and concrete payment integrations"
+  - "W045 eligibility/trust/jurisdiction"
+  - "W046 developer API/SDK/webhooks"
+  - "W047 marketplace discovery"
+  - "W048 provider sharing runtime"
+  - "W049 client runtime"
+  - "W050 capability/isolation matrix"
+  - "payment custody, KYC/KYB, jurisdiction policy, regulated funds movement"
+  - "identity/session/routing/path/transport/federation/policy authority"
+  - "wire-schema or frozen architecture changes"
+  - "modifying spec/architect/ from the implementation PR"
+acceptance_gate:
+  status: "Architect review required after implementation"
+  required_evidence:
+    - "dedicated deterministic EconomicAllocation battery covering all ten invariants and required verification areas"
+    - "exact reviewed delivery SHA, evidence manifest, scope audit, CI/provenance, replay and hash-seed determinism"
+    - "negative payment/reservation/provider-callback cases and exact conservation/rounding proofs"
+handoff: docs/WORK-053-handoff.md
+handoff_required: true

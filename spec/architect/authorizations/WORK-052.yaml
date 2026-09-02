@@ -1,13 +1,15 @@
-# ADCOS Work Item authorization record — WORK-052 active implementation.
-# Issued by DEC-0059 after W051 acceptance.
+# ADCOS Work Item authorization record — WORK-052 provenance.
+# Superseded by DEC-0060 after Architect acceptance of PR #121.
 work_item: WORK-052
-status: active
-authorized: true
+status: superseded
+authorized: false
+superseded_by: "WORK-053-CORE-001"
+supersession_decision: DEC-0060
 type: implementation
 authorization_id: "WORK-052-CORE-001"
 authorization_decision: DEC-0059
 baseline_sha: fc3ace9c45b77bae36fe757a5629bc197fd906e4
-review_basis: "DEC-0059 accepts W051 on PR #117 exact reviewed head 94743283; W052 issue #84 is the next hard-dependent commercial Work Item."
+review_basis: "DEC-0059 activation; exact W052 scope and provenance retained here."
 dependencies:
   - WORK-051
 authority_inputs:
@@ -36,10 +38,11 @@ out_of_scope:
   - "wire-schema or frozen architecture changes"
   - "modifying spec/architect/ from the implementation PR"
 acceptance_gate:
-  status: "Architect review required after implementation"
+  status: "accepted-merged by DEC-0060"
   required_evidence:
-    - "dedicated UsageLedger deterministic battery and replay/hash-seed proofs"
-    - "negative payment-to-usage and reservation-to-usage tests"
-    - "exact delivery SHA, evidence manifest, scope audit, and green existing batteries"
+    - "exact reviewed delivery SHA a0d3b895831d00c2a5fe267afe9c118a5c010648"
+    - "merge SHA dad68cc5c7ecc48eedddfa26264a8b38f7fe84fa"
+    - "42/42 UsageLedger deterministic battery; two-run and hash-seed determinism proofs"
+    - "SOFTWARE-class evidence and authority-boundary review; inherited mainline spec-check defects remain separately disclosed"
 handoff: docs/WORK-052-handoff.md
 handoff_required: true

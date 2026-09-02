@@ -52,8 +52,8 @@
 # semantic changes.
 
 schema_version: 1
-main_sha: fe6e6e35a49cb2113315d0ec1569f7e93a3cf200
-last_updated: "2026-09-01"
+main_sha: cdd2a9c011f573ba11a7bb39e7dc178e7f150b54
+last_updated: "2026-09-02"
 work_items:
   - work_item: WORK-001
     title: "Protocol specification/governance foundation"
@@ -179,7 +179,7 @@ work_items:
   - work_item: WORK-008
     title: "Resource model and measurements"
     phase: 1
-    branch: "work-008-resource-model-measurements"
+    branch: "work-008/resource-model-measurements"
     baseline_sha: null
     pr: 8
     pr_head: 3d9dbe944ceb91ab67ca7605cb2842b3e2a5d37d
@@ -213,7 +213,7 @@ work_items:
   - work_item: WORK-010
     title: "Policy engine"
     phase: 1
-    branch: "work-010-policy-engine"
+    branch: "work-010/policy-engine"
     baseline_sha: null
     pr: 10
     pr_head: 4b8086d9552ca5a29d7c33c97de76b1740d6ec81
@@ -247,7 +247,7 @@ work_items:
   - work_item: WORK-012
     title: "Logical sessions"
     phase: 2
-    branch: "work-012-session-lifecycle"
+    branch: "work-012/session-lifecycle"
     baseline_sha: null
     pr: 12
     pr_head: c0140d7b3279e0afdc92100ad3b533d123bcc741
@@ -264,7 +264,7 @@ work_items:
   - work_item: WORK-013
     title: "Multipath session manager"
     phase: 2
-    branch: "work-013-multipath-sessions"
+    branch: "work-013/multipath-sessions"
     baseline_sha: null
     pr: 13
     pr_head: 3c3588535135e0a91172b162cfb9f848adb121f0
@@ -281,7 +281,7 @@ work_items:
   - work_item: WORK-014
     title: "Mobility and handover manager"
     phase: 2
-    branch: "work-014-mobility-handover"
+    branch: "work-014/mobility-handover"
     baseline_sha: null
     pr: 14
     pr_head: 245689ae8101bb3109ea51422d5cc7d452e25087
@@ -299,7 +299,7 @@ work_items:
   - work_item: WORK-015
     title: "Federation protocol"
     phase: 2
-    branch: "work-015-federation"
+    branch: "work-015/federation"
     baseline_sha: null
     pr: 15
     pr_head: a6d5158669fa9bbdcda676662e2bcf2d0c6c1c8c
@@ -310,14 +310,14 @@ work_items:
     review_rounds: null
     acceptance_decision: DEC-0015
     correction_decisions: []
-    handoff: spec/prompts/WORK-015.md
+    handoff: null
     handoff_required: false
     lifecycle: accepted-merged
     note: "review refinement durably recorded: the Status-line prose-reference classification (tools/spec_check.py, WORK-015 review direction)"
   - work_item: WORK-016
     title: "Adapter SDK/runtime"
     phase: 3
-    branch: "work-016-adapter-sdk"
+    branch: "work-016/adapter-sdk"
     baseline_sha: null
     pr: 16
     pr_head: 2bb0f7617e471bab8b1c3889fd2fbc58adaaa1b0
@@ -335,7 +335,7 @@ work_items:
   - work_item: WORK-017
     title: "Secure transport profiles"
     phase: 3
-    branch: "work-017-final-acceptance"
+    branch: "work-017/final-acceptance"
     baseline_sha: null
     pr: 18
     pr_head: 8b12d0bfbae446f648501b7412f4d896e888ce28
@@ -353,7 +353,7 @@ work_items:
   - work_item: WORK-018
     title: "IPv6 and IP integration boundary"
     phase: 3
-    branch: "work-018-ipv6-ip-integration-v2"
+    branch: "work-018/ipv6-ip-integration-v2"
     baseline_sha: null
     pr: 19
     pr_head: 57628b7c26343666915bf6d7b755bb7ed09c951d
@@ -371,7 +371,7 @@ work_items:
   - work_item: WORK-019
     title: "5G Core integration adapter"
     phase: 4
-    branch: "work-019-5gc-adapter"
+    branch: "work-019/5gc-adapter"
     baseline_sha: null
     pr: 20
     pr_head: 9c8bba609d02d10d6f2f86bb5a8aae7a7d3edeee
@@ -390,7 +390,7 @@ work_items:
   - work_item: WORK-020
     title: "5G RAN/gNB adapter"
     phase: 4
-    branch: "work-020-5g-ran-adapter"
+    branch: "work-020/5g-ran-adapter"
     baseline_sha: null
     pr: 21
     pr_head: 5dd9f0d9da511cad580c365200f6b58ea7075fa7
@@ -426,7 +426,7 @@ work_items:
   - work_item: WORK-022
     title: "Ethernet/fiber/microwave/satellite adapter family"
     phase: 4
-    branch: "work-022-backhaul-adapters"
+    branch: "work-022/backhaul-adapters"
     baseline_sha: null
     pr: 23
     pr_head: 54987bbe46e6d09c727ac721186b2bf8140461a0
@@ -443,7 +443,7 @@ work_items:
   - work_item: WORK-023
     title: "Mesh, IAB, relay, and store-and-forward adapter family"
     phase: 4
-    branch: "work-023-mesh-relay"
+    branch: "work-023/mesh-relay"
     baseline_sha: null
     pr: 24
     pr_head: 9702dd03747761a4d0c43afaa0d7de5e22b7885a
@@ -460,7 +460,7 @@ work_items:
   - work_item: WORK-024
     title: "Distributed core / local breakout / UPF integration"
     phase: 4
-    branch: "work-024-distributed-core"
+    branch: "work-024/distributed-core"
     baseline_sha: null
     pr: 25
     pr_head: 87b028147c1487192ac08a702507a5bb06fdeadb
@@ -477,7 +477,7 @@ work_items:
   - work_item: WORK-025
     title: "Service registry and edge compute"
     phase: 4
-    branch: "work-025-service-registry"
+    branch: "work-025/service-registry"
     baseline_sha: null
     pr: 26
     pr_head: c7e59c50b528240cc1f8d242e99f866fa99f563b
@@ -494,7 +494,7 @@ work_items:
   - work_item: WORK-026
     title: "Telemetry and observability"
     phase: 5
-    branch: "work-026-telemetry-observability"
+    branch: "work-026/telemetry-observability"
     baseline_sha: null
     pr: 27
     pr_head: bc56e08bd42c620502230a9bd110b481fee47d37
@@ -512,7 +512,7 @@ work_items:
   - work_item: WORK-027
     title: "Energy-aware control and resilience"
     phase: 5
-    branch: "work-027-energy-resilience"
+    branch: "work-027/energy-resilience"
     baseline_sha: null
     pr: 28
     pr_head: a4ed7c70e14bfbb474037597c643f30d87473a89
@@ -530,7 +530,7 @@ work_items:
   - work_item: WORK-028
     title: "Threat model and security hardening"
     phase: 5
-    branch: "work-028-security-hardening"
+    branch: "work-028/security-hardening"
     baseline_sha: null
     pr: 30
     pr_head: 164394087fb1f3618b52bea8de16a9c20c43eb46
@@ -547,7 +547,7 @@ work_items:
   - work_item: WORK-029
     title: "Upgrade, rollback, and compatibility manager"
     phase: 5
-    branch: "work-029-upgrade-compat"
+    branch: "work-029/upgrade-compat"
     baseline_sha: null
     pr: 31
     pr_head: b085b8ac86babf486d93ee71a04002f00ef6fdd8
@@ -564,7 +564,7 @@ work_items:
   - work_item: WORK-030
     title: "Management API"
     phase: 5
-    branch: "work-030-management-api"
+    branch: "work-030/management-api"
     baseline_sha: null
     pr: 32
     pr_head: 7cfe4fbd7094ca6ffe928873c637d0d4d0a1369d
@@ -581,7 +581,7 @@ work_items:
   - work_item: WORK-031
     title: "Network and behavior simulator"
     phase: 6
-    branch: "work-031-network-behavior-simulator"
+    branch: "work-031/network-behavior-simulator"
     baseline_sha: null
     pr: 34
     pr_head: 4f80bdc246ede98d52b28ec2dd919ffda24d08ca
@@ -598,7 +598,7 @@ work_items:
   - work_item: WORK-032
     title: "Conformance suite"
     phase: 6
-    branch: "work-032-conformance-suite"
+    branch: "work-032/conformance-suite"
     baseline_sha: null
     pr: 37
     pr_head: 3fa72674b8004e0b96faf60c9d927171af2549dc
@@ -616,7 +616,7 @@ work_items:
   - work_item: WORK-033
     title: "Linux Agent"
     phase: 6
-    branch: "work-033-linux-agent"
+    branch: "work-033/linux-agent"
     baseline_sha: null
     pr: 38
     pr_head: 1a93d5cf0ab611cf6271cd63a9858298991a02af
@@ -633,7 +633,7 @@ work_items:
   - work_item: WORK-034
     title: "Raspberry Pi / low-power gateway"
     phase: 7
-    branch: "work-034-raspberry-pi-gateway"
+    branch: "work-034/raspberry-pi-gateway"
     baseline_sha: ddc7787ca03ef1658997974ade9d81a6c04c9b3a
     pr: 39
     pr_head: a591ac6f1e085a37994e54af18a316a2943e3b31
@@ -651,7 +651,7 @@ work_items:
   - work_item: WORK-035
     title: "Android/mobile Agent"
     phase: 7
-    branch: "work-035-android-mobile-agent"
+    branch: "work-035/android-mobile-agent"
     baseline_sha: d01628c3c437501931fafd98c09bd294c0e952a0
     pr: 40
     pr_head: f1a3ce83267f12eaa4e974a1200c8bf37e7a484a
@@ -670,7 +670,7 @@ work_items:
   - work_item: WORK-036
     title: "Network-in-a-Box"
     phase: 7
-    branch: "work-036-network-in-a-box"
+    branch: "work-036/network-in-a-box"
     baseline_sha: cffbe01639eca7c67988e2df16a7641e145203c1
     pr: 41
     pr_head: f8078db17fb9f0e2ae78f5bfe38538fef58c8dee
@@ -689,7 +689,7 @@ work_items:
   - work_item: WORK-037
     title: "Open RAN/Core interoperability profile"
     phase: 7
-    branch: "work-037-open-ran-core"
+    branch: "work-037/open-ran-core"
     baseline_sha: 518c07133b1e08792d09f28baaf7a671eeeb13f3
     pr: 42
     pr_head: 98c57eca368424b292d4f4ee956f303ea4e0ccee
@@ -708,7 +708,7 @@ work_items:
   - work_item: WORK-038
     title: "Future IMT / 6G adapter profile"
     phase: 8
-    branch: "work-038-future-imt-6g"
+    branch: "work-038/future-imt-6g"
     baseline_sha: cebe9f938d49f31b4c6fdd13e68f1e9075afc904
     pr: 43
     pr_head: 6c809f95d49949281c5c184c0c10720e9c5509c9
@@ -726,7 +726,7 @@ work_items:
   - work_item: WORK-039
     title: "Federation at scale"
     phase: 8
-    branch: "work-039-federation-at-scale"
+    branch: "work-039/federation-at-scale"
     baseline_sha: 06c445a19d04ce6f3642b9138d6ca3318b4e325d
     pr: 44
     pr_head: c515231fa23bc168d603926a81b2c73654e3dfb4
@@ -744,7 +744,7 @@ work_items:
   - work_item: WORK-040
     title: "Pilot deployment"
     phase: 8
-    branch: "work-040-pilot-deployment"
+    branch: "work-040/pilot-deployment"
     baseline_sha: 1669ae9a396838b72ba461c846b98e84478ab24f
     pr: 48
     pr_head: ee9b356020b6450d85837f60e60c41d08f0ec09a
@@ -800,7 +800,7 @@ work_items:
     handoff: docs/WORK-042-handoff.md
     handoff_required: true
     lifecycle: accepted-merged
-    note: "delivery entry added by ACR-011 (frozen Work Item registry extension through the canonical commercial phase) exactly per the convention recorded by LEDGER-RECON-004/006: a ledger entry is added once the Work Item has a delivery PR and is registered in the frozen registry. Delivered under WORK-042-CORE-001 (DEC-0055; authorization baseline 96db8aa = the LEDGER-RECON-006 snapshot baseline; implementation branch cut from the post-PR-#109 mainline 1909479, which carries the active authorization record, ARCH-08 provenance verified on the PR). PR #110 delivery: authoritative CI run 33444952103 (spec-check, pull_request) on head 708a432 is SUCCESS (the platform battery step ran and passed 32/32); the push-run on the merge commit 207d70e (33448347826) is also SUCCESS; the Architect merged PR #110 at 207d70e (2026-08-31T22:54:17Z) with zero correction rounds (one commit, no review comments). DEC-0057 (2026-09-01) is the acceptance review of the exact merged head 708a432 (review round 1, no corrections required): the W042 contract scope is accepted with SOFTWARE-class evidence only (docs/WORK-042-evidence.md — all five contract criteria satisfied; deterministic digest stream; negative fail-closed coverage; no PHYSICAL claim, EVID-007/EVID-008 remain OPEN and W040-owned); the lifecycle transitions to accepted-merged with acceptance_decision DEC-0057 and reviewed_sha 708a432. The same DEC-0057/DEC-0058 transition supersedes WORK-042-CORE-001 (status superseded, authorized false, scope and provenance preserved) and activates WORK-051-CORE-001 (DEC-0058; CommercialCore chain head, dependencies none per the frozen registry) as the single active authorization; the WORK-051 registered-only entry stays lifecycle registered until a real delivery exists. The snapshot baseline is reconciled 96db8aa -> fe6e6e3 by LEDGER-RECON-007. No W001..W041 entry is rewritten."
+    note: "delivery entry added by ACR-011 (frozen Work Item registry extension through the canonical commercial phase) exactly per the convention recorded by LEDGER-RECON-004/006: a ledger entry is added once the Work Item has a delivery PR and is registered in the frozen registry. Delivered under WORK-042-CORE-001 (DEC-0055; authorization baseline 96db8aa = the LEDGER-RECON-006 snapshot baseline; implementation branch cut from the post-PR-#109 mainline 1909479, which carries the active authorization record, ARCH-08 provenance verified on the PR). PR #110 delivery: authoritative CI run 33444952103 (spec-check, pull_request) on head 708a432 is SUCCESS (the platform battery step ran and passed 32/32); the push-run on the merge commit 207d70e (33448347826) is also SUCCESS; the Architect merged PR #110 at 207d70e (2026-08-31T22:54:17Z) with zero correction rounds (one commit, no review comments). DEC-0057 (2026-09-01) is the acceptance review of the exact merged head 708a432 (review round 1, no corrections required): the W042 contract scope is accepted with SOFTWARE-class evidence only (docs/WORK-042-evidence.md — all five contract criteria satisfied; deterministic digest stream; negative fail-closed coverage; no PHYSICAL claim, EVID-007/EVID-008 remain OPEN and W040-owned); the lifecycle transitions to accepted-merged with acceptance_decision DEC-0057 and reviewed_sha 708a432. The same DEC-0057/DEC-0058 transition supersedes WORK-042-CORE-001 (status superseded, authorized false, scope/criteria/provenance preserved) and activates WORK-051-CORE-001 (DEC-0058; CommercialCore chain head, dependencies none per the frozen registry) as the single active authorization; the WORK-051 registered-only entry stays lifecycle registered until a real delivery exists. The snapshot baseline is reconciled 96db8aa -> fe6e6e3 by LEDGER-RECON-007. No W001..W041 entry is rewritten."
   - work_item: WORK-044
     title: "Payment Provider Adapters & Settlement Gateway"
     phase: 10
@@ -948,21 +948,21 @@ work_items:
   - work_item: WORK-052
     title: "UsageLedger: delivered-usage metering, billable finality, and append-only reconciliation"
     phase: 10
-    branch: null
-    baseline_sha: null
-    pr: null
-    pr_head: null
-    reviewed_sha: null
-    merge_sha: null
-    merged_at: null
+    branch: "work-052-usage-ledger"
+    baseline_sha: fc3ace9c45b77bae36fe757a5629bc197fd906e4
+    pr: 121
+    pr_head: a0d3b895831d00c2a5fe267afe9c118a5c010648
+    reviewed_sha: a0d3b895831d00c2a5fe267afe9c118a5c010648
+    merge_sha: dad68cc5c7ecc48eedddfa26264a8b38f7fe84fa
+    merged_at: 2026-09-01T15:19:03Z
     ci_run: null
-    review_rounds: null
-    acceptance_decision: null
+    review_rounds: 1
+    acceptance_decision: DEC-0060
     correction_decisions: []
-    handoff: null
-    handoff_required: false
-    lifecycle: registered
-    note: "registered-only entry added by ACR-011: WORK-052 is formally registered in the frozen registry (Phase 10, canonical commercial phase) with NO delivery yet. Definition source: tracking issue #84 and the canonical commercial dependency model. Dependencies (hard): WORK-051 (interfaces consumed; WORK-042 journal-first discipline where consumed is a discipline reference, not a Work Item dependency edge). Authorization: none — registration is representation only, never authorization; the item stays a ready-candidate until its own repository-local authorization issues."
+    handoff: docs/WORK-052-handoff.md
+    handoff_required: true
+    lifecycle: accepted-merged
+    note: "delivery accepted by DEC-0060 on the exact reviewed head a0d3b895 after the review-response cycle: the twelve UsageLedger invariants are satisfied by the recorded 42/42 battery, determinism proofs, provenance review, and SOFTWARE-only evidence. PR #121 merged at dad68cc5; W040 physical obligations remain independent and open. The acceptance transition supersedes WORK-052-CORE-001 and activates WORK-053-CORE-001 as the sole active implementation authorization; this ledger entry is the durable fact that makes WORK-053's hard dependency WORK-052 satisfied."
   - work_item: WORK-053
     title: "EconomicAllocation: developer/provider/ADCOS revenue-share policy and external payment boundary"
     phase: 10
@@ -989,7 +989,7 @@ reconciliations:
     from_main_sha: 1669ae9a396838b72ba461c846b98e84478ab24f
     to_main_sha: 93efa54f1edc2ec3c0bb5646827719f92af06b86
     reason: "persistent-state reconciliation after the persistent Architect package merged (PR #60, merge 93efa54f at 2026-08-30T03:59:21Z): the package-establishment snapshot baseline moves from 1669ae9a to the post-merge mainline, and the WORK-040 round 1 verdict plus the correction-only authorization WORK-040-CORRECTION-001 are recorded on the WORK-040 entry"
-    history: "no work-item history rewritten: every WORK-001..WORK-039 entry is byte-identical to the package-establishment snapshot; WORK-040 gains its review_rounds count, its correction-decision reference, and the repository-local correction handoff; the reconciliation is formal and visible, never silent"
+    history: "no work-item history rewritten: every WORK-001..WORK-039 entry was byte-identical to the package-establishment snapshot; WORK-040 gains its review_rounds count, its correction-decision reference, and the repository-local correction handoff; the reconciliation is formal and visible, never silent"
   - reconciliation_id: LEDGER-RECON-002
     recorded_by: "Architect-directed governance-only correction commit on PR #70 (2026-08-30): baseline reconciliation of the still-active correction authorization; no new decision record is required because the correction scope, the governing decision (DEC-0046), and all work-item history are unchanged"
     recorded_at: 2026-08-30T07:06:00Z
@@ -1035,3 +1035,11 @@ reconciliations:
     to_main_sha: fe6e6e35a49cb2113315d0ec1569f7e93a3cf200
     reason: "post-PR-#110/#111/#115 mainline reconciliation and atomic governance transition: main advanced from the LEDGER-RECON-006 snapshot baseline 96db8aa through PR #110 (the WORK-042 implementation merged at head 708a432, CI run 33444952103 SUCCESS), PR #111 (the ACR-011 commercial phase registry extension, merged 810374e, accepted by DEC-0056), and PR #115 (the DEC-0056 acceptance record persistence, merged fe6e6e3) while the persistent state still referenced 96db8aa. This reconciliation moves the snapshot baseline to fe6e6e3 in lockstep with execution-state.yaml; records the WORK-042 acceptance (DEC-0057: reviewed_sha 708a432, merge_sha 207d70e, merged_at 2026-08-31T22:54:17Z, acceptance decision ACCEPTED) with its execution-ledger entry transitioned implemented -> accepted-merged; supersedes the WORK-042-CORE-001 authorization (status superseded, authorized false, scope/criteria/provenance preserved); and activates WORK-051-CORE-001 (DEC-0058; CommercialCore, ACR-009, the commercial chain head with frozen-registry dependencies none) as the single active authorization with baseline fe6e6e3 so ARCH-03/ARCH-05 hold. The WORK-051 registered-only ledger entry (applied by the accepted ACR-011) stays lifecycle registered until a real delivery exists. No registry change is recorded by this reconciliation: WORK-042, WORK-044..WORK-053, and the WORK-043 retired slot are already represented through the accepted ACR-011 (DEC-0056)."
     history: "No work-item history rewritten: every WORK-001..WORK-041 entry is byte-identical; the WORK-040 entry (in-review, acceptance_decision null, EVID-007/EVID-008 OPEN and W040-owned) is unchanged; the ten registered-only commercial entries (WORK-044..WORK-053) are unchanged. The WORK-042 entry transitions lifecycle implemented -> accepted-merged with acceptance_decision DEC-0057, reviewed_sha 708a432, and review_rounds 1 (the DEC-0057 acceptance review; zero correction rounds existed on the merged PR). No frozen architecture document is modified and no registry file changes: spec/work-items.md, spec/dependency-graph.md, and tools/spec_check.py are byte-identical to the accepted ACR-011 state. No implementation code changes: platform/, tools/platform_selftest.py, networkpath/, and all other implementation artifacts are byte-identical to the merged delivery. The only spec/architect changes are the two decision records (DEC-0057, DEC-0058), the WORK-042.yaml supersession, the new WORK-051.yaml authorization and its handoff document (docs/WORK-051-handoff.md), the WORK-042 ledger entry transition, this LEDGER-RECON-007 record, the snapshot baseline movement, the synchronized execution-state.yaml and current-state.md narrative updates, the decisions README registration, and the spec_check_selftest.py anchor re-pinning to the new live state (mutation semantics unchanged, per the DEC-0054/DEC-0055 transition precedent)."
+
+  - reconciliation_id: LEDGER-RECON-008
+    recorded_by: DEC-0060
+    recorded_at: 2026-09-02T00:00:00Z
+    from_main_sha: fe6e6e35a49cb2113315d0ec1569f7e93a3cf200
+    to_main_sha: cdd2a9c011f573ba11a7bb39e7dc178e7f150b54
+    reason: "W052 acceptance -> W053 activation reconciliation: main advanced through the accepted W052 delivery (PR #121, merged dad68cc5) and the subsequent commercial-execution charter alignment (DEC-0061). DEC-0060 durably records acceptance of W052 and activation of WORK-053-CORE-001; this reconciliation moves the execution-ledger snapshot from the prior W042/W051 transition baseline to the current mainline and records the real W052 delivery in the authoritative ledger."
+    history: "No prior work-item history is rewritten: WORK-001..WORK-041, WORK-040's independent physical obligations, and the registered-only W044..W051/W053 entries remain otherwise unchanged. WORK-052 is the sole transitioned delivery entry, from registered to accepted-merged, with its exact reviewed head, merge SHA, and DEC-0060 acceptance. The active W053 authorization and execution-state transition remain governed by DEC-0060; this reconciliation only makes the ledger's historical delivery fact and snapshot baseline consistent with that already-persisted governance transition."

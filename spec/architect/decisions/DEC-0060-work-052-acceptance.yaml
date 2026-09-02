@@ -1,0 +1,41 @@
+# ADCOS Architect decision record.
+# schema: spec/architect/decision-record-template.md; verified by tools/spec_check.py (ARCH-04).
+# Atomic W052 acceptance -> W053 activation transition.
+decision_id: DEC-0060
+type: governance
+work_item: WORK-052
+acr: null
+pr: 121
+reviewed_sha: a0d3b895831d00c2a5fe267afe9c118a5c010648
+decision: ACCEPTED
+status: ACCEPTED
+reviewer: "Architect (pectoraux)"
+timestamp: 2026-09-01T15:33:37Z
+findings:
+  - "WORK-052 exact reviewed head a0d3b895 satisfies the twelve UsageLedger invariants after the review-response cycle: transaction-bound commercial evidence, unambiguous correlation, durable observation idempotency before live resolution, and two-real-transaction substitution regression are all verified by the 42/42 battery."
+  - "PR #121 merged at dad68cc5. The delivery remains SOFTWARE-only; W040 physical obligations are independent and unchanged."
+  - "No successful post-merge workflow run is available on the merge commit at this decision time. Acceptance relies on the exact Architect-reviewed head, the recorded 42/42 UsageLedger battery, determinism proofs, provenance review, and the prior independent reproduction of inherited mainline spec-check failures."
+  - "WORK-053 is the canonical next commercial Work Item after W052 in the accepted ACR-011 dependency model; its hard dependency WORK-052 is satisfied by this acceptance."
+blockers: []
+required_corrections: []
+evidence:
+  merge_sha: dad68cc5c7ecc48eedddfa26264a8b38f7fe84fa
+  ci_run: null
+  artifacts:
+    - "docs/WORK-052-evidence.md"
+    - "docs/WORK-052-handoff.md"
+accepted_scope:
+  - "WORK-052 UsageLedger as delivered on exact reviewed head a0d3b895831d00c2a5fe267afe9c118a5c010648 and merged as dad68cc5c7ecc48eedddfa26264a8b38f7fe84fa."
+  - "The UsageLedger implementation, evidence boundary, lifecycle, append-only journal, durable idempotency, deterministic replay, and authority-boundary semantics evidenced by the delivery record."
+  - "The SOFTWARE evidence classification only; no physical evidence is accepted or implied."
+rejected_scope:
+  - "Any modification to frozen architecture or protocol semantics."
+  - "Any acceptance or closure of W040 physical evidence obligations EVID-007/EVID-008."
+  - "Any implementation of W044-W052 outside the already accepted W052 delivery, or any payment-provider integration." 
+downstream_effect:
+  - "WORK-052-CORE-001 is superseded; its authorization record remains durable provenance."
+  - "WORK-053-CORE-001 is created as the sole active implementation authorization with baseline dad68cc5c7ecc48eedddfa26264a8b38f7fe84fa and hard dependency WORK-052."
+  - "The single active execution slot transfers from WORK-052 to WORK-053 in this governance transition."
+  - "W053 implementation remains SOFTWARE-only and must consume public W052/CommercialCore facts without becoming a payment-provider or connectivity authority."
+  - "W040 remains independent, in-review, and unaccepted; its physical evidence obligations remain OPEN and W040-owned."
+resolved_by: null
