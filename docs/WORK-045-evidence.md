@@ -188,21 +188,24 @@ with the appropriate regulated provider (ADCOS stores references and decision me
 | `spec_check` | 14/17 (ARCH-08 evaluates the raw branch-point offset) | **15/17 — failure set byte-identical to clean main `4540dea` (ARCH-02/ARCH-06 inherited only; ZERO new failures)** | 14/16, 1 skipped (ARCH-08 inactive base-less) |
 | `spec_check --provenance` | — | **ARCH-08 PASS: "implementation delta covered by the active authorization inherited from the base"** (in both full and strict modes) | — |
 | `session/adapter/transport/ipintegration/schema` batteries | PASS | **PASS** (55/55, 56/56, 69/69, 45/45, 25/25) | PASS |
-| Identity/capability/discovery/topology/resource/intent/policy/routing/multipath/mobility/federation/envelope | — | **PASS (19/19 … 52/52)** | — |
-| fivegc/ran/wifi/backhaul/mesh/distcore/service/telemetry/energy/security/upgrade/appliance/oran/imt | — | **PASS (31/31 … 42/42)** | — |
+| Identity/capability/discovery/topology/resource/intent/policy/routing/multipath/mobility/federation/envelope | — | **PASS (19/19 … 80/80)** | — |
+| fivegc/ran/wifi/backhaul/mesh/distcore/service/telemetry/energy/security | — | **PASS (31/31 … 48/48)** | — |
+| `upgrade` 40/41, `appliance` 41/42, `oran` 35/36, `imt` 33/34 | — | delta-shape artifact (their own docs/spec-intact and PR-delta pins; failure set byte-identical at the previous head `9894d83` and at this correction head; clean main passes 41/41, 42/42, 36/36, 34/34) | PASS |
+| `agent` 44/45, `conformance` 45/46, `management` 38/39, `simulator` 43/44, `mobile` 44/45, `edge` 47/48, `scale` 38/39 | delta-shape artifact | delta-shape artifact (frozen-spec/PR-delta pins; byte-identical failure set at both heads) | **PASS** |
 | `commercial/usage/allocation/platform/networkpath` (predecessor chain) | — | delta-shape artifact (their own scope pins) | **PASS 35/35, 42/42, 44/44, 32/32, 36/36** |
-| `agent` 45/45, `mobile` 45/45, `conformance` 46/46 | delta-shape artifact | delta-shape artifact | **PASS** |
 | `payment` | 43/44 (its own W044 scope audit correctly sees the W045 delta outside W044's scope) | 43/44 (same, `HEAD^1` context) | 43/44 (same, vs the W044 baseline) |
 | `experience_check`, `schema_check` | — | **PASS (5/5 records; 8/8 blocking)** | PASS |
-| `edge` 48/48, `scale` 39/39 | **PASS** | delta-shape artifact (case_47/case_37, their own shape pins) | PASS on clean main |
 
 **The delta-shape artifact class (documented, inherited from the accepted W044 delivery convention):** the
-frozen-surface batteries (agent/mobile/conformance/usage/allocation/payment/platform/networkpath/edge/scale)
-each pin THEIR OWN work item's sanctioned PR-delta shape. A later work item's delta is legitimately outside those
-pins, so exactly those cases fail at the merge ref while the batteries pass on clean main and in base-less clean
-clones (degraded context). `spec_check_selftest` fails on clean main as well (its mutation anchor predates the
-W045 activation — an inherited condition, zero relation to this delta). The authoritative scope check for THIS
-delivery is the eligibility battery's own scope audit (case 43: confined to the authorized surface) and ARCH-08
+frozen-surface batteries (agent/mobile/conformance/management/simulator/usage/allocation/payment/platform/
+networkpath/edge/scale/upgrade/appliance/oran/imt/commercial) each pin THEIR OWN work item's sanctioned
+PR-delta shape or frozen docs/spec-intact surface. A later work item's delta is legitimately outside those
+pins, so exactly those cases fail at the merge ref while the batteries pass on clean main and in base-less
+clean clones (degraded context). The correction round's verification compared the artifact failure set
+side-by-side at the previous head `9894d83` and at the correction head: **byte-identical** — zero new
+failures introduced by the correction. `spec_check_selftest` fails on clean main as well (its mutation
+anchor predates the W045 activation — an inherited condition, zero relation to this delta). The authoritative
+scope check for THIS delivery is the eligibility battery's own scope audit (case 43: confined to the authorized surface) and ARCH-08
 at the merge ref (PASS).
 
 **Official CI expectation (honest):** the `spec-check` workflow's first step (`spec_check`) fails at 15/17 with
