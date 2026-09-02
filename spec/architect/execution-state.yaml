@@ -13,12 +13,11 @@ versions:
   protocol_version_authority: "spec/schemas/protocol.json"
 execution:
   mode: "implementing"
-  active_work_item: WORK-046
-  active_authorization: "WORK-046-CORE-001"
-  halted_reason: "W046 is active-authorized at the reconciled post-transition governance baseline 3db7500; Z.ai may implement from this exact mainline."
+  active_work_item: WORK-047
+  active_authorization: "WORK-047-CORE-001"
+  halted_reason: "W047 is active-authorized at the exact W046 acceptance mainline f45be6d; Z.ai may implement from this exact mainline."
   next_required_decisions:
-    - "Review the WORK-046 delivery PR on its exact head against the acceptance gate (versioned API schema with backward-compatibility guarantees; sandbox/production isolation; idempotency keys under retries and duplicates; scoped application credentials; signed webhooks with replay/duplicate/out-of-order protection; webhook state observational only; API success never implying physical connectivity; canonical reason codes visible at the developer boundary; SDK semantics matching the canonical server model)."
-    - "After W046 acceptance, evaluate the next eligible commercial Work Item (W047) from the canonical dependency graph."
+    - "Review the next authorized Work Item delivery against its exact W047 acceptance gate and persist the Architect verdict before downstream work."
 in_review:
   - work_item: WORK-040
     branch: "work-040-pilot-deployment"
@@ -135,4 +134,4 @@ open_prs:
     disposition: "superseded by DEC-0054/DEC-0055; historical"
   - pr: 118
     subject: "WORK-052 handoff"
-    disposition: "superseded by DEC-0059; historical"
+    disposition: "superseded by DEC-0059; historical"\n

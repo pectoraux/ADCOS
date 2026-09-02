@@ -27,10 +27,11 @@ The acceptance records are DEC-0001..DEC-0039 for WORK-001..WORK-039, plus DEC-0
 | DEC-0064 | governance | WORK-044 | ACCEPTED | ACCEPTED | W044 payment adapters acceptance → W045 activation |
 | DEC-0065 | governance | WORK-045 | ACCEPTED | ACCEPTED | W045 eligibility acceptance → W046 activation |
 | DEC-0066 | governance | WORK-046 | ACCEPTED | ACCEPTED | W046 baseline reconciliation to the post-transition mainline |
+| DEC-0067 | acceptance | WORK-046 | ACCEPTED | ACCEPTED | W046 Developer API/SDK/Webhook Platform acceptance → W047 activation |
 
 ## Rules
 
 1. IDs are never reused or renumbered; superseded records stay.
 2. A rendered verdict is never edited; later records supersede earlier ones.
 3. New records are added by the Architect in the governance transition they justify.
-4. `tools/spec_check.py` ARCH-04 verifies decision IDs, filename consistency, acceptance SHA/ledger consistency, and reference resolution.
+4. `tools/spec_check.py` ARCH-04 verifies decision IDs, filename consistency, acceptance SHA/ledger consistency, and reference resolution.\n

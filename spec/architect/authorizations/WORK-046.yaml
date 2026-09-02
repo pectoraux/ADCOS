@@ -3,8 +3,10 @@
 # post-transition governance mainline by the DEC-0066 baseline-advancement-
 # only reconciliation (the DEC-0063-established convention).
 work_item: WORK-046
-status: active
-authorized: true
+status: superseded
+authorized: false
+superseded_by: "WORK-047-CORE-001"
+supersession_decision: DEC-0067
 type: implementation
 authorization_id: "WORK-046-CORE-001"
 authorization_decision: DEC-0065

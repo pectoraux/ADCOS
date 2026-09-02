@@ -1,6 +1,6 @@
 # ADCOS Current State
 
-**Persistent Architect snapshot — W045 accepted; W046 active.**
+**Persistent Architect snapshot — W046 accepted; W047 active.**
 
 ## Repository
 
@@ -11,10 +11,10 @@
 
 ## Execution
 
-- Active Work Item: `WORK-046`
-- Active authorization: `WORK-046-CORE-001`
-- Authorization decision: `DEC-0065`
-- Implementation baseline for W046: `3db7500d7b79a8cd3e3a651e1461fbb320efd67e` (the exact post-transition governance mainline, reconciled by DEC-0066; original DEC-0065 issuance baseline `a789d9b403d0e2a6e05276bb3cdc2b7d092c6d88` remains recorded as provenance)
+- Active Work Item: `WORK-047`
+- Active authorization: `WORK-047-CORE-001`
+- Authorization decision: `DEC-0067`
+- Implementation baseline for W047: `f45be6dd0544a2fd6cbc910805def28bbe0c71eb` (the exact W046 acceptance mainline recorded by DEC-0067; W046 implementation reviewed at `09960ea24315e5d0ccfd516d3bdca0802b62d8b7` and merged at `f45be6dd0544a2fd6cbc910805def28bbe0c71eb`)
 - W045: `accepted-merged` by DEC-0065; PR #129 reviewed at the correction-round head `827234ec3a245a6b9f2f2de5d6525afb495684cc` (round 1 CHANGES REQUIRED at `9894d83` with two blockers corrected in-review: the atomic command/event journal and the single lifecycle event_count increment), merged `a789d9b403d0e2a6e05276bb3cdc2b7d092c6d88`; 46/46 deterministic battery in raw-branch, merge-ref, and clean-clone contexts with failure-injection and lifecycle-count proofs
 - W044: `accepted-merged` by DEC-0064; PR #127 reviewed at `6720d220e390999e17707537ab587c1da3b09eb9`, merged `90864ac257a3d93d94852cfa3a74577903f508d3`; 44/44 deterministic battery in raw-branch and merge-ref contexts; the seven mandatory negative proofs pass
 - W053: `accepted-merged` by DEC-0062; PR #124 reviewed at `43591667b226b6239e8197816514b679af1e6154`, merged `c9a1f8589cddbbeb21756bdd8f72ed57ea515173`; 44/44 deterministic battery after a digest-neutral review correction
@@ -32,7 +32,7 @@ Developer Connectivity API, SDK & Webhook Platform (issue #90) is the sole activ
 
 `WORK-051 CommercialCore → WORK-052 UsageLedger → WORK-053 EconomicAllocation → WORK-044 Payment Provider Adapters → WORK-045 Connectivity Eligibility → WORK-046 → WORK-047 → WORK-048 → WORK-049`
 
-W051, W052, W053, W044, and W045 are accepted-merged; W046 is the active implementation track; W047-W050 remain future candidates.
+W051, W052, W053, W044, W045, and W046 are accepted-merged; W047 is the active implementation track; W048-W050 remain future candidates.
 
 ## Governance
 
@@ -41,3 +41,8 @@ DEC-0065 accepts W045 on PR #129 exact reviewed correction-round head `827234ec3
 ## Reconciliation
 
 LEDGER-RECON-013 (DEC-0066) is the baseline-advancement-only reconciliation completing the cycle: the snapshot baseline and the WORK-046-CORE-001 authorization baseline advance `a789d9b403d0e2a6e05276bb3cdc2b7d092c6d88` → `3db7500d7b79a8cd3e3a651e1461fbb320efd67e` (the PR #130 governance merge), so the W046 implementation branch is cut from the exact mainline that carries the transition. LEDGER-RECON-012 (DEC-0065) is the post-PR-#129 mainline reconciliation and the atomic W045 acceptance → W046 activation transition: the snapshot baseline advanced `90864ac257a3d93d94852cfa3a74577903f508d3` → `a789d9b403d0e2a6e05276bb3cdc2b7d092c6d88` (the PR #129 implementation merge landed while the persistent state referenced `90864ac257a3d93d94852cfa3a74577903f508d3`); the WORK-045 ledger entry transitions registered → accepted-merged with review_rounds 2 and the correction history preserved in the entry note. LEDGER-RECON-011 (DEC-0064) remains the record of the W044 acceptance/W045 activation transition; LEDGER-RECON-010 (DEC-0063) remains the baseline-advancement-only record for the W044 implementation baseline; LEDGER-RECON-009 remains the record of the W053 delivery, the WORK-051 dependency reconciliation, and the W053 acceptance/W044 activation transition; the W053 merge fact keeps its merge SHA `c9a1f8589cddbbeb21756bdd8f72ed57ea515173`. No prior work-item history is rewritten; W040 remains independent and unaccepted.
+
+
+## W046 Acceptance → W047 Activation
+
+DEC-0067 accepts W046 on PR #132 exact reviewed head `09960ea24315e5d0ccfd516d3bdca0802b62d8b7` (merge `f45be6dd0544a2fd6cbc910805def28bbe0c71eb`) after five Architect review rounds, including durable webhook observation-admission state and historical-audience replay proofs. `WORK-046-CORE-001` is superseded and `WORK-047-CORE-001` is now the sole active implementation authorization. W047 remains implementation-empty; its hard dependencies W051/W044/W045/W046 are all accepted-merged. W040 remains independent and unaccepted.\n

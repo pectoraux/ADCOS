@@ -1,0 +1,53 @@
+# ADCOS Work Item authorization record — WORK-047 active implementation.
+# Issued by DEC-0067 after Architect acceptance of WORK-046.
+work_item: WORK-047
+status: active
+authorized: true
+type: implementation
+authorization_id: "WORK-047-CORE-001"
+authorization_decision: DEC-0067
+baseline_sha: f45be6dd0544a2fd6cbc910805def28bbe0c71eb
+review_basis: "DEC-0067 accepts WORK-046 on PR #132 exact reviewed head 09960ea24315e5d0ccfd516d3bdca0802b62d8b7, merged at f45be6dd0544a2fd6cbc910805def28bbe0c71eb. W047 issue #91 is the next canonical commercial Work Item; its hard dependencies WORK-051, WORK-044, WORK-045, and WORK-046 are accepted-merged."
+dependencies:
+  - WORK-051
+  - WORK-044
+  - WORK-045
+  - WORK-046
+authority_inputs:
+  - "WORK-051 CommercialCore public commercial state and transaction resources"
+  - "WORK-044 payment/settlement capability where paid offers are presented"
+  - "WORK-045 eligibility/provider-trust/jurisdiction policy"
+  - "WORK-046 developer API boundary"
+  - "WORK-041 NetworkPath path-validation machinery"
+authority_outputs:
+  - "deterministic, eligibility-filtered, privacy-preserving marketplace discovery and candidate selection proposals; no path activation authority"
+scope:
+  - "marketplace/"
+  - "developer-facing/discovery surfaces as defined by issue #91"
+  - "tools/work-047 self-test battery and evidence"
+  - "docs/WORK-047-handoff.md"
+  - ".github/workflows/spec-check.yml"
+acceptance_criteria:
+  - "Discovery/ranking is deterministic over identical candidate sets; expired/ineligible/suspended offers are excluded fail-closed."
+  - "Location precision is bounded and never exceeds the product decision's requirement; exact consumer location is not stored by default."
+  - "Stale quality telemetry carries age/confidence and cannot silently become current reachability."
+  - "Candidate selection hands off to accepted NetworkPath validation/activation rather than bypassing it."
+  - "No forbidden imports or mutations of session/routing/transport authorities; no fabricated physical proximity, quality, or availability."
+out_of_scope:
+  - "direct routing or packet transport implementation"
+  - "exact consumer location storage by default"
+  - "monetization logic beyond invoking canonical commercial resources"
+  - "W048/W049 implementation"
+  - "WORK-040 physical evidence"
+  - "frozen architecture/protocol changes"
+  - "modifying spec/architect/ from the implementation PR"
+acceptance_gate:
+  status: "Architect review required after implementation"
+  required_evidence:
+    - "deterministic discovery/ranking battery over identical candidate sets"
+    - "expired/ineligible/suspended fail-closed exclusion proofs"
+    - "privacy/precision and stale-telemetry evidence proofs"
+    - "NetworkPath handoff composition proofs and forbidden-authority boundary audit"
+    - "exact reviewed delivery SHA, evidence manifest, CI/provenance, replay and determinism evidence"
+handoff: docs/WORK-047-handoff.md
+handoff_required: true\n
