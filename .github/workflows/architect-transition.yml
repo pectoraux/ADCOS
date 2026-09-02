@@ -1,0 +1,350 @@
+name: architect-governance-transition
+
+on:
+  push:
+    branches:
+      - governance/w053-accept-w044
+
+permissions:
+  contents: write
+
+jobs:
+  persist-transition:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out governance branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Persist DEC-0062 W053 acceptance and W044 activation
+        env:
+          TARGET_BRANCH: governance/w053-accept-w044
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          DECISION_TS = "2026-09-02T03:26:32Z"
+          MAIN_SHA = "c9a1f8589cddbbeb21756bdd8f72ed57ea515173"
+          W053_BASE = "9e77861586b19303a4e46558ebed172c82399595"
+          W053_HEAD = "43591667b226b6239e8197816514b679af1e6154"
+          W053_MERGE = MAIN_SHA
+
+          root = Path(".")
+
+          def replace_once(path: str, old: str, new: str) -> None:
+              p = root / path
+              text = p.read_text()
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"expected exactly one match in {path}, got {count}: {old[:120]!r}")
+              p.write_text(text.replace(old, new, 1))
+
+          # --- execution ledger: preserve all historical entries; only mutate
+          # the W053 delivery record, the W044 registration note, the snapshot,
+          # and append one reconciliation fact.
+          ledger_p = root / "spec/architect/execution-ledger.yaml"
+          ledger = ledger_p.read_text()
+          if "reconciliation_id: LEDGER-RECON-009" in ledger:
+              raise SystemExit("LEDGER-RECON-009 already present; refusing duplicate governance transition")
+          ledger = ledger.replace(
+              "main_sha: cdd2a9c011f573ba11a7bb39e7dc178e7f150b54",
+              f"main_sha: {MAIN_SHA}",
+              1,
+          )
+          ledger = ledger.replace('last_updated: "2026-09-02"', 'last_updated: "2026-09-02"', 1)
+
+          w053 = '''  - work_item: WORK-053
+          title: "EconomicAllocation: developer/provider/ADCOS revenue-share policy and external payment boundary"
+          phase: 10
+          branch: "work-053-economic-allocation"
+          baseline_sha: 9e77861586b19303a4e46558ebed172c82399595
+          pr: 124
+          pr_head: 43591667b226b6239e8197816514b679af1e6154
+          reviewed_sha: 43591667b226b6239e8197816514b679af1e6154
+          merge_sha: c9a1f8589cddbbeb21756bdd8f72ed57ea515173
+          merged_at: 2026-09-02T03:10:08Z
+          ci_run: null
+          review_rounds: 2
+          acceptance_decision: DEC-0062
+          correction_decisions: []
+          handoff: docs/WORK-053-handoff.md
+          handoff_required: true
+          lifecycle: accepted-merged
+          note: "delivery accepted by DEC-0062 on exact reviewed head 43591667 after the correction cycle: the fully populated BILLABLE_FINAL fact boundary and deep public-surface immutability blockers are closed by explicit regressions. EconomicAllocation battery 44/44 PASS; golden digest 248764f509804d2d8739de863caab439d13789abb7ef9fd40d9f8c136338f54b is byte-identical across the correction; ARCH-08 provenance PASS. PR #124 merged at c9a1f858. No successful post-merge workflow run is recorded on the merge commit at acceptance time; inherited ARCH-02/04/06 mainline conditions remain separately disclosed and do not block W053 acceptance."
+'''
+          pattern = r"  - work_item: WORK-053\n.*?(?=\n  - work_item:|\nreconciliations:)"
+          ledger, n = re.subn(pattern, w053.rstrip(), ledger, count=1, flags=re.S)
+          if n != 1:
+              raise SystemExit(f"W053 ledger block replacement count={n}")
+
+          w044_pattern = r"(  - work_item: WORK-044\n.*?\n    note: )([^\n]*)"
+          w044_note = '"registered-only entry now has active implementation authorization WORK-044-CORE-001 under DEC-0062; W044 remains lifecycle registered until a delivery exists. Dependencies (hard): WORK-051 and WORK-053 accepted-merged. Registration is representation only; authorization is the repository-local record below."'
+          ledger, n = re.subn(w044_pattern, r"\1" + w044_note, ledger, count=1, flags=re.S)
+          if n != 1:
+              raise SystemExit(f"W044 ledger note replacement count={n}")
+
+          ledger += '''\n  - reconciliation_id: LEDGER-RECON-009
+    recorded_by: DEC-0062
+    recorded_at: 2026-09-02T03:26:32Z
+    from_main_sha: cdd2a9c011f573ba11a7bb39e7dc178e7f150b54
+    to_main_sha: c9a1f8589cddbbeb21756bdd8f72ed57ea515173
+    reason: "W053 implementation acceptance -> W044 activation reconciliation: main advanced through PR #124 (WORK-053 EconomicAllocation), merged at c9a1f858 after exact-head Architect re-review of 43591667. DEC-0062 records W053 acceptance, supersedes WORK-053-CORE-001, creates WORK-044-CORE-001, and transfers the single active execution slot to W044 from the post-W053 mainline."
+    history: "No prior work-item history is rewritten: WORK-001..WORK-042, WORK-040's independent physical obligations, and the registered commercial entries remain historically intact. WORK-053 transitions registered -> accepted-merged with its exact reviewed/merge facts and DEC-0062. WORK-053-CORE-001 is superseded with provenance preserved; WORK-044 is the sole active authorization at baseline c9a1f858. W045+ remain unauthorized ready-candidates. No frozen architecture/protocol semantics or physical evidence obligations change."
+'''
+          ledger_p.write_text(ledger)
+
+          # --- W053 authorization becomes provenance-only.
+          replace_once(
+              "spec/architect/authorizations/WORK-053.yaml",
+              'status: active\nauthorized: true\ntype: implementation\nauthorization_id: "WORK-053-CORE-001"\nauthorization_decision: DEC-0060\nbaseline_sha: cdd2a9c011f573ba11a7bb39e7dc178e7f150b54',
+              'status: superseded\nauthorized: false\nsuperseded_by: "WORK-044-CORE-001"\nsupersession_decision: DEC-0062\ntype: implementation\nauthorization_id: "WORK-053-CORE-001"\nauthorization_decision: DEC-0060\nbaseline_sha: cdd2a9c011f573ba11a7bb39e7dc178e7f150b54',
+          )
+          replace_once(
+              "spec/architect/authorizations/WORK-053.yaml",
+              'review_basis: "DEC-0060 accepts W052 on PR #121 exact reviewed head a0d3b895; W053 issue #85 is the next hard-dependent commercial Work Item. The persistent execution snapshot has been reconciled to the current mainline by LEDGER-RECON-008 without changing the reviewed W052 facts."',
+              'review_basis: "DEC-0060 activation; exact W053 scope and provenance retained here. W053 accepted by DEC-0062 after PR #124 exact-head correction review."',
+          )
+
+          # --- W044 active authorization.
+          w044_auth = '''# ADCOS Work Item authorization record — WORK-044 active implementation.
+# Issued by DEC-0062 after Architect acceptance of WORK-053.
+work_item: WORK-044
+status: active
+authorized: true
+type: implementation
+authorization_id: "WORK-044-CORE-001"
+authorization_decision: DEC-0062
+baseline_sha: c9a1f8589cddbbeb21756bdd8f72ed57ea515173
+review_basis: "DEC-0062 accepts WORK-053 on PR #124 exact reviewed head 43591667, merged at c9a1f858. W044 is the canonical next commercial Work Item whose hard dependencies WORK-051 and WORK-053 are accepted-merged."
+dependencies:
+  - WORK-051
+  - WORK-053
+authority_inputs:
+  - "WORK-051 CommercialCore (accepted-merged by DEC-0059)"
+  - "WORK-052 UsageLedger (accepted-merged by DEC-0060)"
+  - "WORK-053 EconomicAllocation (accepted-merged by DEC-0062)"
+  - "WORK-033 AgentClock seam"
+authority_outputs:
+  - "Provider-neutral payment intent/reference state, authorization/capture/refund/reversal mappings, payout/transfer instructions from finalized allocations, provider callback observations, normalized provider failures, reconciliation and divergence records, and explicit provider capability declarations; never usage/delivery, connectivity, session, routing, or packet authority"
+scope:
+  - "payment/"
+  - "tools/payment_selftest.py"
+  - "docs/WORK-044-handoff.md"
+  - "docs/WORK-044-evidence.md"
+  - ".github/workflows/spec-check.yml"
+acceptance_criteria:
+  - "Payment intent creation/retrieval, authorization/capture/refund/reversal mapping, and payout/transfer instruction emission operate through an abstract provider adapter with no provider-specific semantics in canonical commercial state."
+  - "Provider references are idempotent and correlate to canonical ADCOS transactions and finalized allocations without creating usage or delivery facts."
+  - "Callbacks/webhooks are signature-checked and anti-replay guarded at the adapter boundary, then treated as observations until reconciled against ADCOS state; duplicate and out-of-order callbacks are deterministic and append-only."
+  - "Provider/ADCOS divergence is detected and reconciled without rewriting settled history; corrections are compensating records."
+  - "Provider capabilities are explicit and versioned; provider failures normalize into provider-neutral canonical outcomes."
+  - "Payment adapters cannot import or mutate identity, session, NetworkPath, routing, transport, packet, or delivery-evidence authorities, and payment success cannot bypass W052 billable-final requirements."
+out_of_scope:
+  - "W045 eligibility/trust/jurisdiction"
+  - "W046 developer API/SDK/webhooks as a public platform"
+  - "W047 marketplace discovery"
+  - "W048 provider connectivity-sharing runtime"
+  - "W049 client runtime"
+  - "KYC/KYB, custody, merchant-of-record, jurisdiction-wide legal policy, and live regulated funds custody/movement by ADCOS"
+  - "creation of usage, delivery, billable-final, allocation, connectivity, session, routing, NetworkPath, transport, or packet facts"
+  - "wire-schema, frozen architecture, or specification changes"
+  - "modifying spec/architect/ from the implementation PR"
+acceptance_gate:
+  status: "Architect review required after implementation"
+  required_evidence:
+    - "deterministic fake/sandbox provider covering payment intent, capture, refund, reversal, payout, failure normalization, and provider capability declarations"
+    - "negative tests proving provider success, reservation, or callback cannot create usage or bypass billable-final/allocation authority"
+    - "callback replay/duplicate/out-of-order, reconciliation divergence, append-only compensation, import-boundary, exact-head provenance, replay, and hash-seed determinism evidence"
+handoff: docs/WORK-044-handoff.md
+handoff_required: true
+'''
+          (root / "spec/architect/authorizations/WORK-044.yaml").write_text(w044_auth)
+
+          # --- W044 implementation handoff for Z.ai.
+          w044_handoff = '''# WORK-044 Architect Handoff — Payment Provider Adapters & Settlement Gateway
+
+**Authorization:** WORK-044-CORE-001  
+**Decision:** DEC-0062  
+**Baseline:** c9a1f8589cddbbeb21756bdd8f72ed57ea515173  
+**Implementer:** Z.ai
+
+## Objective
+
+Implement the provider-neutral payment boundary for the ADCOS commercial control plane. ADCOS owns the canonical commercial state, correlation, reconciliation, refund/dispute state, payout state, and capability declarations; external regulated providers own payment-rail execution and regulated funds movement.
+
+## Required invariants
+
+1. Payment-provider operations never create usage, delivery evidence, billable-final facts, or allocation facts.
+2. Canonical ADCOS state is provider-neutral; provider-specific API semantics stay inside adapter implementations.
+3. Payment-provider references are idempotently correlated to canonical transaction/allocation identities.
+4. Authorization, capture, refund, reversal, payout, and normalized failure outcomes are explicit and replay-safe.
+5. Provider callbacks/webhooks are external observations until reconciled against canonical ADCOS state.
+6. Duplicate, replayed, conflicting, and out-of-order callbacks fail closed or converge deterministically without double application.
+7. Settled commercial history is immutable; corrections are append-only compensating records.
+8. Provider/ADCOS divergence is observable and reconcilable without rewriting prior truth.
+9. Provider capability limitations are explicit, versioned, and cannot be silently inferred as universally supported.
+10. Payment adapters cannot import or mutate identity, session, NetworkPath, routing, transport, packet, or delivery-evidence authorities.
+11. ADCOS must not custody or directly move regulated funds in W044; regulated KYC/KYB/custody/MOR obligations remain provider/jurisdiction responsibilities represented as capability/eligibility inputs.
+12. Restart/replay and hash-seed runs reproduce the same canonical payment-state and journal digest streams.
+
+## Consumption boundary
+
+W044 consumes accepted W051/W052/W053 facts through public interfaces only. In particular, payout/transfer instructions must originate only from finalized W053 allocations, and any payment observation must remain DATA until reconciled. The provider layer must never become a shadow UsageLedger, EconomicAllocation, connectivity, session, or routing authority.
+
+## Scope
+
+Implement only the W044 payment-provider adapter family required by issue #88, with a deterministic fake/sandbox provider, dedicated self-test, evidence/handoff documentation, and additive CI wiring. Keep provider-specific credentials, webhook signatures, external IDs, failure codes, and API semantics inside adapters. No live payment account onboarding or real-money movement is part of this Work Item.
+
+## Verification
+
+The delivery PR must demonstrate deterministic intent/retrieval, authorization/capture/refund/reversal, payout instruction emission from finalized allocations, provider failure normalization, capability declaration/versioning, callback signature/anti-replay boundaries, duplicate/conflict/out-of-order callback handling, divergence reconciliation, append-only compensation, negative payment->usage/allocation cases, forbidden-import tests, restart/replay determinism, and exact W044 authorization provenance.
+
+The delivery PR must not modify `spec/architect/` and must remain within `WORK-044-CORE-001`. Any required architecture or authorization change is a separate Architect governance action.
+
+## Acceptance
+
+One implementation PR only. The Architect reviews the exact delivery SHA, evidence manifest, scope audit, CI/provenance, authority boundaries, replay/failure behavior, and every invariant above before acceptance. W045 and later Work Items remain unauthorized until a subsequent governance transition activates them.
+'''
+          (root / "docs/WORK-044-handoff.md").write_text(w044_handoff)
+
+          # --- W053 acceptance decision.
+          dec = '''# ADCOS Architect decision record.
+# schema: spec/architect/decision-record-template.md; verified by tools/spec_check.py (ARCH-04).
+# Acceptance of W053 after the exact-head correction/re-review; W044 activation is the downstream governance effect.
+decision_id: DEC-0062
+type: acceptance
+work_item: WORK-053
+acr: null
+pr: 124
+reviewed_sha: 43591667b226b6239e8197816514b679af1e6154
+decision: ACCEPTED
+status: ACCEPTED
+reviewer: "Architect (pectoraux)"
+timestamp: 2026-09-02T03:26:32Z
+findings:
+  - "WORK-053 exact corrected head 43591667 closes both returned admission blockers: fully populated BILLABLE_FINAL facts are required before allocation, with incomplete index entries failing closed as FACT_INCOMPLETE; allocation projections, journaled payloads, and durable idempotency ledgers are deeply immutable through the public surface."
+  - "The corrected EconomicAllocation battery is 44/44 PASS. The golden digest stream 248764f509804d2d8739de863caab439d13789abb7ef9fd40d9f8c136338f54b remains byte-identical to the rejected head, proving the correction was admission/immutability hardening rather than a recorded-fact change."
+  - "ARCH-08 provenance is PASS and the implementation delta remains inside WORK-053-CORE-001 with spec/architect/ untouched."
+  - "PR #124 merged at c9a1f8589cddbbeb21756bdd8f72ed57ea515173 after the Architect re-review. No successful post-merge workflow run is recorded on the merge commit at acceptance time; inherited ARCH-02/04/06 mainline conditions remain separately disclosed."
+blockers: []
+required_corrections: []
+evidence:
+  merge_sha: c9a1f8589cddbbeb21756bdd8f72ed57ea515173
+  ci_run: null
+  artifacts:
+    - "docs/WORK-053-evidence.md"
+    - "docs/WORK-053-handoff.md"
+accepted_scope:
+  - "WORK-053 EconomicAllocation implementation delivered on exact reviewed head 43591667b226b6239e8197816514b679af1e6154 and merged as c9a1f8589cddbbeb21756bdd8f72ed57ea515173."
+  - "The immutable allocation policy/state model, billable-final fact boundary, append-only journal, durable idempotency, compensating events, public authority boundary, and deterministic digest/evidence behavior evidenced by PR #124."
+  - "SOFTWARE-class evidence only; no physical deployment or W040 evidence is accepted or implied."
+rejected_scope:
+  - "Any modification to frozen architecture or protocol semantics."
+  - "Any acceptance or closure of W040 physical evidence obligations EVID-007/EVID-008."
+  - "Any payment-provider integration beyond the W053 external-payment DATA boundary."
+downstream_effect:
+  - "WORK-053-CORE-001 is superseded; its authorization record remains durable provenance."
+  - "WORK-044-CORE-001 is created as the sole active implementation authorization at baseline c9a1f8589cddbbeb21756bdd8f72ed57ea515173."
+  - "The single active execution slot transfers from WORK-053 to WORK-044 in this governance transition."
+  - "W044 must consume W051/W052/W053 public facts and must not create usage, delivery, billable-final, allocation, connectivity, session, routing, or packet authority."
+  - "W040 remains independent, in-review, and unaccepted; EVID-007/EVID-008 remain W040-owned and OPEN."
+resolved_by: null
+'''
+          (root / "spec/architect/decisions/DEC-0062-work-053-acceptance-w044-activation.yaml").write_text(dec)
+
+          # --- registry README.
+          readme_p = root / "spec/architect/decisions/README.md"
+          readme = readme_p.read_text()
+          readme = readme.replace(
+              "The acceptance records are DEC-0001..DEC-0039 for WORK-001..WORK-039, plus DEC-0054 for WORK-041, DEC-0057 for WORK-042, DEC-0059 for WORK-051, and DEC-0060 for WORK-052. Governance, correction, and architecture decisions DEC-0040..DEC-0053 and DEC-0055/DEC-0056/DEC-0058/DEC-0061 remain in their original files.",
+              "The acceptance records are DEC-0001..DEC-0039 for WORK-001..WORK-039, plus DEC-0054 for WORK-041, DEC-0057 for WORK-042, DEC-0059 for WORK-051, DEC-0060 for WORK-052, and DEC-0062 for WORK-053. Governance, correction, and architecture decisions DEC-0040..DEC-0053 and DEC-0055/DEC-0056/DEC-0058/DEC-0061 remain in their original files.",
+          )
+          readme = readme.replace(
+              "| DEC-0061 | governance | null | ACCEPTED | ACCEPTED | Continuous commercial execution lane; lean successor transitions |",
+              "| DEC-0061 | governance | null | ACCEPTED | ACCEPTED | Continuous commercial execution lane; lean successor transitions |\n| DEC-0062 | acceptance | WORK-053 | ACCEPTED | ACCEPTED | W053 EconomicAllocation acceptance → W044 activation |",
+          )
+          readme_p.write_text(readme)
+
+          # --- execution state.
+          state_p = root / "spec/architect/execution-state.yaml"
+          state = state_p.read_text()
+          replacements = {
+              '  main_sha: cdd2a9c011f573ba11a7bb39e7dc178e7f150b54': f'  main_sha: {MAIN_SHA}',
+              '  main_sha_semantics: "Post-W052 mainline reconciled with DEC-0060 W052 acceptance and W053 activation."': '  main_sha_semantics: "Post-W053 mainline reconciled with DEC-0062 W053 acceptance and W044 activation."',
+              '  active_work_item: WORK-053': '  active_work_item: WORK-044',
+              '  active_authorization: "WORK-053-CORE-001"': '  active_authorization: "WORK-044-CORE-001"',
+              '  halted_reason: "W053 is active-authorized; Z.ai may implement from this mainline."': '  halted_reason: "W044 is active-authorized; Z.ai may implement from this mainline."',
+              '    - "Review the WORK-053 delivery PR on its exact head against the ten invariants and acceptance gate."': '    - "Review the WORK-044 delivery PR on its exact head against the W044 invariants and acceptance gate."',
+              '    - "After W053 acceptance, evaluate the next eligible commercial Work Item from the canonical dependency graph."': '    - "After W044 acceptance, evaluate the next eligible commercial Work Item from the canonical dependency graph."',
+              '  last: "WORK-052"': '  last: "WORK-053"',
+              '  note: "WORK-001..WORK-039, WORK-041, WORK-042, WORK-051, and WORK-052 are accepted-merged; WORK-040 remains in-review and unaccepted."': '  note: "WORK-001..WORK-039, WORK-041, WORK-042, WORK-051, WORK-052, and WORK-053 are accepted-merged; WORK-040 remains in-review and unaccepted."',
+              '  - work_item: WORK-053\n    issue: 85\n    status: "active authorized"\n    contract: "issue #85"\n    authorization: "WORK-053-CORE-001"\n    prerequisite: "W052 accepted-merged"': '  - work_item: WORK-053\n    issue: 85\n    status: "accepted-merged"\n    contract: "issue #85"\n    authorization: "WORK-053-CORE-001 (superseded by DEC-0062)"\n    prerequisite: "accepted by DEC-0062 on PR #124"',
+              '  - work_item: WORK-044\n    issue: 88\n    status: "ready-candidate"\n    contract: "issue #88"\n    authorization: "none"\n    prerequisite: "W051 and W053 accepted-merged"': '  - work_item: WORK-044\n    issue: 88\n    status: "active authorized"\n    contract: "issue #88"\n    authorization: "WORK-044-CORE-001"\n    prerequisite: "W051 and W053 accepted-merged; activated by DEC-0062"',
+          }
+          for old, new in replacements.items():
+              if old not in state:
+                  raise SystemExit(f"execution-state replacement anchor missing: {old!r}")
+              state = state.replace(old, new, 1)
+          state_p.write_text(state)
+
+          # --- current-state narrative.
+          current_state = f'''# ADCOS Current State
+
+**Persistent Architect snapshot — W053 accepted; W044 active.**
+
+## Repository
+
+- Repository: `github.com/pectoraux/ADCOS`
+- Baseline: `{MAIN_SHA}`
+- Architecture version: `1.0`
+- Protocol version: `1.0`
+
+## Execution
+
+- Active Work Item: `WORK-044`
+- Active authorization: `WORK-044-CORE-001`
+- Authorization decision: `DEC-0062`
+- Baseline for W044: `{MAIN_SHA}`
+- W053: `accepted-merged` by DEC-0062; PR #124 reviewed at `43591667b226b6239e8197816514b679af1e6154`, merged `{MAIN_SHA}`
+- W052: `accepted-merged` by DEC-0060
+- W051: `accepted-merged` by DEC-0059
+- W042: `accepted-merged` by DEC-0057; authorization superseded by DEC-0058
+- W041: `accepted-merged` by DEC-0054
+- W040: `in-review`, NOT accepted; EVID-007/EVID-008 remain W040-owned and open
+
+## W044
+
+Payment Provider Adapters & Settlement Gateway is the active authorized implementation track. It provides a provider-neutral boundary between canonical ADCOS commercial state and external regulated payment providers. W044 may consume finalized W053 allocations and W051/W052 facts through public interfaces, but it must never create usage/delivery/billable-final/allocation truth or become a connectivity/session/routing authority.
+
+## Commercial chain
+
+`WORK-051 CommercialCore → WORK-052 UsageLedger → WORK-053 EconomicAllocation → WORK-044 Payment Provider Adapters & Settlement Gateway`
+
+W045-W052 are not active implementation tracks; W045-W050 remain future candidates except W044, which is active-authorized under DEC-0062.
+
+## Governance
+
+DEC-0062 accepts W053 and transfers the single active implementation slot to W044. The transition changes governance state only; no frozen architecture semantic, protocol schema, or physical evidence obligation changes.
+
+## Reconciliation
+
+LEDGER-RECON-009 records the W053 delivery/acceptance and W044 activation against main `{MAIN_SHA}`. No prior work-item history is rewritten; W040 remains independent and unaccepted.
+'''
+          (root / "spec/architect/current-state.md").write_text(current_state)
+
+          # Remove this temporary mutation workflow before committing the durable
+          # governance state so the final PR contains only the intended records.
+          transition = root / ".github/workflows/architect-transition.yml"
+          transition.unlink()
+          PY
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add spec/architect docs/WORK-044-handoff.md
+          git rm --cached --ignore-unmatch .github/workflows/architect-transition.yml >/dev/null 2>&1 || true
+          git add -u .github/workflows/architect-transition.yml
+          git commit -m "governance: accept W053 and activate W044"
+          git push origin "HEAD:${TARGET_BRANCH}"
