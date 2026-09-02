@@ -4,8 +4,8 @@ package: "persistent-architect"
 last_updated: "2026-09-02"
 repository:
   canonical: "github.com/pectoraux/ADCOS"
-  main_sha: 3db7500d7b79a8cd3e3a651e1461fbb320efd67e
-  main_sha_semantics: "Exact post-transition governance mainline: PR #130 merged the DEC-0065 / LEDGER-RECON-012 governance transition (accept WORK-045 at reviewed correction head 827234ec / merge a789d9b2; activate WORK-046) at 3db7500 (2026-09-02T14:59:16Z), and DEC-0066 / LEDGER-RECON-013 advance this recorded mainline and the WORK-046-CORE-001 authorization baseline to that exact governance commit, so the W046 implementation branch is cut from the mainline that carries the transition."
+  main_sha: f45be6dd0544a2fd6cbc910805def28bbe0c71eb
+  main_sha_semantics: "Exact post-acceptance mainline: PR #132 merged the Architect-accepted WORK-046 implementation at reviewed head 09960ea24315e5d0ccfd516d3bdca0802b62d8b7 as f45be6dd0544a2fd6cbc910805def28bbe0c71eb (2026-09-02T19:59:40Z); DEC-0067 / LEDGER-RECON-014 record W046 acceptance and activation of WORK-047 from this exact mainline."
 versions:
   architecture_version_reference: "1.0"
   architecture_version_authority: "spec/architecture.md ## Status (single declaration site)"
@@ -50,8 +50,8 @@ accepted_acrs:
 open_architectural_questions: []
 accepted_work_items:
   first: "WORK-001"
-  last: "WORK-045"
-  note: "WORK-001..WORK-039, WORK-041, WORK-042, WORK-051, WORK-052, WORK-053, WORK-044, and WORK-045 are accepted-merged; WORK-040 remains in-review and unaccepted."
+  last: "WORK-046"
+  note: "WORK-001..WORK-039, WORK-041, WORK-042, WORK-051, WORK-052, WORK-053, WORK-044, WORK-045, and WORK-046 are accepted-merged; WORK-040 remains in-review and unaccepted."
 planned_work_items:
   - work_item: WORK-040
     issue: 48
@@ -73,15 +73,15 @@ planned_work_items:
     prerequisite: "accepted by DEC-0065 on PR #129 (reviewed 827234ec, merge a789d9b2)"
   - work_item: WORK-046
     issue: 90
-    status: "active authorized"
+    status: "accepted-merged"
     contract: "issue #90"
-    authorization: "WORK-046-CORE-001"
-    prerequisite: "W051, W052, W053, W044, and W045 accepted-merged"
+    authorization: "WORK-046-CORE-001 (superseded by DEC-0067)"
+    prerequisite: "accepted by DEC-0067 on PR #132 (reviewed 09960ea, merge f45be6d)"
   - work_item: WORK-047
     issue: 91
-    status: "ready-candidate"
+    status: "active authorized"
     contract: "issue #91"
-    authorization: "none"
+    authorization: "WORK-047-CORE-001"
     prerequisite: "W051/W044/W045/W046 accepted-merged"
   - work_item: WORK-048
     issue: 92
@@ -134,4 +134,4 @@ open_prs:
     disposition: "superseded by DEC-0054/DEC-0055; historical"
   - pr: 118
     subject: "WORK-052 handoff"
-    disposition: "superseded by DEC-0059; historical"\n
+    disposition: "superseded by DEC-0059; historical"
