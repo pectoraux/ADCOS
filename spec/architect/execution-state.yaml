@@ -4,8 +4,8 @@ package: "persistent-architect"
 last_updated: "2026-09-02"
 repository:
   canonical: "github.com/pectoraux/ADCOS"
-  main_sha: f45be6dd0544a2fd6cbc910805def28bbe0c71eb
-  main_sha_semantics: "Exact post-acceptance mainline: PR #132 merged the Architect-accepted WORK-046 implementation at reviewed head 09960ea24315e5d0ccfd516d3bdca0802b62d8b7 as f45be6dd0544a2fd6cbc910805def28bbe0c71eb (2026-09-02T19:59:40Z); DEC-0067 / LEDGER-RECON-014 record W046 acceptance and activation of WORK-047 from this exact mainline."
+  main_sha: 3db7500d7b79a8cd3e3a651e1461fbb320efd67e
+  main_sha_semantics: "Persistent snapshot remains at the pre-DEC-0067 governance mainline 3db7500 until the acceptance governance transition itself merges; DEC-0067 / LEDGER-RECON-014 records W046 acceptance at reviewed head 09960ea24315e5d0ccfd516d3bdca0802b62d8b7, merged as f45be6dd0544a2fd6cbc910805def28bbe0c71eb, and activates WORK-047 from that implementation merge. A follow-up baseline reconciliation will advance the snapshot to the exact governance-transition merge mainline."
 versions:
   architecture_version_reference: "1.0"
   architecture_version_authority: "spec/architecture.md ## Status (single declaration site)"
@@ -15,7 +15,7 @@ execution:
   mode: "implementing"
   active_work_item: WORK-047
   active_authorization: "WORK-047-CORE-001"
-  halted_reason: "W047 is active-authorized at the exact W046 acceptance mainline f45be6d; Z.ai may implement from this exact mainline."
+  halted_reason: "W047 is active-authorized from the exact W046 acceptance mainline f45be6d; Z.ai may implement only after this governance transition merges and the persistent snapshot is reconciled."
   next_required_decisions:
     - "Review the next authorized Work Item delivery against its exact W047 acceptance gate and persist the Architect verdict before downstream work."
 in_review:
