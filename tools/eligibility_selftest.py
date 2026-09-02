@@ -54,12 +54,23 @@ declarations through an injected immutable authority snapshot:
   document / biometric / government-ID content fields exist
   anywhere in the family (the opaque reference id string is the
   entire stored surface);
-- journal-first durability: hash-chained append-only records,
-  persist-then-ack, tamper detection (byte flip, reorder,
-  truncation, sequence gap, duplicated line), store-failure
-  isolation (no phantom state), and byte-identical replay with
-  the FIVE idempotency ledgers (commands, decisions,
-  providers, declarations, citations);
+- journal-first durability: ONE durable journal record per
+  admitted command + its event + the action-owned identity
+  digests (the W044 atomic shape -- a persisted command without
+  its event is structurally unrepresentable); hash-chained
+  append-only records, persist-then-ack, tamper detection
+  (byte flip, reorder, truncation, sequence gap, duplicated
+  line), store-failure isolation (no phantom state),
+  failure-injection recovery at the old two-record boundary
+  (crash before the atomic write, crash after it, and the
+  legacy stranded command-without-event line all leave the
+  command un-stranded or fail closed), and byte-identical
+  replay with the FIVE idempotency ledgers (commands,
+  decisions, providers, declarations, citations);
+- lifecycle-count discipline: ONE journaled event = exactly
+  ONE provider ``event_count`` increment (register -> 1,
+  evaluation conferment -> 2, suspension -> 3), with the
+  identical count reproduced by restart replay;
 - determinism: two fresh runs byte-identical, and the digest
   stream reproduced byte-for-byte under PYTHONHASHSEED
   0/1/7919/unset subprocesses; the ONLY time source is the
@@ -84,7 +95,7 @@ import subprocess  # noqa: S404 - deterministic child processes of this repo's o
 import sys
 import tempfile
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
@@ -416,8 +427,12 @@ _AUTHORIZED_PATHS = (
 AUTHORIZED_CI_WIRING = ".github/workflows/spec-check.yml"
 
 #: The pinned golden stream digest of the canonical scenario
-#: (byte-identical across runs, hash seeds, and replays).
-_GOLDEN_STREAM_SHA = "sha256:91e024024db44823ac1fdc542641a02cee91de1a790cb54e3d1c2e51dc57c865"
+#: (byte-identical across runs, hash seeds, and replays;
+#: re-pinned for the correction-round journal: the atomic
+#: W044-shape records, the born-frozen event payloads, the
+#: provider-ledger registration digest, and the single
+#: conferment increment).
+_GOLDEN_STREAM_SHA = "sha256:6c54627097a093fb032c29b8103b3b03bfc204b14a31973045fea35e85111192"
 
 
 def ok(name: str, detail: str = "") -> Result:
@@ -2233,10 +2248,10 @@ def case_10_every_illegal_transition(results: List[Result]) -> None:
         if problems:
             results.append(fail(name, "%s: %s" % (action, problems)))
             return
-    if len(authority.journal_records()) != length_before + 4:
+    if len(authority.journal_records()) != length_before + 2:
         # the provider-2 registration + its revocation appended
-        # (2 admitted commands = 4 records); every REJECTED
-        # command appended nothing
+        # (2 admitted commands = 2 atomic records); every
+        # REJECTED command appended nothing
         results.append(
             fail(name, "rejected commands grew the journal: %d" % (
                 len(authority.journal_records()) - length_before,
@@ -3780,10 +3795,13 @@ def case_35_history_never_rewritten(results: List[Result]) -> None:
 
 def case_36_journal_first_recovery(results: List[Result]) -> None:
     name = "case_36_journal_first_recovery"
-    # the store fails on the 4th append: genesis + policy cmd +
-    # policy event succeeded; the provider registration's COMMAND
-    # record fails -> no ack, no phantom provider
-    store = FailingEligibilityStore(fail_after=3)
+    # the store fails on the 2nd append: the policy admission
+    # persisted ATOMICALLY (its command + event + identity as
+    # ONE record); the provider registration's single record
+    # fails -> nothing persisted for it, no ack, no phantom
+    # provider (the command-without-event intermediate state
+    # the OLD two-record shape could persist no longer exists)
+    store = FailingEligibilityStore(fail_after=1)
     authority = EligibilityAuthority(
         store=store, clock=StepClock(_ET0, _ESTEP),
         snapshot=AuthoritySnapshot(()),
@@ -4072,11 +4090,11 @@ def case_42_deep_immutability(results: List[Result]) -> None:
         return
     except Exception:
         pass
-    # the journal record payloads are deeply frozen
+    # the journal record event payloads are deeply frozen
     for record_entry in authority.journal_records():
-        if isinstance(record_entry.payload, dict):
+        if isinstance(record_entry.event.payload, Mapping):
             try:
-                record_entry.payload["x"] = 1  # type: ignore[index]
+                record_entry.event.payload["x"] = 1  # type: ignore[index]
                 results.append(
                     fail(name, "journal payload mutable (record %d)" % (
                         record_entry.sequence,
@@ -4314,6 +4332,385 @@ def case_44_closed_loop_composition(results: List[Result]) -> None:
     )
 
 
+class CrashAfterWriteStore(MemoryEligibilityStore):
+    """A battery fixture: the append DURABLY SUCCEEDS (the
+    bytes are in the store), then the process "dies" before the
+    in-memory acknowledgment -- the only crash boundary that
+    remains in the atomic single-record shape (persist happened,
+    ack never did)."""
+
+    def __init__(self, crash_on_append: int) -> None:
+        super().__init__()
+        self._crash_on = crash_on_append
+        self._appended = 0
+
+    def append(self, record_bytes: bytes) -> None:
+        super().append(record_bytes)
+        self._appended += 1
+        if self._appended >= self._crash_on:
+            raise EligibilityError(
+                EligibilityReasonCode.STORE_FAILED,
+                "battery fixture: simulated process death after "
+                "the durable write (before the ack)",
+            )
+
+
+def case_45_atomic_admission_recovery(results: List[Result]) -> None:
+    name = "case_45_atomic_admission_recovery"
+    # THE OLD DEFECT: _append persisted the COMMAND record and
+    # the EVENT record as two independent writes; a crash between
+    # them left a persisted command whose journal ledger entry
+    # had no event, so the retry was acknowledged as a DUPLICATE
+    # forever -- a stranded command.  The W044 single-record
+    # shape (one durable record = one admitted command + its
+    # event + the action-owned identity digests) makes the
+    # intermediate state structurally unrepresentable.
+    #
+    # Injection A -- failure EXACTLY at the old command/event
+    # persistence boundary: the old code had already persisted
+    # the command's first write by this point; the atomic shape
+    # has persisted NOTHING for it (the single record write
+    # fails before any byte lands).
+    store = FailingEligibilityStore(fail_after=1)
+    authority = EligibilityAuthority(
+        store=store, clock=StepClock(_ET0, _ESTEP),
+        snapshot=AuthoritySnapshot(()),
+    )
+    out = authority.enroll_policy(
+        command_id="pol-01", actor="a", source="s",
+        jurisdiction=_J_ALPHA, policy_version=1,
+        sharing_modes=(_MODE_TETHER,), access_types=(_ACCESS_WIFI,),
+        allowed_platform_families=(_FAMILY_HANDSET,),
+        allowed_device_classes=(_CLASS_PORTABLE,),
+        provenance="p",
+    )
+    if out.status != "appended":
+        results.append(fail(name, "the admitted policy failed"))
+        return
+    problems = _expect_error(
+        name, EligibilityReasonCode.STORE_FAILED,
+        authority.register_provider,
+        command_id="prov-01", actor="a", source="s",
+        provider_id=_PROVIDER_1, jurisdictions=(_J_ALPHA,), provenance="p",
+    )
+    if problems:
+        results.append(fail(name, "injection A: %s" % problems))
+        return
+    if "prov-01" in authority.command_ledger():
+        results.append(
+            fail(name, "injection A: phantom command ledger entry")
+        )
+        return
+    if authority.providers():
+        results.append(fail(name, "injection A: phantom provider state"))
+        return
+    # simulate restart: a fresh process replays the SAME bytes
+    healthy = MemoryEligibilityStore()
+    healthy._chunks = list(store._chunks)  # noqa: SLF001 - battery fixture
+    restarted = EligibilityAuthority.load(
+        store=healthy, clock=StepClock(_ET0, _ESTEP),
+        snapshot=AuthoritySnapshot(()),
+    )
+    if "prov-01" in restarted.command_ledger():
+        results.append(
+            fail(name, "injection A: the failed command persisted")
+        )
+        return
+    # retry the EXACT command: NOT stranded -- admitted cleanly
+    retry = restarted.register_provider(
+        command_id="prov-01", actor="a", source="s",
+        provider_id=_PROVIDER_1, jurisdictions=(_J_ALPHA,), provenance="p",
+    )
+    if retry.status != "appended" or not retry.event_id:
+        results.append(
+            fail(name, "injection A retry: %s (event %r)" % (
+                retry.status, retry.event_id,
+            ))
+        )
+        return
+    # exactly one resulting event exists for the command
+    records_for = [
+        record for record in restarted.journal_records()
+        if record.command.command_id == "prov-01"
+    ]
+    if len(records_for) != 1:
+        results.append(
+            fail(name, "injection A: %d records for one command" % (
+                len(records_for),
+            ))
+        )
+        return
+    if records_for[0].event.event_id != retry.event_id:
+        results.append(fail(name, "injection A: event id mismatch"))
+        return
+    # idempotency after the retry: the duplicate does not grow
+    # the journal and carries the SAME real event id
+    again = restarted.register_provider(
+        command_id="prov-01", actor="a", source="s",
+        provider_id=_PROVIDER_1, jurisdictions=(_J_ALPHA,), provenance="p",
+    )
+    if again.status != "duplicate" or again.event_id != retry.event_id:
+        results.append(
+            fail(name, "injection A duplicate: %s (event %r)" % (
+                again.status, again.event_id,
+            ))
+        )
+        return
+    journal_digest_a = restarted.journal_digest()
+    if len(restarted.journal_records()) != 2:
+        results.append(
+            fail(name, "injection A: journal grew to %d records" % (
+                len(restarted.journal_records()),
+            ))
+        )
+        return
+    # replay of the post-retry journal stays byte-identical
+    healthy_b = MemoryEligibilityStore()
+    healthy_b._chunks = list(healthy._chunks)  # noqa: SLF001 - battery fixture
+    restarted_b = EligibilityAuthority.load(
+        store=healthy_b, clock=StepClock(_ET0, _ESTEP),
+        snapshot=AuthoritySnapshot(()),
+    )
+    if restarted_b.journal_digest() != journal_digest_a:
+        results.append(fail(name, "injection A: replay digest diverged"))
+        return
+    if restarted_b.digest_stream() != restarted.digest_stream():
+        results.append(fail(name, "injection A: replay stream diverged"))
+        return
+
+    # Injection B -- crash AFTER the atomic record is durably
+    # persisted but BEFORE the in-memory ack: the retry is a
+    # DUPLICATE whose ledger entry carries its REAL event id
+    # (never the stranded empty-event duplicate of the old
+    # two-record shape), and exactly one event exists.
+    crash_store = CrashAfterWriteStore(crash_on_append=2)
+    authority_b = EligibilityAuthority(
+        store=crash_store, clock=StepClock(_ET0, _ESTEP),
+        snapshot=AuthoritySnapshot(()),
+    )
+    out = authority_b.enroll_policy(
+        command_id="pol-01", actor="a", source="s",
+        jurisdiction=_J_ALPHA, policy_version=1,
+        sharing_modes=(_MODE_TETHER,), access_types=(_ACCESS_WIFI,),
+        allowed_platform_families=(_FAMILY_HANDSET,),
+        allowed_device_classes=(_CLASS_PORTABLE,),
+        provenance="p",
+    )
+    if out.status != "appended":
+        results.append(fail(name, "injection B: the policy failed"))
+        return
+    problems = _expect_error(
+        name, EligibilityReasonCode.STORE_FAILED,
+        authority_b.register_provider,
+        command_id="prov-01", actor="a", source="s",
+        provider_id=_PROVIDER_1, jurisdictions=(_J_ALPHA,), provenance="p",
+    )
+    if problems:
+        results.append(fail(name, "injection B: %s" % problems))
+        return
+    # the write is durable; the ack never happened; restart:
+    survived = MemoryEligibilityStore()
+    survived._chunks = list(  # noqa: SLF001 - battery fixture
+        crash_store._chunks
+    )
+    restarted_c = EligibilityAuthority.load(
+        store=survived, clock=StepClock(_ET0, _ESTEP),
+        snapshot=AuthoritySnapshot(()),
+    )
+    known = restarted_c.command_ledger().get("prov-01")
+    if known is None or not known.get("event_id", ""):
+        results.append(
+            fail(name, "injection B: the persisted command is "
+                "stranded without its event")
+        )
+        return
+    if not restarted_c.providers():
+        results.append(
+            fail(name, "injection B: replay lost the provider"))
+        return
+    retry_b = restarted_c.register_provider(
+        command_id="prov-01", actor="a", source="s",
+        provider_id=_PROVIDER_1, jurisdictions=(_J_ALPHA,), provenance="p",
+    )
+    if retry_b.status != "duplicate":
+        results.append(
+            fail(name, "injection B retry: %s" % retry_b.status))
+        return
+    if retry_b.event_id != known["event_id"] or not retry_b.event_id:
+        results.append(
+            fail(name, "injection B: duplicate event id %r != %r" % (
+                retry_b.event_id, known["event_id"],
+            ))
+        )
+        return
+    records_b = [
+        record for record in restarted_c.journal_records()
+        if record.command.command_id == "prov-01"
+    ]
+    if len(records_b) != 1:
+        results.append(
+            fail(name, "injection B: %d records for one command" % (
+                len(records_b),
+            ))
+        )
+        return
+    if records_b[0].event.event_id != known["event_id"]:
+        results.append(fail(name, "injection B: event id mismatch"))
+        return
+    if len(restarted_c.journal_records()) != 2:
+        results.append(fail(name, "injection B: journal grew"))
+        return
+
+    # Injection C -- the legacy stranded state itself: a journal
+    # line shaped like the OLD command-without-event record (the
+    # command persisted, the event missing) is UNREPRESENTABLE:
+    # the loader fails closed journal-corrupt rather than
+    # silently acknowledging a duplicate for a stranded command.
+    good_store = MemoryEligibilityStore()
+    authority_c = EligibilityAuthority(
+        store=good_store, clock=StepClock(_ET0, _ESTEP),
+        snapshot=AuthoritySnapshot(()),
+    )
+    authority_c.enroll_policy(
+        command_id="pol-01", actor="a", source="s",
+        jurisdiction=_J_ALPHA, policy_version=1,
+        sharing_modes=(_MODE_TETHER,), access_types=(_ACCESS_WIFI,),
+        allowed_platform_families=(_FAMILY_HANDSET,),
+        allowed_device_classes=(_CLASS_PORTABLE,),
+        provenance="p",
+    )
+    authority_c.register_provider(
+        command_id="prov-01", actor="a", source="s",
+        provider_id=_PROVIDER_1, jurisdictions=(_J_ALPHA,), provenance="p",
+    )
+    admitted = authority_c.journal_records()[1].to_dict()
+    stranded_line = dict(admitted)
+    del stranded_line["event"]  # the old intermediate state
+    legacy = canonical_json_bytes(stranded_line) + b"\n"
+    policy_line = journal_bytes_for(
+        authority_c.journal_records()[0]
+    )
+    problems = _expect_error(
+        name, EligibilityReasonCode.JOURNAL_CORRUPT,
+        EligibilityAuthority.load,
+        store=FrozenBytesStore(policy_line + legacy),
+        clock=StepClock(_ET0, _ESTEP),
+        snapshot=AuthoritySnapshot(()),
+    )
+    if problems:
+        results.append(fail(name, "injection C: %s" % problems))
+        return
+    results.append(
+        ok(name, "atomic admission: crash before/after the single "
+            "record write strands nothing; the legacy "
+            "command-without-event line fails closed")
+    )
+
+
+def case_46_lifecycle_count_discipline(results: List[Result]) -> None:
+    name = "case_46_lifecycle_count_discipline"
+    # ONE journaled event = exactly ONE lifecycle-count
+    # increment: register -> 1, evaluation conferment -> 2,
+    # renewal -> 3, suspension -> 4; restart replay reproduces
+    # the IDENTICAL count (the pre-correction double increment
+    # through the post-conferment bookkeeping refresh is the
+    # defect this case pins closed).
+    store = MemoryEligibilityStore()
+    authority = EligibilityAuthority(
+        store=store, clock=StepClock(_ET0, _ESTEP),
+        snapshot=AuthoritySnapshot(()),
+    )
+    authority.enroll_policy(
+        command_id="pol-01", actor="a", source="s",
+        jurisdiction=_J_ALPHA, policy_version=1,
+        sharing_modes=(_MODE_TETHER,), access_types=(_ACCESS_WIFI,),
+        allowed_platform_families=(_FAMILY_HANDSET,),
+        allowed_device_classes=(_CLASS_PORTABLE,),
+        provenance="p",
+    )
+    authority.register_provider(
+        command_id="prov-01", actor="a", source="s",
+        provider_id=_PROVIDER_1, jurisdictions=(_J_ALPHA,), provenance="p",
+    )
+    if authority.provider(_PROVIDER_1).event_count != 1:
+        results.append(
+            fail(name, "register: event_count %d != 1" % (
+                authority.provider(_PROVIDER_1).event_count,
+            ))
+        )
+        return
+    out = authority.evaluate(
+        command_id="ev-01", actor="a", source="s",
+        jurisdiction=_J_ALPHA, provider_id=_PROVIDER_1,
+        valid_until=_CONFER_UNTIL,
+    )
+    if out.status != "appended":
+        results.append(fail(name, "the conferral evaluation failed"))
+        return
+    if authority.provider(_PROVIDER_1).event_count != 2:
+        results.append(
+            fail(name, "conferment: event_count %d != 2 (one "
+                "increment per journaled event)" % (
+                authority.provider(_PROVIDER_1).event_count,
+            ))
+        )
+        return
+    if authority.provider(_PROVIDER_1).last_action != "evaluate":
+        results.append(fail(name, "conferment bookkeeping not refreshed"))
+        return
+    # renewal (eligible -> eligible): exactly +1
+    authority.evaluate(
+        command_id="ev-02", actor="a", source="s",
+        jurisdiction=_J_ALPHA, provider_id=_PROVIDER_1,
+        valid_until=_CONFER_UNTIL,
+    )
+    if authority.provider(_PROVIDER_1).event_count != 3:
+        results.append(
+            fail(name, "renewal: event_count %d != 3" % (
+                authority.provider(_PROVIDER_1).event_count,
+            ))
+        )
+        return
+    # suspension: exactly +1
+    authority.suspend(
+        command_id="susp-01", actor="a", source="s",
+        provider_id=_PROVIDER_1, reason="compliance-hold",
+    )
+    if authority.provider(_PROVIDER_1).event_count != 4:
+        results.append(
+            fail(name, "suspension: event_count %d != 4" % (
+                authority.provider(_PROVIDER_1).event_count,
+            ))
+        )
+        return
+    # restart replay: the IDENTICAL count and stream
+    replay_store = MemoryEligibilityStore()
+    replay_store._chunks = list(store._chunks)  # noqa: SLF001 - fixture
+    restarted = EligibilityAuthority.load(
+        store=replay_store, clock=StepClock(_ET0, _ESTEP),
+        snapshot=AuthoritySnapshot(()),
+    )
+    if restarted.provider(_PROVIDER_1).event_count != 4:
+        results.append(
+            fail(name, "replay event_count %d != 4" % (
+                restarted.provider(_PROVIDER_1).event_count,
+            ))
+        )
+        return
+    if restarted.provider(_PROVIDER_1).digest() != (
+        authority.provider(_PROVIDER_1).digest()
+    ):
+        results.append(fail(name, "replay trust record diverged"))
+        return
+    if restarted.digest_stream() != authority.digest_stream():
+        results.append(fail(name, "replay digest stream diverged"))
+        return
+    results.append(
+        ok(name, "lifecycle counts: register 1 -> conferment 2 -> "
+            "renewal 3 -> suspension 4; replay identical")
+    )
+
+
 def main() -> int:
     results: List[Result] = []
     for case in (
@@ -4361,6 +4758,8 @@ def main() -> int:
         case_42_deep_immutability,
         case_43_scope_audit,
         case_44_closed_loop_composition,
+        case_45_atomic_admission_recovery,
+        case_46_lifecycle_count_discipline,
     ):
         case(results)
     failures = [result for result in results if not result[1]]

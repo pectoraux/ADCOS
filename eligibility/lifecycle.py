@@ -20,7 +20,8 @@ deterministic, fail-closed service that
   with explicit reason/evidence, preserving all history;
 - projects the current state (trust records, live
   declarations, decisions) from the append-only journal, and
-  recovers journal-first from the persisted bytes.
+  recovers journal-first from the persisted bytes
+  (construction is recovery).
 
 The service composes the external authorities ONLY through the
 injected :class:`~eligibility.evidence.AuthoritySnapshot`
@@ -41,7 +42,6 @@ from .decision import DecisionRecord
 from .device import DeviceEligibilitySignal
 from .errors import EligibilityError, EligibilityReasonCode
 from .evidence import AuthoritySnapshot
-from .immutability import deep_materialize
 from .jurisdiction import JurisdictionPolicy
 from .journal import (
     AppendOnlyEligibilityJournal,
@@ -151,7 +151,14 @@ def fold_state(
 ) -> None:
     """Fold ONE journaled event into the projections (pure
     state; used by both the live service and the replay/restart
-    path -- the ONLY way any projection ever changes)."""
+    path -- the ONLY way any projection ever changes).
+
+    Lifecycle-count discipline: ONE journaled event = exactly
+    ONE ``event_count`` increment on the provider trust record
+    (the increment belongs to the projection methods --
+    ``with_conferment``/``with_action`` and the explicit
+    lifecycle construction -- never to the bookkeeping
+    refresh)."""
     action = event.action
     fact = event.payload
     if action == ActionKind.REGISTER_PROVIDER:
@@ -208,6 +215,9 @@ def fold_state(
                 valid_until=decision.valid_until,
                 conferring_decision_id=decision.decision_id,
             )
+            # the bookkeeping refresh carries NO increment:
+            # with_conferment() already returned the incremented
+            # projection (one journaled event = one increment)
             _touch(providers, provider_id, action, event.instant)
         return
     if action in (
@@ -263,7 +273,10 @@ def _touch(
     instant: str,
 ) -> None:
     """Refresh the last-action bookkeeping of one trust record
-    (pure replacement)."""
+    (pure replacement; deliberately carries NO event_count
+    increment -- the increment is owned by the projection
+    methods, so one journaled event increments the lifecycle
+    count exactly once)."""
     current = providers[provider_id]
     providers[provider_id] = ProviderTrustRecord(
         provider_id=current.provider_id,
@@ -279,7 +292,7 @@ def _touch(
         created_at=current.created_at,
         last_action=action,
         last_instant=instant,
-        event_count=current.event_count + 1,
+        event_count=current.event_count,
     )
 
 
@@ -289,22 +302,10 @@ def apply_record(
     decisions: Dict[str, DecisionRecord],
     record: JournalRecord,
 ) -> None:
-    """Apply one journaled EVENT record to the projections (the
-    replay path; command records carry no fold state)."""
-    if record.kind != "event":
-        return
-    content = deep_materialize(record.payload)
-    event = EligibilityEvent(
-        event_id=str(content.get("event_id", "")),
-        command_digest=str(content.get("command_digest", "")),
-        action=str(content.get("action", "")),
-        entity_kind=str(content.get("entity_kind", "")),
-        entity_id=str(content.get("entity_id", "")),
-        outcome=str(content.get("outcome", "")),
-        instant=str(content.get("instant", "")),
-        payload=dict(content.get("payload", {})),
-    )
-    fold_state(providers, declarations, decisions, event)
+    """Apply ONE journaled record to the projections (the
+    replay path).  Every record is the atomic (command + event)
+    unit, so folding is simply folding the record's event."""
+    fold_state(providers, declarations, decisions, record.event)
 
 
 class EligibilityAuthority:
@@ -316,6 +317,13 @@ class EligibilityAuthority:
     W044 public surfaces).  Every mutation flows through the
     journal; every projection is a fold; there is no
     out-of-band state.
+
+    Construction is RECOVERY (the W044 discipline): the journal
+    replays the store's persisted bytes and the projections
+    are folded from them, so an authority built over a
+    non-empty store is the byte-identical continuation of the
+    process that wrote those bytes; :meth:`load` is the same
+    recovery expressed as a constructor.
     """
 
     def __init__(
@@ -342,6 +350,13 @@ class EligibilityAuthority:
         self._providers: Dict[str, ProviderTrustRecord] = {}
         self._declarations: Dict[str, Any] = {}
         self._decisions: Dict[str, DecisionRecord] = {}
+        for record in self._journal.records():
+            apply_record(
+                self._providers,
+                self._declarations,
+                self._decisions,
+                record,
+            )
 
     # ------------------------------------------------------------------
     # Journal-first recovery
@@ -356,23 +371,9 @@ class EligibilityAuthority:
         snapshot: AuthoritySnapshot,
     ) -> "EligibilityAuthority":
         """Rebuild the authority from the persisted journal
-        bytes (byte-identical replay)."""
-        journal = AppendOnlyEligibilityJournal.load(store)
-        authority = cls.__new__(cls)
-        authority._journal = journal
-        authority._clock = clock
-        authority._snapshot = snapshot
-        authority._providers = {}
-        authority._declarations = {}
-        authority._decisions = {}
-        for record in journal.records():
-            apply_record(
-                authority._providers,
-                authority._declarations,
-                authority._decisions,
-                record,
-            )
-        return authority
+        bytes (byte-identical replay; construction is
+        recovery)."""
+        return cls(store=store, clock=clock, snapshot=snapshot)
 
     # ------------------------------------------------------------------
     # Public command surface (typed wrappers over _submit)
@@ -952,20 +953,15 @@ class EligibilityAuthority:
         entity_id: str,
         fact: Dict[str, Any],
     ) -> EligibilityEvent:
-        """Journal-first append: one COMMAND record + one EVENT
-        record, persist-then-ack, then the fold."""
+        """Journal-first append of ONE ATOMIC record: the
+        admitted command, its resulting event, and the
+        action-owned identity digests are persisted TOGETHER as
+        a single durable journal record (persist-then-ack), then
+        the fold updates the projections.  There is no persisted
+        intermediate state in which the command exists without
+        its event -- a crash strands nothing (the W044
+        invariant)."""
         digest = command.digest()
-        command_record = JournalRecord.build(
-            sequence=self._journal.tail_sequence() + 1,
-            prev_record_id=self._journal.tail_record_id(),
-            kind="command",
-            command_digest=digest,
-            entity_kind="command",
-            entity_id=command.command_id,
-            payload=command.content(),
-            instant=instant,
-        )
-        self._journal.append(command_record)
         event = EligibilityEvent.build(
             command_digest=digest,
             action=command.action,
@@ -975,22 +971,19 @@ class EligibilityAuthority:
             instant=instant,
             payload=fact,
         )
-        event_record = JournalRecord.build(
+        record = JournalRecord.build(
             sequence=self._journal.tail_sequence() + 1,
             prev_record_id=self._journal.tail_record_id(),
-            kind="event",
+            command=command,
             command_digest=digest,
-            entity_kind=entity_kind,
-            entity_id=entity_id,
-            payload=event.content(),
-            instant=instant,
+            event=event,
         )
-        self._journal.append(event_record)
+        self._journal.append(record)
         apply_record(
             self._providers,
             self._declarations,
             self._decisions,
-            event_record,
+            record,
         )
         return event
 

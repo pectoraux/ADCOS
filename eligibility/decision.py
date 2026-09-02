@@ -37,7 +37,7 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass
-from typing import Any, Dict, Tuple
+from typing import Any, Dict, Mapping, Tuple
 
 from protocol.canonicalization import canonical_json_bytes
 
@@ -386,7 +386,7 @@ class DecisionRecord:
 
     @classmethod
     def from_dict(cls, data: object) -> "DecisionRecord":
-        if not isinstance(data, dict):
+        if not isinstance(data, Mapping):
             raise EligibilityError(
                 EligibilityReasonCode.INVALID_INPUT,
                 "decision record must be a mapping",

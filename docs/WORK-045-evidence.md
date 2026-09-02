@@ -5,10 +5,16 @@
 W044-established delivery-cycle convention, the implementation branch is cut from the recorded baseline while
 `main` additionally carries the DEC-0064 governance merge `4540dea` — the branch-point offset is governance-only
 and is the honest delta the Architect reviews; CI evaluates the merge ref)
-**Repository surface:** `eligibility/` (16 modules, ~5,950 package lines, 61 frozen exports),
-`tools/eligibility_selftest.py` (44 deterministic cases), this manifest, and one additive CI step.
-**Battery result:** PASS 44/44 (branch context, simulated CI merge-ref context, and base-less clean clones).
-**Golden stream:** `sha256:91e024024db44823ac1fdc542641a02cee91de1a790cb54e3d1c2e51dc57c865`
+**Review state:** CHANGES REQUIRED (Architect, on head `9894d83`) — correction round delivered at the new head:
+(1) the journal refactored to the W044 atomic single-record shape (one durable record = one admitted command +
+its event + the action-owned identity digests); (2) the double lifecycle increment removed. **NOT claimed
+accepted** — the next Architect re-review owns the disposition.
+**Repository surface:** `eligibility/` (16 modules, 61 frozen exports), `tools/eligibility_selftest.py`
+(46 deterministic cases), this manifest, and one additive CI step.
+**Battery result:** PASS 46/46 (branch context, simulated CI merge-ref context, and base-less clean clones).
+**Golden stream:** `sha256:6c54627097a093fb032c29b8103b3b03bfc204b14a31973045fea35e85111192` (re-pinned for the
+correction-round journal: the atomic record bytes, the born-frozen event payloads, the provider-ledger
+registration digest, and the single conferment increment)
 
 ## 0. Boundary statement (mandatory)
 
@@ -63,8 +69,9 @@ checks, and device/platform eligibility signals evaluate deterministically under
   (case 01, 24).
 - Determinism: two fresh runs byte-identical (case 38); `PYTHONHASHSEED` 0/1/7919/unset subprocesses
   byte-identical (case 39); the golden scenario digest stream is pinned
-  `sha256:91e024024db44823ac1fdc542641a02cee91de1a790cb54e3d1c2e51dc57c865` (case 08); restart replay is
-  byte-identical over the persisted journal bytes (case 37).
+  `sha256:6c54627097a093fb032c29b8103b3b03bfc204b14a31973045fea35e85111192` (case 08); restart replay is
+  byte-identical over the persisted journal bytes (case 37); the lifecycle counts replay identically
+  (register 1 → conferment 2 → renewal 3 → suspension 4, case 46).
 
 ### AC-2 "Expired/revoked eligibility fails closed; suspension prevents new offers/leases while preserving
 historical settlement records; reinstatement is explicit"
@@ -139,23 +146,45 @@ with the appropriate regulated provider (ADCOS stores references and decision me
 
 ## 4. Journal, idempotency, and durability
 
-- One append-only hash-chained journal (genesis + command + event records; persist-then-ack; atomic per record)
-  with FIVE durable idempotency ledgers (commands, decisions, providers, declarations, citations) — all fully
-  derived from the journaled records so replay rebuilds them byte-identically (cases 12, 37).
-- Duplicate commands are idempotent no-ops (no journal growth, case 12); conflicting replays of the same command
-  identity fail closed (case 13).
+- **The atomic admission invariant (correction round):** ONE durable journal record represents ONE admitted
+  command together with its resulting event and all action-owned identity data — the accepted W044 shape.
+  The record carries the typed command, the command digest, the event, the declaration/registration identity
+  digest, and the decision identity digest; construction, deserialization, and every append mechanically
+  verify the digests and the command/event pairing.  The previous two-record (COMMAND then EVENT) shape is
+  gone: a persisted command without its event is structurally unrepresentable, so
+  `persisted command + event → acknowledged` is guaranteed and
+  `persisted command + missing event → acknowledged duplicate forever` is impossible.
+- One append-only hash-chained journal (sequences 1..N from the virtual genesis anchor; persist-then-ack) with
+  FIVE durable idempotency ledgers (commands, decisions, providers, declarations, citations) — all fully
+  derived from the journaled records so replay rebuilds them byte-identically (cases 12, 37).  The command
+  ledger entry is born WITH its event id (the atomic registration); construction is recovery (an authority
+  built over a non-empty store is the byte-identical continuation of the process that wrote those bytes).
+- Failure-injection recovery at the old two-record boundary (case 45): a store failure injected exactly where
+  the old shape had persisted the command but not yet its event leaves NOTHING persisted for the command;
+  restart + retry re-admits it cleanly.  A crash injected AFTER the atomic record is durably persisted but
+  BEFORE the ack leaves the complete (command + event) pair: restart replays it, the retry is a duplicate
+  carrying its REAL event id, and exactly ONE resulting event exists.  A legacy journal line shaped like the
+  old stranded state (command persisted, event missing) fails closed `journal-corrupt` — never a silent
+  stranded duplicate.  Replay and idempotency stay byte-identical across every injection.
+- Duplicate commands are idempotent no-ops (no journal growth, case 12); conflicting replays of the same
+  command identity fail closed (case 13).
 - Tamper detection: byte flip, record reordering, mid-record truncation, full-line truncation (digest change),
   and line duplication all fail closed `journal-corrupt` (case 35).
 - Store failures: persist-then-ack means no ack, no phantom state, and no phantom ledger entries; recovery
   replays the same bytes into the identical authority and the failed command can be re-submitted (case 36).
-- Deep immutability: the projections, journal payloads, and ledger views are deeply frozen; mutation attempts
-  raise; detached copies never leak (case 42).
+- Lifecycle-count discipline (correction round): ONE journaled event = exactly ONE provider `event_count`
+  increment — the post-conferment bookkeeping refresh no longer increments (`with_conferment` already returns
+  the incremented projection); register → 1, evaluation conferment → 2, renewal → 3, suspension → 4, and
+  restart replay reproduces the identical count and stream (case 46; the golden stream re-pin covers the
+  corrected counts, case 08).
+- Deep immutability: the projections, journal event payloads (born frozen at event construction), and ledger
+  views are deeply frozen; mutation attempts raise; detached copies never leak (case 42).
 
 ## 5. Verification matrix (all contexts honest)
 
 | Check | Branch context | Simulated CI merge ref (`4540dea` + head) | Base-less clean clone |
 |---|---|---|---|
-| `eligibility_selftest` | **PASS 44/44** | **PASS 44/44** (via the scope-audit case's `HEAD^1` selection) | **PASS 44/44** |
+| `eligibility_selftest` | **PASS 46/46** | **PASS 46/46** (via the scope-audit case's `HEAD^1` selection) | **PASS 46/46** |
 | `spec_check` | 14/17 (ARCH-08 evaluates the raw branch-point offset) | **15/17 — failure set byte-identical to clean main `4540dea` (ARCH-02/ARCH-06 inherited only; ZERO new failures)** | 14/16, 1 skipped (ARCH-08 inactive base-less) |
 | `spec_check --provenance` | — | **ARCH-08 PASS: "implementation delta covered by the active authorization inherited from the base"** (in both full and strict modes) | — |
 | `session/adapter/transport/ipintegration/schema` batteries | PASS | **PASS** (55/55, 56/56, 69/69, 45/45, 25/25) | PASS |
@@ -230,10 +259,32 @@ reason/evidence.
 - The implementation files are confined to `eligibility/`, `tools/eligibility_selftest.py`,
   `docs/WORK-045-evidence.md`, and the one additive CI step (case 43; ARCH-08 at the merge ref).
 - No `spec/architect/` changes; no frozen architecture changes; no wire-schema changes; no W046+ implementation;
-  no W040 changes.
+  no W040 changes.  The W045 authorization remains valid and unchanged; the correction round did not broaden
+  the scope.
 - This delivery does not merge itself; the Architect review gate owns acceptance.
 
-## 10. Architectural escalation report
+## 10. Correction-round record (CHANGES REQUIRED disposition on `9894d83`)
+
+The Architect returned two defects on the PR #129 head `9894d83`.  Both are corrected at the new head:
+
+1. **Atomic command/event durability.** `_append()` previously persisted the COMMAND and the EVENT as two
+   independent journal records, creating an unrecoverable persisted intermediate state (a crash between the
+   writes left the command journaled without its event; `_submit()` then answered every retry as a duplicate
+   with an empty event id — stranded forever).  Correction: the W044 single-record invariant (§4) — one
+   durable record per admitted command + event + action-owned identity digests, the atomic command-ledger
+   registration, construction-is-recovery replay, and the deterministic failure-injection battery proof
+   (case 45) covering crash-before-write, crash-after-write-before-ack, and the legacy stranded line itself.
+2. **Double lifecycle increment.** `fold_state()` previously applied `with_conferment(...)` (which already
+   returns the incremented projection) and then a bookkeeping refresh that incremented `event_count` again —
+   one journaled conferment event counted twice, and the replay reproduced the wrong value deterministically.
+   Correction: the refresh carries no increment; one journaled event = one increment, pinned by the explicit
+   battery assertion register → conferment → expected count → replay → identical count (case 46).
+
+The golden stream digest was re-pinned to the corrected journal bytes (the format change is the correction,
+   not a regression).  This manifest does NOT claim acceptance; the next Architect re-review on the new head
+   owns the disposition.
+
+## 11. Architectural escalation report
 
 None. W045 required no new identity/session/routing/transport/NetworkPath/payment authority, no wire-schema
 modification, no frozen architecture change, no raw KYC/KYB storage, and no regulatory/legal authority claim.

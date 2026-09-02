@@ -1,13 +1,30 @@
 """WORK-045 append-only eligibility journal (hash-chained,
 tamper-evident, replayable).
 
-Mirrors the W051/W053/W044 journal discipline: the eligibility
-family owns exactly ONE journal -- the append-only,
-hash-chained eligibility history (commands + events, atomic per
-record, persist-then-ack, tamper-evident, replayable).  Every
-record's identity is content-and-chain derived; every append
-updates the durable idempotency ledgers; every load replays the
-bytes into the identical ledgers (journal-first recovery).
+Mirrors the ACCEPTED W044 journal invariant exactly: ONE durable
+journal record represents ONE admitted command together with
+its resulting event and all action-owned identity data.  The
+admitted command and its event are persisted ATOMICALLY as a
+single append-only record -- there is no persisted intermediate
+state in which a command exists without its event, so a crash
+at any point can never strand an admitted command as a
+"duplicate forever" with no resulting event.
+
+The record carries, beyond the (command, event) pair, the
+action-owned durable identity digests: the declaration digest
+(the immutable registration/declaration identity the action
+owns) and the decision digest (the evaluation decision
+identity).  Both are recomputed and verified at construction
+and on every deserialization, so a tampered identity basis
+fails closed ``journal-corrupt``.
+
+The eligibility family owns exactly ONE journal -- the
+append-only, hash-chained eligibility history.  Every record's
+identity is content-and-chain derived; every append updates the
+durable idempotency ledgers IN THE SAME ATOMIC STEP (the
+command ledger entry is created WITH its event id); every load
+replays the bytes into the identical ledgers (journal-first
+recovery).
 
 The FIVE durable idempotency ledgers (all fully derived from
 the journaled records, so replay rebuilds them byte-identically):
@@ -33,13 +50,16 @@ from protocol.canonicalization import canonical_json_bytes
 
 from .errors import EligibilityError, EligibilityReasonCode
 from .immutability import deep_freeze, deep_materialize
-from .states import EventOutcome
+from .model import EligibilityCommand, EligibilityEvent
+from .states import ActionKind
 
-#: The genesis record id (the chain anchor).
+#: The record-kind vocabulary: one discriminated family (the
+#: W044 single-record shape -- each record is one admitted
+#: command + its event + the action-owned identity digests).
+JOURNAL_RECORD_KIND = "eligibility-record"
+
+#: The chain anchor (the virtual predecessor of record 1).
 GENESIS_RECORD_ID = "sha256:" + "0" * 64
-
-#: The frozen journal record kinds.
-JOURNAL_RECORD_KIND = ("genesis", "command", "event")
 
 #: The declaration-event actions (whose event fact payload
 #: carries a versioned declaration record).
@@ -60,198 +80,266 @@ def _require_text(value: object, label: str) -> str:
     return value
 
 
-def record_content(
-    sequence: int,
-    record_id: str,
-    prev_record_id: str,
-    kind: str,
-    command_digest: str,
-    entity_kind: str,
-    entity_id: str,
-    payload: Any,
-    instant: str,
-) -> Dict[str, Any]:
-    """The canonical content basis of one journal record."""
-    return {
-        "sequence": sequence,
-        "record_id": record_id,
-        "prev_record_id": prev_record_id,
-        "kind": kind,
-        "command_digest": command_digest,
-        "entity_kind": entity_kind,
-        "entity_id": entity_id,
-        "payload": payload,
-        "instant": instant,
-    }
-
-
-def derive_record_id(content: Dict[str, Any]) -> str:
-    """The content-and-chain derived record identity (excluding
-    the id itself)."""
-    basis = {
-        key: value for key, value in content.items()
-        if key != "record_id"
-    }
-    return "sha256:" + hashlib.sha256(
-        canonical_json_bytes(deep_materialize(basis))
-    ).hexdigest()
-
-
-def command_digest_of_payload(payload: Any) -> str:
-    """The command digest of one COMMAND record's payload (the
-    canonical command content digest)."""
-    return "sha256:" + hashlib.sha256(
-        canonical_json_bytes(deep_materialize(payload))
-    ).hexdigest()
-
-
 def _content_digest(payload: Any) -> str:
-    """The canonical content digest of one event fact record
-    (declaration/registration digests for the idempotency
-    ledgers)."""
+    """The canonical content digest of one identity basis (the
+    declaration/registration/decision digests for the
+    idempotency ledgers)."""
     return "sha256:" + hashlib.sha256(
         canonical_json_bytes(deep_materialize(payload))
     ).hexdigest()
+
+
+def record_content(
+    command: EligibilityCommand,
+    command_digest: str,
+    event: EligibilityEvent,
+    declaration_digest: str,
+    decision_digest: str,
+) -> Dict[str, Any]:
+    """The canonical journal record content: the admitted
+    command + its event + the action-owned durable identity
+    digests (ONE atomic persistence unit)."""
+    return {
+        "command": command.to_dict(),
+        "command_digest": command_digest,
+        "event": event.to_dict(),
+        "declaration_digest": declaration_digest,
+        "decision_digest": decision_digest,
+    }
+
+
+def derive_record_id(
+    sequence: int, record_content: Dict[str, Any], prev_record_id: str
+) -> str:
+    """The content-derived journal record fingerprint (hash
+    chain).
+
+    Binds the record to its position (sequence), its content
+    (the admitted command + its event + the durable identity
+    digests), and the ENTIRE preceding journal (prev link).
+    """
+    content = {
+        "sequence": sequence,
+        "record_kind": JOURNAL_RECORD_KIND,
+        "record": record_content,
+        "prev_record_id": prev_record_id,
+    }
+    return "sha256:" + hashlib.sha256(
+        canonical_json_bytes(content)
+    ).hexdigest()
+
+
+def declaration_digest_for_event(event: EligibilityEvent) -> str:
+    """The durable declaration/registration identity digest of
+    one event (content-derived over the action's OWN record
+    DATA).
+
+    ``register-provider`` owns the registration identity (the
+    provider's registered facts); the four declaration actions
+    own the versioned declaration record identity.  Every other
+    action carries the empty digest ``""``.
+    """
+    if event.action == ActionKind.REGISTER_PROVIDER:
+        return _content_digest(event.payload)
+    if event.action in DECLARATION_ACTIONS:
+        fact = event.payload
+        record = fact.get("record", None)
+        if record is None:
+            raise EligibilityError(
+                EligibilityReasonCode.JOURNAL_CORRUPT,
+                "declaration event fact carries no versioned record",
+            )
+        return _content_digest(record)
+    return ""
+
+
+def decision_digest_for_event(event: EligibilityEvent) -> str:
+    """The durable decision identity digest of one ``evaluate``
+    event (content-derived over the journaled decision record).
+    Non-evaluation events carry the empty digest ``""``.
+    A malformed stored evaluation fact fails closed
+    ``journal-corrupt`` (the live admission path validates the
+    decision BEFORE any journal record exists)."""
+    if event.action != ActionKind.EVALUATE:
+        return ""
+    fact = event.payload
+    decision = fact.get("decision", None)
+    if decision is None:
+        raise EligibilityError(
+            EligibilityReasonCode.JOURNAL_CORRUPT,
+            "evaluation event fact carries no decision record",
+        )
+    return _content_digest(decision)
 
 
 @dataclass(frozen=True)
 class JournalRecord:
-    """One immutable journaled record.
+    """One immutable append-only journal record: an admitted
+    command, its resulting eligibility event, and the
+    action-owned durable identity digests (declaration /
+    decision; ``""`` where the action owns none).
 
-    ``kind`` is ``genesis`` / ``command`` / ``event``; the
-    COMMAND record's payload is the command content; the EVENT
-    record's payload is the event content (which itself carries
-    the fact payload).  ``payload`` is deeply frozen at
-    construction.
+    ``record_id`` is the hash-chain fingerprint over (sequence,
+    {command, command_digest, event, declaration_digest,
+    decision_digest}, prev) and is mechanically verified at
+    deserialization and on every append (``verify_id``).
     """
 
     sequence: int
     record_id: str
-    prev_record_id: str
-    kind: str
+    command: EligibilityCommand
     command_digest: str
-    entity_kind: str
-    entity_id: str
-    payload: Any
-    instant: str
+    event: EligibilityEvent
+    declaration_digest: str
+    decision_digest: str
 
     def __post_init__(self) -> None:
         if not isinstance(self.sequence, int) or isinstance(
             self.sequence, bool
         ):
             raise EligibilityError(
-                EligibilityReasonCode.INVALID_INPUT,
+                EligibilityReasonCode.JOURNAL_CORRUPT,
                 "sequence must be an integer",
             )
-        if self.sequence < 0:
+        if self.sequence < 1:
             raise EligibilityError(
-                EligibilityReasonCode.INVALID_INPUT,
-                "sequence must be non-negative",
+                EligibilityReasonCode.JOURNAL_CORRUPT,
+                "sequence must be >= 1 (contiguous 1..N journal)",
             )
         _require_text(self.record_id, "record_id")
-        if self.kind not in JOURNAL_RECORD_KIND:
+        if not isinstance(self.command, EligibilityCommand):
             raise EligibilityError(
-                EligibilityReasonCode.INVALID_INPUT,
-                "record kind %r must be one of %s"
-                % (self.kind, list(JOURNAL_RECORD_KIND)),
+                EligibilityReasonCode.JOURNAL_CORRUPT,
+                "record must carry an EligibilityCommand",
             )
-        if self.kind == "genesis":
-            if self.sequence != 0:
-                raise EligibilityError(
-                    EligibilityReasonCode.INVALID_INPUT,
-                    "the genesis record must be sequence 0",
-                )
-            if self.prev_record_id != "":
-                raise EligibilityError(
-                    EligibilityReasonCode.INVALID_INPUT,
-                    "the genesis record has no predecessor",
-                )
-            if self.command_digest != "":
-                raise EligibilityError(
-                    EligibilityReasonCode.INVALID_INPUT,
-                    "the genesis record carries no command digest",
-                )
-        else:
-            _require_text(self.prev_record_id, "prev_record_id")
-            _require_text(self.command_digest, "command_digest")
-            _require_text(self.entity_kind, "entity_kind")
-            _require_text(self.entity_id, "entity_id")
-            _require_text(self.instant, "instant")
-        expected = derive_record_id(self.content())
-        if self.record_id != expected:
+        _require_text(self.command_digest, "command_digest")
+        if not isinstance(self.event, EligibilityEvent):
             raise EligibilityError(
-                EligibilityReasonCode.INVALID_INPUT,
-                "record id %r does not match the content-derived "
-                "identity %r" % (self.record_id, expected),
+                EligibilityReasonCode.JOURNAL_CORRUPT,
+                "record must carry an EligibilityEvent",
+            )
+        if self.command.action != self.event.action:
+            raise EligibilityError(
+                EligibilityReasonCode.JOURNAL_CORRUPT,
+                "record action %r does not match the event action %r"
+                % (self.command.action, self.event.action),
+            )
+        if self.event.command_digest != self.command_digest:
+            raise EligibilityError(
+                EligibilityReasonCode.JOURNAL_CORRUPT,
+                "record %d event cites command digest %r, expected %r"
+                % (
+                    self.sequence,
+                    self.event.command_digest,
+                    self.command_digest,
+                ),
+            )
+        for label, digest in (
+            ("declaration_digest", self.declaration_digest),
+            ("decision_digest", self.decision_digest),
+        ):
+            if not isinstance(digest, str):
+                raise EligibilityError(
+                    EligibilityReasonCode.JOURNAL_CORRUPT,
+                    "%s must be a string" % label,
+                )
+        expected_declaration = declaration_digest_for_event(self.event)
+        if self.declaration_digest != expected_declaration:
+            raise EligibilityError(
+                EligibilityReasonCode.JOURNAL_CORRUPT,
+                "record %d declaration digest %s does not match the "
+                "recomputed digest %s (tampered declaration identity)"
+                % (
+                    self.sequence,
+                    self.declaration_digest,
+                    expected_declaration,
+                ),
+            )
+        expected_decision = decision_digest_for_event(self.event)
+        if self.decision_digest != expected_decision:
+            raise EligibilityError(
+                EligibilityReasonCode.JOURNAL_CORRUPT,
+                "record %d decision digest %s does not match the "
+                "recomputed digest %s (tampered decision identity)"
+                % (
+                    self.sequence,
+                    self.decision_digest,
+                    expected_decision,
+                ),
             )
 
     def content(self) -> Dict[str, Any]:
         return record_content(
-            self.sequence,
-            self.record_id,
-            self.prev_record_id,
-            self.kind,
+            self.command,
             self.command_digest,
-            self.entity_kind,
-            self.entity_id,
-            self.payload,
-            self.instant,
+            self.event,
+            self.declaration_digest,
+            self.decision_digest,
         )
 
     def verify_id(self, prev_record_id: str) -> None:
-        """Verify the chain link and the content-derived
-        identity (tamper-evidence)."""
-        if self.prev_record_id != prev_record_id:
-            raise EligibilityError(
-                EligibilityReasonCode.JOURNAL_CORRUPT,
-                "record %d breaks the hash chain (prev %r, expected %r)"
-                % (self.sequence, self.prev_record_id, prev_record_id),
-            )
-        expected = derive_record_id(self.content())
+        """Mechanical content binding (the hash-chain gate)."""
+        expected = derive_record_id(
+            self.sequence, self.content(), prev_record_id
+        )
         if self.record_id != expected:
             raise EligibilityError(
                 EligibilityReasonCode.JOURNAL_CORRUPT,
-                "record %d content does not match its identity"
-                % self.sequence,
+                "record %d id %s does not match the content-derived "
+                "id %s (tampered journal record)"
+                % (self.sequence, self.record_id, expected),
+            )
+
+    def verify_command_digest(self) -> None:
+        """The command digest must recompute from the command (a
+        tampered command in a stored journal fails closed)."""
+        expected = self.command.digest()
+        if self.command_digest != expected:
+            raise EligibilityError(
+                EligibilityReasonCode.JOURNAL_CORRUPT,
+                "record %d command digest %s does not match the "
+                "recomputed digest %s (tampered command)"
+                % (self.sequence, self.command_digest, expected),
             )
 
     def to_dict(self) -> Dict[str, Any]:
-        return deep_materialize(self.content())
+        content = self.content()
+        content["sequence"] = self.sequence
+        content["record_id"] = self.record_id
+        return content
 
     @classmethod
     def from_dict(cls, data: object) -> "JournalRecord":
         if not isinstance(data, dict):
             raise EligibilityError(
-                EligibilityReasonCode.INVALID_INPUT,
+                EligibilityReasonCode.JOURNAL_CORRUPT,
                 "journal record must be a mapping",
             )
-        required = (
+        for member in (
             "sequence",
             "record_id",
-            "prev_record_id",
-            "kind",
+            "command",
             "command_digest",
-            "entity_kind",
-            "entity_id",
-            "payload",
-            "instant",
-        )
-        for member in required:
+            "event",
+            "declaration_digest",
+            "decision_digest",
+        ):
             if member not in data:
                 raise EligibilityError(
-                    EligibilityReasonCode.INVALID_INPUT,
-                    "journal record is missing %r" % member,
+                    EligibilityReasonCode.JOURNAL_CORRUPT,
+                    "journal record is missing required member %r"
+                    % member,
                 )
+        command = EligibilityCommand.from_dict(data["command"])
+        event = EligibilityEvent.from_dict(data["event"])
         return cls(
             sequence=data["sequence"],
             record_id=data["record_id"],
-            prev_record_id=data["prev_record_id"],
-            kind=data["kind"],
+            command=command,
             command_digest=data["command_digest"],
-            entity_kind=data["entity_kind"],
-            entity_id=data["entity_id"],
-            payload=deep_freeze(data["payload"]),
-            instant=data["instant"],
+            event=event,
+            declaration_digest=data["declaration_digest"],
+            decision_digest=data["decision_digest"],
         )
 
     @classmethod
@@ -260,54 +348,50 @@ class JournalRecord:
         *,
         sequence: int,
         prev_record_id: str,
-        kind: str,
+        command: EligibilityCommand,
         command_digest: str,
-        entity_kind: str,
-        entity_id: str,
-        payload: Any,
-        instant: str,
+        event: EligibilityEvent,
     ) -> "JournalRecord":
-        """Build one record with the content-derived identity
-        (the only construction path)."""
+        """Build one record with the content-derived identity and
+        the action-owned identity digests (the only construction
+        path: command + event are admitted TOGETHER or not at
+        all)."""
         content = record_content(
-            sequence,
-            "",
-            prev_record_id,
-            kind,
+            command,
             command_digest,
-            entity_kind,
-            entity_id,
-            deep_freeze(payload),
-            instant,
+            event,
+            declaration_digest_for_event(event),
+            decision_digest_for_event(event),
         )
-        record_id = derive_record_id(content)
+        record_id = derive_record_id(sequence, content, prev_record_id)
         return cls(
             sequence=sequence,
             record_id=record_id,
-            prev_record_id=prev_record_id,
-            kind=kind,
+            command=command,
             command_digest=command_digest,
-            entity_kind=entity_kind,
-            entity_id=entity_id,
-            payload=deep_freeze(payload),
-            instant=instant,
+            event=event,
+            declaration_digest=declaration_digest_for_event(event),
+            decision_digest=decision_digest_for_event(event),
         )
 
 
 def journal_bytes_for(record: JournalRecord) -> bytes:
-    """The canonical persistence bytes of one record (one line
-    per record)."""
-    return canonical_json_bytes(
-        deep_materialize(record.content())
-    ) + b"\n"
+    """One canonical-JSON line for one record (the persist
+    basis)."""
+    return canonical_json_bytes(record.to_dict()) + b"\n"
 
 
 def record_list_digest(records: Tuple[JournalRecord, ...]) -> str:
-    """The deterministic digest over a record sequence."""
-    digest = hashlib.sha256()
-    for record in records:
-        digest.update(journal_bytes_for(record))
-    return "sha256:" + digest.hexdigest()
+    """Deterministic digest over a record sequence (record ids
+    in journal order)."""
+    return "sha256:" + hashlib.sha256(
+        canonical_json_bytes(
+            {
+                "kind": "eligibility-journal-records",
+                "record_ids": [r.record_id for r in records],
+            }
+        )
+    ).hexdigest()
 
 
 class EligibilityStore:
@@ -371,11 +455,23 @@ class FileEligibilityStore(EligibilityStore):
 
 
 class AppendOnlyEligibilityJournal:
-    """The append-only hash-chained eligibility journal with the
+    """The append-only, hash-chained eligibility journal with the
     FIVE durable idempotency ledgers (all derived from the
-    journaled records).  Append is persist-then-ack: the store
-    write happens BEFORE the in-memory registration, so a crash
-    between the two recovers by replay.
+    journaled records).
+
+    Construction verifies the ENTIRE stored journal (record ids,
+    chain links, contiguous sequence, command digests, action
+    identity digests, command/event pairing, and the duplicate
+    ledger keys) -- a tampered or corrupt store fails closed
+    ``journal-corrupt`` and constructs nothing.
+
+    Append is persist-then-ack over ONE atomic record: the
+    admitted command, its event, and the identity data hit the
+    store as a single write, and the in-memory ledgers are
+    populated from that record only AFTER the write succeeds --
+    so a crash can persist either NOTHING for a command or the
+    COMPLETE (command + event) pair, never the command without
+    its event.
     """
 
     def __init__(self, *, store: EligibilityStore) -> None:
@@ -387,34 +483,41 @@ class AppendOnlyEligibilityJournal:
         self._store = store
         self._records: List[JournalRecord] = []
         self._command_ledger: Dict[str, Dict[str, str]] = {}
-        self._command_by_digest: Dict[str, str] = {}
         self._decision_ledger: Dict[str, Dict[str, str]] = {}
         self._provider_ledger: Dict[str, Dict[str, str]] = {}
         self._declaration_ledger: Dict[str, Dict[str, str]] = {}
         self._citation_ledger: Dict[str, Dict[str, str]] = {}
-        genesis = JournalRecord.build(
-            sequence=0,
-            prev_record_id="",
-            kind="genesis",
-            command_digest="",
-            entity_kind="",
-            entity_id="",
-            payload={},
-            instant="",
-        )
-        self._store.append(journal_bytes_for(genesis))
-        self._records.append(genesis)
+        prev = GENESIS_RECORD_ID
+        expected_sequence = 1
+        for chunk in store.load_bytes():
+            record = _record_from_bytes(chunk)
+            if record.sequence != expected_sequence:
+                raise EligibilityError(
+                    EligibilityReasonCode.JOURNAL_CORRUPT,
+                    "replay: sequence gap: expected %d, found %d"
+                    % (expected_sequence, record.sequence),
+                )
+            record.verify_id(prev)
+            record.verify_command_digest()
+            self._register(record)
+            self._records.append(record)
+            prev = record.record_id
+            expected_sequence += 1
 
     # -- append ---------------------------------------------------
 
     def append(self, record: JournalRecord) -> None:
-        """Persist-then-ack append (atomic per record)."""
+        """Persist-then-ack append of ONE atomic (command +
+        event + identity) record: the store write happens BEFORE
+        any in-memory registration, so a store failure leaves no
+        phantom in-memory state and a crash after the write
+        leaves the COMPLETE pair recoverable by replay."""
         if not isinstance(record, JournalRecord):
             raise EligibilityError(
                 EligibilityReasonCode.INVALID_INPUT,
                 "the journal appends JournalRecord values only",
             )
-        expected_sequence = len(self._records)
+        expected_sequence = len(self._records) + 1
         if record.sequence != expected_sequence:
             raise EligibilityError(
                 EligibilityReasonCode.EVENT_INVALID,
@@ -422,41 +525,46 @@ class AppendOnlyEligibilityJournal:
                 "(expected %d)" % (record.sequence, expected_sequence),
             )
         record.verify_id(self.tail_record_id())
+        record.verify_command_digest()
         self._store.append(journal_bytes_for(record))
-        self._records.append(record)
         self._register(record)
+        self._records.append(record)
 
     def _register(self, record: JournalRecord) -> None:
-        if record.kind == "command":
-            digest = command_digest_of_payload(record.payload)
-            self._command_ledger[record.entity_id] = {
-                "digest": digest,
-                "status": "appended",
-                "event_id": "",
-            }
-            self._command_by_digest[digest] = record.entity_id
-            return
-        if record.kind != "event":
-            return
-        payload = record.payload
+        """Populate the FIVE durable idempotency ledgers from ONE
+        record (the atomic registration: the command ledger entry
+        is born WITH its event id -- a command can never be
+        registered without its event; a duplicate key in a
+        stored journal fails closed)."""
+        command = record.command
+        event = record.event
+        existing = self._command_ledger.get(command.command_id)
+        if existing is not None:
+            raise EligibilityError(
+                EligibilityReasonCode.JOURNAL_CORRUPT,
+                "duplicate command id %r in the stored journal"
+                % command.command_id,
+            )
+        self._command_ledger[command.command_id] = {
+            "digest": record.command_digest,
+            "event_id": event.event_id,
+        }
         entry = {
-            "event_id": str(payload.get("event_id", "")),
+            "event_id": event.event_id,
             "record_id": record.record_id,
         }
-        action = str(payload.get("action", ""))
-        fact = payload.get("payload", {})
-        # link the event back to its command ledger entry
-        command_id = self._command_by_digest.get(
-            str(payload.get("command_digest", ""))
-        )
-        if command_id is not None:
-            self._command_ledger[command_id]["event_id"] = entry[
-                "event_id"
-            ]
-        if action == "evaluate":
+        action = event.action
+        fact = event.payload
+        if action == ActionKind.EVALUATE:
             decision = fact.get("decision", {})
             decision_id = str(decision.get("decision_id", ""))
             if decision_id:
+                if decision_id in self._decision_ledger:
+                    raise EligibilityError(
+                        EligibilityReasonCode.JOURNAL_CORRUPT,
+                        "duplicate decision id %r in the stored "
+                        "journal" % decision_id,
+                    )
                 self._decision_ledger[decision_id] = dict(entry)
             for citation in list(decision.get("citations", ())) + list(
                 [decision.get("payment_reference", "")]
@@ -465,19 +573,37 @@ class AppendOnlyEligibilityJournal:
                     self._citation_ledger.setdefault(
                         citation, dict(entry)
                     )
-        elif action == "register-provider":
-            self._provider_ledger[record.entity_id] = dict(
-                entry, digest=_content_digest(fact.get("record", {}))
+        elif action == ActionKind.REGISTER_PROVIDER:
+            if event.entity_id in self._provider_ledger:
+                raise EligibilityError(
+                    EligibilityReasonCode.JOURNAL_CORRUPT,
+                    "duplicate provider registration %r in the "
+                    "stored journal" % event.entity_id,
+                )
+            self._provider_ledger[event.entity_id] = dict(
+                entry, digest=record.declaration_digest
             )
         elif action in DECLARATION_ACTIONS:
-            self._declaration_ledger[record.entity_id] = dict(
-                entry, digest=_content_digest(fact.get("record", {}))
+            if event.entity_id in self._declaration_ledger:
+                raise EligibilityError(
+                    EligibilityReasonCode.JOURNAL_CORRUPT,
+                    "duplicate declaration key %r in the stored "
+                    "journal" % event.entity_id,
+                )
+            self._declaration_ledger[event.entity_id] = dict(
+                entry, digest=record.declaration_digest
             )
-        elif action in ("suspend", "reinstate", "revoke", "expire"):
-            self._provider_ledger[record.entity_id] = dict(
-                entry, digest=self._provider_ledger.get(
-                    record.entity_id, {}
-                ).get("digest", "")
+        elif action in (
+            ActionKind.SUSPEND,
+            ActionKind.REINSTATE,
+            ActionKind.REVOKE,
+            ActionKind.EXPIRE,
+        ):
+            self._provider_ledger[event.entity_id] = dict(
+                entry,
+                digest=self._provider_ledger.get(
+                    event.entity_id, {}
+                ).get("digest", ""),
             )
 
     # -- reads ----------------------------------------------------
@@ -486,16 +612,18 @@ class AppendOnlyEligibilityJournal:
         return tuple(self._records)
 
     def journal_bytes(self) -> bytes:
-        chunks = b""
-        for record in self._records:
-            chunks += journal_bytes_for(record)
-        return chunks
+        return b"".join(
+            journal_bytes_for(record) for record in self._records
+        )
 
     def journal_digest(self) -> str:
-        return record_list_digest(tuple(self._records))
+        """The tamper-evident fingerprint of the whole journal."""
+        return "sha256:" + hashlib.sha256(
+            self.journal_bytes()
+        ).hexdigest()
 
     def tail_sequence(self) -> int:
-        return self._records[-1].sequence if self._records else 0
+        return len(self._records)
 
     def tail_record_id(self) -> str:
         if not self._records:
@@ -561,9 +689,9 @@ class AppendOnlyEligibilityJournal:
 
     def verify_integrity(self) -> None:
         """Full tamper verification (chain, identities,
-        sequences, genesis)."""
-        previous = ""
-        expected_sequence = 0
+        sequences, command/event pairing)."""
+        previous = GENESIS_RECORD_ID
+        expected_sequence = 1
         for record in self._records:
             if record.sequence != expected_sequence:
                 raise EligibilityError(
@@ -572,13 +700,9 @@ class AppendOnlyEligibilityJournal:
                     % record.sequence,
                 )
             record.verify_id(previous)
+            record.verify_command_digest()
             previous = record.record_id
             expected_sequence += 1
-        if self._records and self._records[0].kind != "genesis":
-            raise EligibilityError(
-                EligibilityReasonCode.JOURNAL_CORRUPT,
-                "the journal does not begin with the genesis record",
-            )
 
     @classmethod
     def load(
@@ -587,36 +711,7 @@ class AppendOnlyEligibilityJournal:
         """Journal-first recovery: rebuild the journal (and its
         idempotency ledgers) from the persisted bytes, verifying
         integrity while replaying (byte-identical replay)."""
-        journal = cls.__new__(cls)
-        journal._store = store
-        journal._records = []
-        journal._command_ledger = {}
-        journal._command_by_digest = {}
-        journal._decision_ledger = {}
-        journal._provider_ledger = {}
-        journal._declaration_ledger = {}
-        journal._citation_ledger = {}
-        previous = ""
-        for chunk in store.load_bytes():
-            record = _record_from_bytes(chunk)
-            expected_sequence = len(journal._records)
-            if record.sequence != expected_sequence:
-                raise EligibilityError(
-                    EligibilityReasonCode.JOURNAL_CORRUPT,
-                    "replay: sequence mismatch at record %d"
-                    % record.sequence,
-                )
-            record.verify_id(previous)
-            previous = record.record_id
-            journal._records.append(record)
-            journal._register(record)
-        if not journal._records or journal._records[0].kind != "genesis":
-            raise EligibilityError(
-                EligibilityReasonCode.JOURNAL_CORRUPT,
-                "replay: the journal does not begin with the genesis "
-                "record",
-            )
-        return journal
+        return cls(store=store)
 
 
 def _record_from_bytes(chunk: bytes) -> JournalRecord:

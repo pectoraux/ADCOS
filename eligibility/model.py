@@ -14,12 +14,12 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass
-from typing import Any, Dict, Tuple
+from typing import Any, Dict, Mapping, Tuple
 
 from protocol.canonicalization import canonical_json_bytes
 
 from .errors import EligibilityError, EligibilityReasonCode
-from .immutability import deep_materialize
+from .immutability import deep_freeze, deep_materialize
 from .states import ActionKind, EventOutcome
 
 
@@ -348,6 +348,87 @@ class EligibilityCommand:
     def to_dict(self) -> Dict[str, Any]:
         return self.content()
 
+    _CONTENT_MEMBERS = (
+        "command_id", "action", "actor", "source",
+        "provider_id", "offer_id", "device_id", "jurisdiction",
+        "schema_version", "jurisdictions", "kyc_reference",
+        "provenance", "sharing_modes", "access_types",
+        "capabilities", "supports_metered", "supports_unmetered",
+        "network_sharing_mode", "access_type", "metered",
+        "restricted", "restriction_reason", "valid_from",
+        "valid_until", "effective_from", "metering_required",
+        "allowed_platform_families", "allowed_device_classes",
+        "required_capabilities", "payment_prerequisite_required",
+        "kyc_reference_required", "platform_family", "os_version",
+        "device_class", "payment_reference", "citations",
+        "reason", "evidence_refs",
+    )
+
+    @classmethod
+    def from_dict(cls, data: object) -> "EligibilityCommand":
+        """Rebuild one command from its canonical content
+        mapping (the journal deserialization path; fail closed
+        on any missing member)."""
+        if not isinstance(data, Mapping):
+            raise EligibilityError(
+                EligibilityReasonCode.INVALID_INPUT,
+                "command content must be a mapping",
+            )
+        for member in cls._CONTENT_MEMBERS:
+            if member not in data:
+                raise EligibilityError(
+                    EligibilityReasonCode.INVALID_INPUT,
+                    "command content is missing %r" % member,
+                )
+        return cls(
+            command_id=data["command_id"],
+            action=data["action"],
+            actor=data["actor"],
+            source=data["source"],
+            provider_id=data["provider_id"],
+            offer_id=data["offer_id"],
+            device_id=data["device_id"],
+            jurisdiction=data["jurisdiction"],
+            schema_version=data["schema_version"],
+            jurisdictions=tuple(data["jurisdictions"]),
+            kyc_reference=data["kyc_reference"],
+            provenance=data["provenance"],
+            sharing_modes=tuple(data["sharing_modes"]),
+            access_types=tuple(data["access_types"]),
+            capabilities=tuple(data["capabilities"]),
+            supports_metered=data["supports_metered"],
+            supports_unmetered=data["supports_unmetered"],
+            network_sharing_mode=data["network_sharing_mode"],
+            access_type=data["access_type"],
+            metered=data["metered"],
+            restricted=data["restricted"],
+            restriction_reason=data["restriction_reason"],
+            valid_from=data["valid_from"],
+            valid_until=data["valid_until"],
+            effective_from=data["effective_from"],
+            metering_required=data["metering_required"],
+            allowed_platform_families=tuple(
+                data["allowed_platform_families"]
+            ),
+            allowed_device_classes=tuple(
+                data["allowed_device_classes"]
+            ),
+            required_capabilities=tuple(
+                data["required_capabilities"]
+            ),
+            payment_prerequisite_required=(
+                data["payment_prerequisite_required"]
+            ),
+            kyc_reference_required=data["kyc_reference_required"],
+            platform_family=data["platform_family"],
+            os_version=data["os_version"],
+            device_class=data["device_class"],
+            payment_reference=data["payment_reference"],
+            citations=tuple(data["citations"]),
+            reason=data["reason"],
+            evidence_refs=tuple(data["evidence_refs"]),
+        )
+
 
 def event_content(
     event_id: str,
@@ -424,7 +505,7 @@ class EligibilityEvent:
                 % (self.outcome, list(EventOutcome.values())),
             )
         _require_text(self.instant, "instant")
-        if not isinstance(self.payload, dict):
+        if not isinstance(self.payload, Mapping):
             raise EligibilityError(
                 EligibilityReasonCode.EVENT_INVALID,
                 "event payload must be a mapping",
@@ -460,6 +541,37 @@ class EligibilityEvent:
         return self.content()
 
     @classmethod
+    def from_dict(cls, data: object) -> "EligibilityEvent":
+        """Rebuild one event from its canonical content mapping
+        (the journal deserialization path; the payload is deeply
+        frozen on arrival -- the journaled facts are immutable
+        from the first instant they exist)."""
+        if not isinstance(data, Mapping):
+            raise EligibilityError(
+                EligibilityReasonCode.INVALID_INPUT,
+                "event content must be a mapping",
+            )
+        for member in (
+            "event_id", "command_digest", "action", "entity_kind",
+            "entity_id", "outcome", "instant", "payload",
+        ):
+            if member not in data:
+                raise EligibilityError(
+                    EligibilityReasonCode.INVALID_INPUT,
+                    "event content is missing %r" % member,
+                )
+        return cls(
+            event_id=data["event_id"],
+            command_digest=data["command_digest"],
+            action=data["action"],
+            entity_kind=data["entity_kind"],
+            entity_id=data["entity_id"],
+            outcome=data["outcome"],
+            instant=data["instant"],
+            payload=deep_freeze(dict(data["payload"])),
+        )
+
+    @classmethod
     def build(
         cls,
         *,
@@ -472,7 +584,10 @@ class EligibilityEvent:
         payload: Dict[str, Any],
     ) -> "EligibilityEvent":
         """Build one event with the content-derived identity
-        (the only construction path)."""
+        (the only construction path); the fact payload is deeply
+        frozen at construction (digest-neutral -- the canonical
+        bytes of the frozen and plain forms are identical)."""
+        frozen = deep_freeze(dict(payload))
         content = event_content(
             "",
             command_digest,
@@ -481,7 +596,7 @@ class EligibilityEvent:
             entity_id,
             outcome,
             instant,
-            dict(payload),
+            deep_materialize(frozen),
         )
         event_id = derive_event_id(content)
         return cls(
@@ -492,5 +607,5 @@ class EligibilityEvent:
             entity_id=entity_id,
             outcome=outcome,
             instant=instant,
-            payload=dict(payload),
+            payload=frozen,
         )

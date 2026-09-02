@@ -56,10 +56,14 @@ discipline):
   DATA/configuration.  Policy changes create new evaluation
   behavior WITHOUT rewriting historical decision records.
 - Eligibility owns exactly ONE journal: the append-only,
-  hash-chained eligibility history (commands + events, atomic
-  per-record, persist-then-ack, tamper-evident, replayable)
-  with FIVE durable idempotency ledgers (commands, decisions,
-  providers, declarations, citations).
+  hash-chained eligibility history, where ONE durable record
+  represents ONE admitted command together with its resulting
+  event and all action-owned identity data (the W044 atomic
+  single-record invariant -- a persisted command without its
+  event is structurally unrepresentable; persist-then-ack,
+  tamper-evident, replayable) with FIVE durable idempotency
+  ledgers (commands, decisions, providers, declarations,
+  citations).
 
 Determinism: injected WORK-033 clock seam only (duplicates
 consume no read; each other admitted command consumes exactly
