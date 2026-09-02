@@ -1,0 +1,40 @@
+# ADCOS Architect decision record.
+# schema: spec/architect/decision-record-template.md; verified by tools/spec_check.py (ARCH-04).
+# Baseline-advancement-only reconciliation for WORK-044 (LEDGER-RECON-010);
+# no W044 scope, dependency, architecture, or acceptance-fact change.
+decision_id: DEC-0063
+type: governance
+work_item: WORK-044
+acr: null
+pr: 125
+reviewed_sha: 66f6c4f0ae2c5e4cd4498e6090f876acb1859e45
+decision: ACCEPTED
+status: ACCEPTED
+reviewer: "Architect (pectoraux)"
+timestamp: 2026-09-02T04:30:00Z
+findings:
+  - "DEC-0062 authorized W044 against the post-W053 implementation mainline c9a1f8589cddbbeb21756bdd8f72ed57ea515173; after governance PR #125 was merged, the repository's actual mainline became 66f6c4f0ae2c5e4cd4498e6090f876acb1859e45. This reconciliation advances the W044 implementation baseline to that exact current main SHA without changing the W044 contract, authorization scope, dependency satisfaction, or prior acceptance facts."
+  - "The only reason for this transition is that governance PR #125 itself became a merge commit on the current mainline (PR head 89c55c99035ed6c491629f61359a5d100c49ae8c, merge commit 66f6c4f0ae2c5e4cd4498e6090f876acb1859e45), and W044 implementation must begin from the actual current main; no W044 implementation delivery exists and none is recorded by this decision."
+  - "WORK-044 remains the sole active implementation authorization: WORK-044-CORE-001 stays active and authorized under its issuing decision DEC-0062, with hard dependencies WORK-051 and WORK-053 both accepted-merged and unchanged."
+  - "No W053 acceptance facts are rewritten: DEC-0062 remains authoritative historical evidence, and the WORK-053 ledger entry keeps its exact reviewed head 43591667b226b6239e8197816514b679af1e6154 and merge SHA c9a1f8589cddbbeb21756bdd8f72ed57ea515173."
+  - "No scope change, no dependency change, no architecture/protocol change, no registry change, and no W040 change is made by this decision; the WORK-044 authorization baseline, the execution-state repository snapshot, and the execution-ledger snapshot are advanced in lockstep so ARCH-03 and ARCH-05 hold against the actual current mainline."
+blockers: []
+required_corrections: []
+evidence:
+  merge_sha: 66f6c4f0ae2c5e4cd4498e6090f876acb1859e45
+  ci_run: null
+  artifacts:
+    - "spec/architect/authorizations/WORK-044.yaml"
+    - "spec/architect/execution-state.yaml"
+    - "spec/architect/execution-ledger.yaml"
+accepted_scope:
+  - "The WORK-044 implementation authorization baseline advances from c9a1f8589cddbbeb21756bdd8f72ed57ea515173 to the actual current mainline 66f6c4f0ae2c5e4cd4498e6090f876acb1859e45, in lockstep with the execution-state repository snapshot and the execution-ledger snapshot, recorded as LEDGER-RECON-010."
+rejected_scope:
+  - "Any change to the WORK-044 contract, authorization scope, dependencies, acceptance criteria, out-of-scope boundaries, or the single-active-authorization slot."
+  - "Any rewriting of WORK-053 acceptance facts, DEC-0062, or any other historical record."
+  - "Any WORK-044 implementation, payment-provider code, provider onboarding, frozen architecture/protocol change, registry change, or W040 change."
+downstream_effect:
+  - "WORK-044-CORE-001 remains the sole active implementation authorization; its baseline_sha is advanced to 66f6c4f0ae2c5e4cd4498e6090f876acb1859e45 while every other authorization field is unchanged, and the advancement reason is recorded on the authorization record."
+  - "The persistent repository snapshot (execution-state.yaml repository.main_sha and execution-ledger.yaml main_sha) advances to 66f6c4f0ae2c5e4cd4498e6090f876acb1859e45; W044 implementation may begin from this actual current mainline."
+  - "DEC-0062 remains the authoritative W053 acceptance and W044 activation evidence; LEDGER-RECON-010 records this baseline advancement with no implementation delivery and no prior historical work-item fact rewritten."
+resolved_by: null

@@ -4,8 +4,8 @@ package: "persistent-architect"
 last_updated: "2026-09-02"
 repository:
   canonical: "github.com/pectoraux/ADCOS"
-  main_sha: c9a1f8589cddbbeb21756bdd8f72ed57ea515173
-  main_sha_semantics: "Post-W053 mainline reconciled with DEC-0062 W053 acceptance and W044 activation."
+  main_sha: 66f6c4f0ae2c5e4cd4498e6090f876acb1859e45
+  main_sha_semantics: "Actual post-PR-#125 mainline: DEC-0063 / LEDGER-RECON-010 reconcile the repository snapshot and the W044 implementation baseline to this exact current main (baseline-advancement-only) while W044 remains the active implementation track."
 versions:
   architecture_version_reference: "1.0"
   architecture_version_authority: "spec/architecture.md ## Status (single declaration site)"
