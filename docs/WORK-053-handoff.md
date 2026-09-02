@@ -82,3 +82,24 @@ After activation, Z.ai must branch from the authorized main baseline, preserve t
 ## Evidence class
 
 W053 is SOFTWARE-only control-plane/economic evidence. It must not make or imply a PHYSICAL claim and must not modify W040's independent evidence obligations.
+---
+
+## Z.ai implementation handoff addendum (WORK-053 delivery)
+
+**Branch:** `work-053-economic-allocation` from main `9e77861` (the post-activation main tip carrying the active `WORK-053-CORE-001` authorization record byte-identically — the W052 branch-point convention).
+**Battery:** `tools/allocation_selftest.py` — **42/42 PASS** (stdlib only, fully offline, deterministic).
+**Evidence manifest:** `docs/WORK-053-evidence.md` (scope audit, invariant-by-invariant evidence, determinism proofs, golden digest stream `248764f5…`).
+
+### What was built (the canonical EconomicAllocation layer)
+
+- `allocation/` — one frozen public surface (71 exports): the value model (seven-state allocation lifecycle `ALLOCATED → SETTLED → {REFUNDED, REVERSED, DISPUTED, CHARGEBACKED, PAYOUT_FAILED}` with compensations reachable from both ALLOCATED and SETTLED and every compensating state terminal; immutable versioned `EconomicPolicy` records with declared currency/minor-unit exponent/rounding/effective window/share constraints; content-derived command/event/policy/allocation-intent identities), the external fact boundary (`FactIndex` built by the caller from the W052 UsageLedger's and W051 CommercialCore's PUBLIC reads only), the fail-closed admission gates (family rules, payload shapes, the unambiguous BILLABLE_FINAL citation BOUND to the command's own usage record, policy window/currency/share gates, account/compensation bounds, exact-split arithmetic validated before the journal append), the journal-first durable core (hash-chained append-only records with THREE durable idempotency ledgers — commands, usage-record allocation intents, immutable policy versions — persist-then-ack, tamper-evident, byte-identical replay), the single-fold lifecycle manager, and the deterministic digest streams.
+- The exact arithmetic: `compute_split` computes the ADCOS share and tax from the policy basis points with the declared rounding mode, the developer share of the distributable remainder the same way, and the provider share absorbs the residual — conservation `developer + provider + adc_os + tax == billable + adjustment` is exact by construction and mechanically enforced at account construction.
+- The admission-boundary discipline the W052 review cycle established is carried forward: entity idempotency is decided from the STORED ledgers BEFORE live fact resolution (restart + fact-index eviction replays exact duplicates as no-ops), the usage-final citation is bound to the command's own usage record, and the citation set is unambiguous.
+
+### Authority boundaries honored
+
+EconomicAllocation consumes the W052 UsageLedger's billable-final projections and the W051 commercial transaction projections as injected immutable DATA (no authority construction, no live queries, no payment-provider integration). Payment movement stays entirely outside ADCOS behind the DATA boundary. `spec/architect/` is untouched. The accepted W051/W052/W041/W042 families are byte-identical to origin/main (battery case_36).
+
+### Verification
+
+42/42 battery cases covering all ten invariants, all fourteen handoff verification areas, the determinism protocol (two-run byte-identical; PYTHONHASHSEED 0/1/7919/unset; clock discipline; journal-first recovery; tamper matrix), and the negative admission matrices (payment/reservation/offer never create allocation; non-final usage never allocates; substitution/ambiguity/conflict fail closed; every rejection leaves zero journal growth). See `docs/WORK-053-evidence.md` for the full criterion-by-criterion table.

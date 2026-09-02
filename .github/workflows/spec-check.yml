@@ -173,6 +173,9 @@ jobs:
       - name: Run usage ledger tests
         run: python3 tools/usage_selftest.py
 
+      - name: Run economic allocation tests
+        run: python3 tools/allocation_selftest.py
+
       # Persistent Architect package: authorization provenance for pull
       # requests. Runs LAST on purpose: the frozen-surface batteries above
       # detect the origin/main ref to choose their strict context, and this
