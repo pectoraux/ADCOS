@@ -281,6 +281,38 @@ def derive_obligation_id(environment: str, event_id: str) -> str:
     ).hexdigest()
 
 
+def derive_admission_id(
+    environment: str, event_id: str, event_type: str
+) -> str:
+    """The content-derived observation-ADMISSION id: one per
+    (environment, event identity, event type) -- the durable
+    identity of the observation-admission DECISION for exactly
+    one emission (whether that emission required a webhook
+    audience, and the audience frozen at admission time when it
+    did).  The event TYPE is part of the identity because the
+    same canonical event may legitimately back more than one
+    observation type (an intent's ``created`` observation and a
+    transaction's ``state_changed`` observation cite the same
+    core event id): each is a distinct admission decision.  The
+    admission is a strictly earlier truth than the obligation
+    (``derive_obligation_id``): the admission answers "was
+    observation required, and for WHOM"; the obligation answers
+    "the required observation has not yet reached queue state
+    for all frozen audience members"; the queue/attempt records
+    answer "where did delivery get to"."""
+    return "sha256:" + hashlib.sha256(
+        canonical_json_bytes(
+            {
+                "namespace": ID_NAMESPACE,
+                "admission": True,
+                "environment": environment,
+                "event": event_id,
+                "event_type": event_type,
+            }
+        )
+    ).hexdigest()
+
+
 def build_observation_event(
     *,
     event_id: str,

@@ -887,3 +887,388 @@ round-2 and round-3 heads — zero new failures.
 
 **Out of scope: NO. Physical evidence claimed: NO. W040 modified: NO.
 Acceptance: NOT claimed — the disposition remains the Architect's.**
+
+## 14. Correction round record — round 5 (PR #132, CHANGES REQUIRED)
+
+**The finding (Architect's round-4 review of head `861fc11`):** the
+obligation-write admission gate was correct, but a durable-state
+ambiguity remained. A `MutationRecord` with no
+`WebhookObligationRecord` could mean two materially different
+historical states:
+
+```text
+State A — legitimately no audience:
+    mutation admitted → no matching endpoints existed → no
+    obligation was required → success returned
+State B — admission incomplete:
+    mutation admitted → webhook audience existed → obligation
+    persistence failed → success NOT admitted → retry must
+    complete observation admission
+```
+
+Both states looked identical in the durable store, and
+`_complete_prior_admission()` re-resolved the audience from the
+CURRENT endpoint index on replay — which is forbidden. Two
+defects followed: (1) a mutation that legitimately completed with
+no audience could later produce a webhook merely because an
+endpoint was registered afterward and the client replayed the
+same idempotency key; (2) a failed obligation admission could
+acquire a DIFFERENT audience on retry if endpoints changed
+between the first attempt and the retry. The root cause: the
+admission decision itself — including the admission-time audience
+when an obligation is required — was not durable.
+
+**Why round 4 was insufficient:** round 4 gated the success
+response on the OBLIGATION write, but only when an obligation
+existed. The no-audience case wrote nothing, so "no obligation
+required" and "obligation write pending" were indistinguishable
+durable states, and the only recovery source was a fresh
+audience resolution against current endpoint state. The invariant
+"same mutation + same idempotency key → same historical
+observation-admission decision → NO reinterpretation of current
+endpoint state" could not hold.
+
+**The corrected semantics (the durable observation-admission
+state machine):**
+
+```text
+canonical mutation
+        ↓
+durable MutationRecord                       (business truth)
+        ↓
+durable observation-admission state          (NEW: WebhookAdmissionRecord)
+        ├─ NOT_REQUIRED  (terminal; endpoints empty)
+        └─ REQUIRED      (frozen audience + frozen emission identity/payload)
+                ↓
+durable WebhookObligationRecord              (delivery-obligation truth)
+        ↓
+successful API response
+        ↓
+queue                                        (delivery state)
+        ↓
+delivery                                     (delivery state)
+```
+
+The `WebhookAdmissionRecord` (record kind `webhook-admission`) is
+a member of the existing append-only journal family and hash
+chain: it is in `RECORD_KINDS`/`RECORD_TYPES`, carries full
+constructor validation (status ∈ {`not-required`, `required`};
+`endpoints` non-empty iff `required`, empty iff `not-required`;
+positive `resource_version`; non-empty frozen `data`), a canonical
+`chain_content()`, a deterministic `record_id`, a
+`derive_admission_id(environment, event_id, event_type)`
+identity (one admission decision per emission; the event TYPE is
+part of the identity because the same canonical core event id may
+legitimately back both an intent's `created` observation and a
+transaction's `state_changed` observation), parsing in
+`_record_from_dict()`, inclusion in `fold_index()` (with
+fail-closed `journal-corrupt` on a duplicate admission, a second
+admission for one idempotency key, or an admission whose mutation
+record the journal does not hold), inclusion in
+`verify_integrity()`, and survival across
+`DeveloperApiService.load()` (all battery-proven, case 45).
+
+The truth separation the record fixes permanently:
+
+```text
+business truth                (MutationRecord)
+≠ observation-admission truth (WebhookAdmissionRecord)
+≠ delivery-obligation truth   (WebhookObligationRecord)
+≠ delivery state              (WebhookQueueRecord / WebhookAttemptRecord)
+```
+
+The admission record answers "was observation required, and what
+was the audience frozen at admission time?". The obligation record
+(the existing, unchanged model) answers "the required observation
+has not yet reached queue state for all frozen audience members".
+The queue/attempt records remain delivery state. No mutable
+"satisfied" flag exists anywhere; satisfaction stays derived.
+
+**The fix (the request path, the recovery path, and the platform
+surface — one canonical admission architecture):**
+
+- First admission (`_admit_observation` →
+  `_establish_observation_admission`): resolve the audience
+  EXACTLY ONCE (`_resolve_observation_audience`, the only
+  audience-resolution site in the family — AST-audited); append
+  the `WebhookAdmissionRecord` (status `required` with the exact
+  frozen endpoints, or terminal `not-required` with none); when
+  required, append the `WebhookObligationRecord`; ONLY AFTER the
+  REQUIRED durable state exists return the success. Deterministic
+  write order: `MutationRecord` → `WebhookAdmissionRecord` →
+  `WebhookObligationRecord` → API success. The admission-record
+  write is part of the successful-admission contract: its failure
+  is the deterministic admission failure (500 `store-failed`,
+  never a false 200; no rollback; no canonical re-execution; the
+  same-key retry heals) — exactly like the obligation write
+  before it.
+
+- Same-key retry (`_complete_prior_admission`, fully reworked —
+  not more conditionals but the frozen-state recovery): the
+  durable admission record is AUTHORITATIVE. `not-required` →
+  pure replay: the audience is NOT resolved, nothing is created,
+  and no later endpoint registration can produce a webhook for
+  the historical mutation (terminal decision). `required` → the
+  stored event/payload and FROZEN audience are used verbatim
+  (`_ensure_obligation_from_admission` re-establishes a missing
+  obligation from the admission record's frozen values alone);
+  `_resolve_observation_audience()` is not called for a
+  historical replay AT ALL (AST-audited), so a retry can never
+  drift the audience. No admission record → the ONLY way a
+  current-format mutation exists without one is that its first
+  attempt returned the deterministic admission failure BEFORE the
+  admission record became durable: the retry establishes the
+  admission NOW from the request + the durable canonical mutation
+  alone (`_reconstruct_emission`, the unchanged per-operation
+  durable-truth reconstruction), through the SAME admission gate.
+  An inconsistent journal fails closed with the canonical
+  `journal-corrupt` semantics (the fold's orphan/duplicate
+  checks; the hash chain; the reconstruction's existing
+  fail-closed) rather than guessing — and never infers an
+  audience from current state for a historical decision.
+
+- Platform `observe_transaction` (`_emit_event`): the same
+  durable observation semantics, NOT a second webhook-admission
+  architecture — it writes the SAME admission record family
+  (empty `idempotency_key`: not an HTTP mutation response),
+  freezes the audience at admission time, honors an existing
+  admission's frozen decision on re-observation (a
+  `not-required` admission is terminal; a `required` admission
+  queues only its frozen audience's still-missing endpoints), and
+  raises admission/obligation/queue failures to the operator.
+
+- The public API surface is UNCHANGED: `WebhookAdmissionRecord`
+  and `derive_admission_id` live in
+  `developerapi.journal`/`developerapi.webhooks` but are NOT
+  added to the package `__all__` — the frozen 85 exports stand
+  (case 38), no route, no schema, no reason code, no event type
+  changed.
+
+**The proof (case 45, `tools/developerapi_selftest.py`):** the
+deterministic conformance case for all three crash windows, plus
+the structural audit:
+
+- *Scenario A — legitimate no-audience completion*: the mutation
+  succeeds with no matching endpoint; the durable admission says
+  `not-required`; a matching endpoint is registered afterward;
+  the same idempotency key is replayed; the response is the
+  byte-identical idempotent replay with ZERO journal growth; NO
+  obligation is created and NO delivery occurs (the pump runs and
+  finds nothing — nothing may be fabricated).
+- *Scenario B — required admission with obligation failure and
+  audience drift*: the mutation is durable; the admission record
+  is durably `required` with the frozen audience; the obligation
+  append fails (the deterministic 500, not a false success); the
+  process is discarded and reloaded from the durable stores; the
+  current endpoint set is intentionally CHANGED before the retry
+  (a new endpoint subscribed to the same event type — the model
+  permits registration only); the retry heals the obligation with
+  the ORIGINAL frozen audience; the NEW endpoint NEVER receives
+  the historical event; the old endpoint receives it exactly
+  once; the canonical mutation is never re-executed; the response
+  is the byte-identical stored replay.
+- *Scenario C — admission-record persistence failure*: the
+  mutation is durable; the ADMISSION-record append fails (the
+  `_AdmissionFailingApiStore`, kind+key-selected); the API returns
+  the deterministic non-success (500 `store-failed` with the
+  durable-not-rolled-back message); no false success, no
+  fabricated state, no contained incident; the process crashes;
+  the same-key retry establishes the admission state from the
+  request + the durable canonical mutation ONLY (exactly one
+  `required` admission with the endpoint and the canonical event
+  identity; exactly one obligation); only then the canonical
+  success replays byte-identically; the canonical mutation
+  executes exactly ZERO additional times (core journal count and
+  `event_count` unchanged); the pump delivers exactly once.
+- *The structural audit*: `RECORD_KINDS`/`RECORD_TYPES` membership;
+  constructor validation (a bad status is rejected); the fold's
+  fail-closed orphan-admission check (`journal-corrupt`); and the
+  AST audit of the gateway — the audience resolution is confined
+  to the canonical admission path (callers exactly
+  `_establish_observation_admission` and `_emit_event`); the
+  admission record is built only at `_append_observation_admission`
+  and the obligation only at `_append_observation_obligation`
+  (single canonical write sites); `_complete_prior_admission` and
+  `_ensure_obligation_from_admission` never call the resolver (no
+  current-audience re-resolution on a historical replay); no
+  `_pending_emissions`-style process-local observation state
+  exists.
+
+**The negative controls (run against the reviewed round-4 head
+`861fc11` in a git worktree, the new battery copied onto the old
+gateway with a permissive stand-in for the not-yet-existing record
+class):** 42/45 cases pass at the old head; the failures are
+exactly the pinned defects plus two documented mechanical
+artifacts:
+
+- *Negative control 1 (the no-audience replay test)*: case 45
+  fails at `861fc11` specifically because **current endpoint
+  registration changes historical replay behavior** — the replay
+  creates a webhook obligation ("the replay created a webhook
+  obligation (1) for a mutation that completed with no audience"),
+  grows the journal, and the pump then delivers the historical
+  event to the late-registered endpoint ("the late-registered
+  endpoint received the historical no-audience event (1
+  deliveries)").
+- *Negative control 2 (the audience-drift retry test)*: case 45
+  fails at `861fc11` specifically because **the current
+  implementation re-resolves the audience** — the healed obligation
+  carries the late-registered endpoint ("the retry re-resolved
+  the audience: the healed obligation carries the late-registered
+  endpoint"), the NEW endpoint receives the historical event (1
+  delivery), and the AST audit independently confirms the root
+  cause ("the historical replay path re-resolves the audience from
+  current endpoint state").
+- Documented mechanical artifacts at the old head (not
+  negative-control signals): case 42 fails because its
+  position-based `_FlakyApiStore` windows are re-derived for the
+  new journal member order (the admission records are new journal
+  members; the semantic failure sites are unchanged); case 36
+  fails because the determinism subprocess cannot import the
+  round-5 battery's new record class on the round-4 code. All
+  other 42 cases — including the entire pre-W046 surface, the
+  authority audits, and cases 43/44 (kind-selected injections) —
+  pass at the old head unchanged.
+
+**Restart / audience-freeze / no-reexecution proofs:** scenarios
+B and C both reconstruct the service from the durable stores
+through `CommercialCore.load` + `DeveloperApiService.load` (the
+crashed instances, with all in-process state, are discarded);
+scenario B proves the audience freeze across a CHANGED endpoint
+set; scenarios B and C both prove zero canonical re-execution
+(core journal count and `event_count` unchanged through the whole
+healing); case 43/44/45's post-crash replays are pure (zero
+journal growth) once the admission/obligation state is complete.
+
+**Golden-stream honesty (the journal delta is the new admission
+records — and NOTHING else):** the healthy-path golden stream was
+recalculated honestly. The round-4 anchor (at `861fc11`):
+`journal_digest=sha256:a78847deaa3eb446289cb5e304846466930519c00c
+2d29e0e0028ad210b9877a`, `journal_length=25`. The round-5 stream:
+`journal_digest=sha256:23ee34168e44727c3a1714a5c263a715afd07bad8b
+d885b8600ae898f2c7107`, `journal_length=34`. The structural
+reason: the admission record is now part of the canonical durable
+history — the golden scenario emits 9 admissions (one per
+emission: the endpoint registration, 3 developer-A offers, 1
+developer-B offer, the intent, the reservation, the policy, and
+the platform's transaction observation), so the journal grows by
+exactly 9 records. The proof that the delta is limited to the new
+admission records (a record-by-record comparison of both heads'
+golden journals, positional machinery stripped): all 25
+pre-existing record CONTENTS are byte-identical, the new journal
+is the old journal's kind sequence with the 9 `webhook-admission`
+records interleaved, and 10 of the 12 stream members — every
+non-journal member (mutations, mutation_digests, credentials,
+offers, endpoints, deliveries, transaction_count,
+reservation_state, policy_id, intent_id_prefix) — are
+byte-identical. No clock call was added or moved (the admission
+record reuses the emission's `occurred_at`), which is why the
+delivery/attempt stream is unchanged. Determinism:
+`PYTHONHASHSEED=0/1/7919/unset` and two fresh in-process runs are
+byte-identical (case 35/36 + the explicit seed sweep, stream
+digest `sha256:50f382c43b684986fd53e23f7d88a4f6a1837613ff10685ed
+1e8c3ea24af2912` across all five runs).
+
+**spec_check inheritance comparison:** `python3 tools/spec_check.py`
+at the round-5 working tree reports exactly the same three
+inherited conditions as at the round-4 head `861fc11` — ARCH-02,
+ARCH-06, ARCH-08 — 14/17 blocking checks passed, zero new
+failures, zero advisories added. The simulated CI merge-ref and
+clean-clone results are recorded in §15.
+
+**Scope discipline of the correction:** the delta is confined to
+`developerapi/journal.py` (the `WebhookAdmissionRecord` + the
+fold/parse/family membership), `developerapi/webhooks.py`
+(`derive_admission_id`), `developerapi/gateway.py` (the
+admission-establishment, frozen-state recovery, and platform
+emission paths; `verify_integrity`), `tools/developerapi_selftest.py`
+(case 45 + the `_AdmissionFailingApiStore` injectable + the
+re-derived case-42 position windows + the registration + the
+header docstring), and this manifest — all inside the
+WORK-046-CORE-001 authorized set. The package `__all__` is
+unchanged (85 exports, case 38); no route, no schema, no reason
+code, no event type, no frozen spec surface changed (cases
+01/38/40); the PR delta remains confined to the authorized paths
+(case 41); the CI step remains the single additive wiring.
+
+**Out of scope: NO. Physical evidence claimed: NO. W040 modified: NO.
+Governance change: NO. W047 started: NO. Acceptance: NOT claimed —
+the disposition remains the Architect's. PR #132 remains OPEN and
+UNMERGED.**
+
+## 15. Round-5 final verification record
+
+**The reviewed head of this correction:** the single round-5
+commit at the tip of branch `work-046-developer-api` (PR #132,
+OPEN and UNMERGED), reported exactly in the delivery message — a
+commit cannot embed its own hash (the self-reference limitation
+the governance cycle documented for the two-PR pattern), so this
+manifest pins the verification matrix by CONTEXT and CONTENT, not
+by self-SHA.  The prior reviewed head was `861fc116d6d3d70dd5926
+d5b306952cf88aba64e`; every context below was re-executed at the
+final committed head immediately before delivery.
+
+**Branch context (the committed head):**
+
+- `python3 tools/developerapi_selftest.py`: **PASS 45/45**
+  (44 prior cases unchanged in semantics + the new case 45).
+- `PYTHONHASHSEED=0/1/7919/unset` + the in-process two-run:
+  byte-identical streams (case 35/36; the explicit seed sweep
+  hashes to `sha256:50f382c43b684986fd53e23f7d88a4f6a1837613ff1068
+  5ed1e8c3ea24af2912` on every run).
+- `python3 tools/spec_check.py`: 14/17 — exactly the three
+  inherited conditions (ARCH-02, ARCH-06, ARCH-08), the SAME
+  failure set with the SAME messages as at `861fc11` (side-by-side
+  compared): zero new failures.
+- `python3 -m py_compile` over the family: clean (case 39).
+- Frozen surfaces: 85 exports unchanged (case 38); spec/architect
+  + checker byte-identical to HEAD (case 40); PR delta confined
+  to the authorized 5-file set (case 41).
+
+**Simulated CI merge-ref (the clean ort merge of the final head
+into `origin/main` at `a1fa7951`, executed in a detached worktree
+after the commit; the merge SHAs are reported in the delivery
+message):**
+
+- `developerapi_selftest.py`: **PASS 45/45**.
+- `spec_check.py`: 15/17 — the two inherited conditions only
+  (ARCH-02, ARCH-06); ARCH-08 (the implementation-PR provenance)
+  resolves at the merge ref.
+- `spec_check.py --provenance`: ARCH-08 **PASS** ("implementation
+  delta covered by the active authorization inherited from the
+  base").
+
+**Base-less clean clone of the merge ref (no `origin/main` ref):**
+
+- `developerapi_selftest.py`: **PASS 45/45**.
+- `commercial` 35/35, `usage` 42/42, `platform` 32/32,
+  `networkpath` 36/36, `allocation` 44/44 — all PASS.
+- `eligibility` 45/46 and `payment` 43/44: the sole failures are
+  the documented pre-existing scope-audit artifacts (the W046
+  governance files visible to those batteries' naive `HEAD^1`
+  diffs) — **byte-identical failure messages at the round-4 merge
+  ref** (side-by-side compared at `861fc11`+main vs
+  `9393217`+main): verified not new, unrelated to this round.
+- `spec_check.py`: 14/16 blocking (ARCH-08 skipped base-lessly —
+  the documented behavior; ARCH-02/ARCH-06 only).
+
+**Negative-control record (at `861fc11`, see §14):** 42/45 pass;
+case 45 fails exactly on the two pinned regressions (the
+no-audience replay producing an obligation + delivery after late
+endpoint registration; the audience-drift retry delivering the
+historical event to the newly registered endpoint) plus the
+documented mechanical artifacts (case 42's re-derived position
+windows; case 36's import of the not-yet-existing record class).
+
+**Final state:**
+
+```text
+ALL W046 BATTERY CASES PASS (45/45 in branch, merge-ref, clean clone)
+NO NEW SPEC-CHECK FAILURES (failure set byte-identical to 861fc11)
+NO AUTHORITY DRIFT (cases 28/29/30 + the case-45 AST audit)
+NO W040 MODIFICATION (case 40; zero spec/architect delta)
+NO GOVERNANCE CHANGE (zero decisions/ledger/authorization edits)
+NO W047 (WORK-046 remains the single active item)
+PR #132 OPEN / NOT MERGED
+ACCEPTANCE NOT CLAIMED (the disposition remains the Architect's)
+```

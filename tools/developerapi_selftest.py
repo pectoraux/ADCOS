@@ -109,7 +109,29 @@ platform journal):
   truth alone BEFORE the byte-identical stored response is
   replayed, after which the delivery pump delivers exactly
   once: the durable obligation is part of the
-  successful-admission contract, never best effort);
+  successful-admission contract, never best effort), and the
+  DURABLE OBSERVATION-ADMISSION STATE (the round-5 frozen
+  semantics: every emission's admission-time audience is an
+  admission-time FACT, persisted as its own hash-chained
+  journal record -- ``required`` with the exact frozen
+  endpoints, or terminal ``not-required`` with none -- BEFORE
+  the successful response; a historical admission decision is
+  AUTHORITATIVE, so a mutation that legitimately completed
+  with no audience can never produce a webhook merely because
+  an endpoint was registered afterwards and the client
+  replayed the same key, an obligation-failed admission heals
+  on retry with the ORIGINAL frozen audience even when the
+  endpoint set changed in between (no audience drift: the new
+  endpoint never receives the historical event), and the
+  admission-record write itself failing returns the
+  deterministic non-success with the same-key retry
+  establishing the admission from the request + the durable
+  canonical mutation alone with ZERO additional canonical
+  executions -- plus the structural audit: record family
+  membership, constructor validation, the fold's fail-closed
+  orphan check, and the AST audit of the observation-emission
+  call sites proving ONE canonical admission path and no
+  process-local observation state);
 - **delivery discipline**: frozen public API surface, frozen
   spec surfaces intact, PR delta confined to the authorized
   W046 scope (+ the sanctioned additive-only CI wiring).
@@ -222,6 +244,7 @@ from developerapi.gateway import ApiRequest, ROUTES  # noqa: E402
 from developerapi.journal import (  # noqa: E402
     AppendOnlyApiJournal,
     MutationRecord,
+    WebhookAdmissionRecord,
     WebhookQueueRecord,
     fold_index,
 )
@@ -762,6 +785,39 @@ class _ObligationFailingApiStore(MemoryApiStore):
             raise DeveloperApiError(
                 DeveloperApiReasonCode.STORE_FAILED,
                 "injected webhook obligation append failure",
+            )
+        super().append_line(line)
+
+
+class _AdmissionFailingApiStore(MemoryApiStore):
+    """A store that fails the first webhook-ADMISSION append
+    carrying a given idempotency key (kind+key-selected failure
+    injection) and heals afterwards: the failure site is the
+    durable observation-admission record write itself -- the
+    FIRST durable observation boundary, written after the
+    mutation record and before the obligation and the successful
+    response (the round-5 admission-record persistence-failure
+    proof; the key selection keeps the injection on the probe
+    mutation's admission, past the endpoint registration's own
+    terminal not-required admission)."""
+
+    def __init__(self, idempotency_key: str) -> None:
+        super().__init__()
+        self._key = idempotency_key
+        self._remaining = 1
+        self.failures = 0
+
+    def append_line(self, line: str) -> None:
+        if (
+            self._remaining > 0
+            and '"record_kind":"webhook-admission"' in line
+            and '"idempotency_key":"%s"' % self._key in line
+        ):
+            self._remaining -= 1
+            self.failures += 1
+            raise DeveloperApiError(
+                DeveloperApiReasonCode.STORE_FAILED,
+                "injected webhook admission append failure",
             )
         super().append_line(line)
 
@@ -4004,9 +4060,15 @@ def case_42_post_finality_webhook_isolation(results: List[Result]) -> None:
     # -- scenario A: the commercial mutation (intent) with the
     # webhook QUEUE write failing post-finality ------------------
     # append calls: 1 credential, 2 endpoint mutation record,
-    # 3 intent boundary mutation record (FINALITY), 4 the durable
-    # webhook obligation (OK), 5 the queue record (FAILS)
-    store = _FlakyApiStore(fail_from=5, fail_until=6)
+    # 3 the endpoint registration's terminal not-required
+    # admission record, 4 intent boundary mutation record
+    # (FINALITY), 5 the intent's required admission record (the
+    # frozen audience), 6 the durable webhook obligation (OK),
+    # 7 the queue record (FAILS)  [the admission record is a
+    # journal member as of the round-5 durable admission state;
+    # the window is re-derived from the round-4 position 5 for
+    # the new member order]
+    store = _FlakyApiStore(fail_from=7, fail_until=8)
     service, core, *_ = _compose_service(store=store)
     app = _full_app(service, "dev-iso", "iso")
     endpoint_resp = service.handle(
@@ -4159,10 +4221,14 @@ def case_42_post_finality_webhook_isolation(results: List[Result]) -> None:
     # -- scenario B: the boundary-owned mutation (offer) with the
     # webhook DELIVERY attempt record failing post-finality ------
     # append calls: 1 credential, 2 endpoint mutation record,
-    # 3 offer boundary mutation record (FINALITY), 4 the durable
-    # webhook obligation (OK), 5 the queue record (OK),
-    # 6 the delivery attempt record (FAILS), 7 the retry attempt (OK)
-    store_b = _FlakyApiStore(fail_from=6, fail_until=7)
+    # 3 the endpoint registration's terminal not-required
+    # admission record, 4 offer boundary mutation record
+    # (FINALITY), 5 the offer's required admission record, 6 the
+    # durable webhook obligation (OK), 7 the queue record (OK),
+    # 8 the delivery attempt record (FAILS), 9 the retry attempt
+    # (OK)  [round-4 positions 6/7 re-derived for the new member
+    # order]
+    store_b = _FlakyApiStore(fail_from=8, fail_until=9)
     service_b, *_ = _compose_service(store=store_b)
     app_b = _full_app(service_b, "dev-iso-b", "iso-b")
     endpoint_b = service_b.handle(
@@ -4980,6 +5046,800 @@ def case_44_obligation_write_admission_gate(
         )
 
 
+def case_45_durable_observation_admission_state(
+    results: List[Result],
+) -> None:
+    """The DURABLE observation-ADMISSION state (the round-5
+    frozen semantics): the admission-time audience is an
+    admission-time FACT, persisted as its own journal record
+    BEFORE the successful API response, and a historical
+    admission decision is AUTHORITATIVE -- the same mutation +
+    the same idempotency key always resolve to the SAME
+    historical decision, and an idempotent replay NEVER
+    re-interprets the current endpoint state.
+
+    The durable state machine under proof:
+
+    .. code-block:: text
+
+        canonical mutation
+                |
+        durable MutationRecord
+                |
+        durable observation-admission state
+                |
+                +-- NOT_REQUIRED (terminal, empty endpoints)
+                |
+                +-- REQUIRED (frozen audience + frozen emission)
+                        |
+                durable WebhookObligationRecord
+                        |
+                successful API response
+                        |
+                queue / delivery (contained)
+
+    Scenario A (the no-audience replay regression): a mutation
+    that legitimately completed with NO audience can never
+    produce a webhook merely because an endpoint was registered
+    afterwards and the client replayed the same idempotency
+    key.
+
+    Scenario B (the audience-drift retry): a required admission
+    whose OBLIGATION write failed (the first attempt returned
+    the deterministic admission failure) heals on the same-key
+    retry with the ORIGINAL frozen audience -- endpoints
+    registered between the first attempt and the retry are not
+    part of the historical audience and never receive the
+    historical event.
+
+    Scenario C (the admission-record persistence failure): the
+    admission record itself is the correct FIRST durable
+    observation boundary -- when its write fails the boundary
+    returns the deterministic non-success (never a false
+    success), the canonical mutation is neither rolled back nor
+    re-executed, and the same-key retry after a process crash
+    establishes the admission state from the request + the
+    durable canonical mutation alone, then replays the
+    canonical success byte-identically with ZERO additional
+    canonical executions.
+
+    The case closes with the structural audit: the journal
+    record family membership + constructor validation + the
+    fold + ``verify_integrity`` (behavioral, through the
+    reloads above) and the AST audit of the
+    observation-emission call sites -- ONE canonical admission
+    path, no audience re-resolution on the historical replay
+    path, no process-local observation state."""
+    problems: List[str] = []
+
+    # -- scenario A: legitimate no-audience completion ----------------
+    service, core, *_ = _compose_service()
+    app = _full_app(service, "dev-adm45", "adm45")
+    offer_body = _offer_body("Admission freeze offer", amount=4545)
+    first = service.handle(
+        _req(
+            "POST",
+            "/api/1.0/offers",
+            app,
+            body=offer_body,
+            idempotency_key="adm45-a-1",
+        )
+    )
+    if first.status != 200 or first.body.get("error") is not None:
+        problems.append(
+            "no-audience mutation did not succeed: %s" % first.status
+        )
+    # (4) the durable admission record says not-required
+    # (5) a matching endpoint is registered AFTERWARD
+    endpoint = service.handle(
+        _req(
+            "POST",
+            "/api/1.0/webhook-endpoints",
+            app,
+            body={
+                "url": "https://consumer-adm45-a.test/hook",
+                "event_types": ["offer.published"],
+            },
+            idempotency_key="adm45-a-ep-1",
+        )
+    )
+    endpoint_id = endpoint.body["data"]["id"]
+    consumer = _Consumer("unused")
+    service._transports[endpoint_id] = consumer
+    # (6) replay the original idempotency key
+    journal_before = len(service.journal_records())
+    retry = service.handle(
+        _req(
+            "POST",
+            "/api/1.0/offers",
+            app,
+            body=offer_body,
+            idempotency_key="adm45-a-1",
+        )
+    )
+    # (7) byte-identical idempotent replay
+    prior = service.index().mutations["adm45-a-1"]
+    if retry.status != 200 or (
+        retry.headers.get("X-ADCOS-Idempotent-Replay") != "true"
+    ):
+        problems.append(
+            "no-audience replay not a 200 replay: %s" % retry.status
+        )
+    if retry.canonical_body_bytes() != canonical_json_bytes(
+        json.loads(prior.response_body)
+    ):
+        problems.append("no-audience replay body diverged")
+    if len(service.journal_records()) != journal_before:
+        problems.append("no-audience replay grew the journal")
+    # (8) NO webhook obligation is created by the late
+    # registration + the replay
+    if service.index().obligations:
+        problems.append(
+            "late endpoint registration changed the historical "
+            "replay: the replay created a webhook obligation (%d) "
+            "for a mutation that completed with no audience"
+            % len(service.index().obligations)
+        )
+    # (9) no delivery occurs (the pump runs; there is nothing
+    # to deliver and nothing may be fabricated)
+    service.process_due_deliveries()
+    if service.index().deliveries:
+        problems.append(
+            "late endpoint registration produced a delivery for "
+            "the historical no-audience mutation"
+        )
+    if consumer.deliveries:
+        problems.append(
+            "the late-registered endpoint received the historical "
+            "no-audience event (%d deliveries)"
+            % len(consumer.deliveries)
+        )
+    # the historical admission decision stays terminal
+    admissions_a = [
+        record
+        for record in service.journal_records()
+        if isinstance(record, WebhookAdmissionRecord)
+    ]
+    offer_admissions_a = [
+        record
+        for record in admissions_a
+        if record.idempotency_key == "adm45-a-1"
+    ]
+    if len(offer_admissions_a) != 1:
+        problems.append(
+            "expected exactly one admission record for the "
+            "no-audience mutation, found %d" % len(offer_admissions_a)
+        )
+    else:
+        adm = offer_admissions_a[0]
+        if adm.status != "not-required":
+            problems.append(
+                "no-audience admission status %r" % adm.status
+            )
+        if tuple(adm.endpoints) != ():
+            problems.append(
+                "no-audience admission carries endpoints %s"
+                % (adm.endpoints,)
+            )
+    service.verify_integrity()
+
+    # -- scenario B: required admission, obligation failure, and
+    # the audience-freeze retry --------------------------------------
+    store_b = _ObligationFailingApiStore(failures=1)
+    core_store_b = MemoryCommercialStore()
+    service_b, core_b, usage_b, allocation_b, world_b = _compose_service(
+        store=store_b, core_store=core_store_b
+    )
+    runtime_b, peer_b, session_b, manager_b, integrator_b, shared_b = (
+        world_b
+    )
+    app_b = _full_app(service_b, "dev-drift", "drift")
+    ep1 = service_b.handle(
+        _req(
+            "POST",
+            "/api/1.0/webhook-endpoints",
+            app_b,
+            body={
+                "url": "https://consumer-drift-1.test/hook",
+                "event_types": ["connectivity_intent.created"],
+            },
+            idempotency_key="drift-ep-1",
+        )
+    )
+    ep1_id = ep1.body["data"]["id"]
+    intent_body_b = {"intent": {"subscriber": "drift-window"}}
+    # (1)-(4): the mutation executes and is durable; the
+    # admission record is durably written as required with the
+    # frozen audience; the OBLIGATION append fails; the API does
+    # NOT return success
+    first_b = service_b.handle(
+        _req(
+            "POST",
+            "/api/1.0/intents",
+            app_b,
+            body=intent_body_b,
+            idempotency_key="drift-intent-1",
+        )
+    )
+    if first_b.status != 500 or (
+        first_b.body.get("error", {}).get("reason") != "store-failed"
+    ):
+        problems.append(
+            "obligation-write failure did not fail admission (B): "
+            "status %s reason %r"
+            % (first_b.status, first_b.body.get("error", {}).get("reason"))
+        )
+    if "drift-intent-1" not in service_b.index().mutations:
+        problems.append("durable mutation missing after the failure (B)")
+    if len(core_b.journal_records()) != 1:
+        problems.append(
+            "canonical mutation not durable (B): %d core records"
+            % len(core_b.journal_records())
+        )
+    if store_b.failures != 1:
+        problems.append(
+            "injection (B) did not fire at the obligation append "
+            "(failures=%d)" % store_b.failures
+        )
+    if service_b.index().obligations:
+        problems.append("obligation fabricated despite the failure (B)")
+    # (5) the process state is discarded; the service reloads
+    # from the durable stores
+    core_b2 = CommercialCore.load(
+        store=core_store_b,
+        clock=shared_b,
+        references=_references(manager_b, integrator_b, session_b),
+    )
+    reloaded_b = DeveloperApiService.load(
+        environment="sandbox",
+        core=core_b2,
+        usage=usage_b,
+        allocation=allocation_b,
+        store=store_b,
+        clock=shared_b,
+        issuance_key=b"w046-platform-issuance-key",
+    )
+    # (9-pre) recovery alone re-executed nothing
+    if len(core_b2.journal_records()) != 1:
+        problems.append("crash recovery re-executed the mutation (B)")
+    # (9) the current endpoint set is intentionally CHANGED
+    # before the retry: a NEW endpoint subscribed to the SAME
+    # event type joins the developer's audience (the endpoint
+    # model permits registration only -- no removal exists)
+    ep2 = reloaded_b.handle(
+        _req(
+            "POST",
+            "/api/1.0/webhook-endpoints",
+            app_b,
+            body={
+                "url": "https://consumer-drift-2.test/hook",
+                "event_types": ["connectivity_intent.created"],
+            },
+            idempotency_key="drift-ep-2",
+        )
+    )
+    ep2_id = ep2.body["data"]["id"]
+    # (8) the same-key retry: the frozen audience from the
+    # admission record
+    retry_b = reloaded_b.handle(
+        _req(
+            "POST",
+            "/api/1.0/intents",
+            app_b,
+            body=intent_body_b,
+            idempotency_key="drift-intent-1",
+        )
+    )
+    prior_b = reloaded_b.index().mutations["drift-intent-1"]
+    if retry_b.status != 200 or (
+        retry_b.headers.get("X-ADCOS-Idempotent-Replay") != "true"
+    ):
+        problems.append(
+            "healing retry not a 200 replay (B): %s" % retry_b.status
+        )
+    if retry_b.canonical_body_bytes() != canonical_json_bytes(
+        json.loads(prior_b.response_body)
+    ):
+        problems.append("healing replay body diverged (B)")
+    # (13) the canonical mutation executes exactly zero
+    # additional times
+    if len(core_b2.journal_records()) != 1:
+        problems.append("healing retry re-executed the mutation (B)")
+    # (10) the retry used the ORIGINAL frozen audience: the
+    # healed obligation carries exactly the admission-time
+    # endpoints -- never the late-registered one
+    obligations_b = [
+        record
+        for record in reloaded_b.journal_records()
+        if record.to_dict().get("record_kind") == "webhook-obligation"
+    ]
+    if len(obligations_b) != 1:
+        problems.append(
+            "healed obligation count (B) %d" % len(obligations_b)
+        )
+    else:
+        healed_endpoints = tuple(
+            obligations_b[0].to_dict().get("endpoints", ())
+        )
+        if ep2_id in healed_endpoints:
+            problems.append(
+                "the retry re-resolved the audience: the healed "
+                "obligation carries the late-registered endpoint "
+                "(frozen audience was %s, healed audience is %s)"
+                % ((ep1_id,), healed_endpoints)
+            )
+        if healed_endpoints != (ep1_id,):
+            problems.append(
+                "healed obligation audience %s (expected the frozen "
+                "admission audience (%s,))"
+                % (healed_endpoints, ep1_id)
+            )
+    # (11)+(12)+(15): delivery succeeds exactly once for the
+    # frozen audience; the NEW endpoint never receives the
+    # historical event
+    consumer_1 = _Consumer(reloaded_b.endpoint_signing_secret(ep1_id))
+    consumer_2 = _Consumer(reloaded_b.endpoint_signing_secret(ep2_id))
+    reloaded_b._transports[ep1_id] = consumer_1
+    reloaded_b._transports[ep2_id] = consumer_2
+    reloaded_b.process_due_deliveries()
+    if len(consumer_1.deliveries) != 1:
+        problems.append(
+            "frozen-audience endpoint received %d deliveries "
+            "(expected exactly one) (B)"
+            % len(consumer_1.deliveries)
+        )
+    if consumer_2.deliveries:
+        problems.append(
+            "the NEW endpoint received the historical event (B): %d "
+            "deliveries -- the retry re-resolved the audience from "
+            "the current endpoint state" % len(consumer_2.deliveries)
+        )
+    # exactly-once: a second pump pass is a no-op
+    journal_b_before = len(reloaded_b.journal_records())
+    reloaded_b.process_due_deliveries()
+    if len(reloaded_b.journal_records()) != journal_b_before:
+        problems.append("second pump pass grew the journal (B)")
+    if len(consumer_1.deliveries) != 1:
+        problems.append("second pump pass re-delivered (B)")
+    # the frozen admission record itself (the structural truth
+    # behind the behavioral freeze)
+    admissions_b = [
+        record
+        for record in reloaded_b.journal_records()
+        if isinstance(record, WebhookAdmissionRecord)
+        and record.idempotency_key == "drift-intent-1"
+    ]
+    if len(admissions_b) != 1:
+        problems.append(
+            "expected exactly one admission record for the drift "
+            "mutation, found %d" % len(admissions_b)
+        )
+    else:
+        adm_b = admissions_b[0]
+        if adm_b.status != "required":
+            problems.append("drift admission status %r" % adm_b.status)
+        if tuple(adm_b.endpoints) != (ep1_id,):
+            problems.append(
+                "the admission record did not freeze the original "
+                "audience: %s" % (adm_b.endpoints,)
+            )
+    reloaded_b.verify_integrity()
+
+    # -- scenario C: admission-record persistence failure -------------
+    store_c = _AdmissionFailingApiStore("adm45-c-1")
+    core_store_c = MemoryCommercialStore()
+    service_c, core_c, usage_c, allocation_c, world_c = _compose_service(
+        store=store_c, core_store=core_store_c
+    )
+    runtime_c, peer_c, session_c, manager_c, integrator_c, shared_c = (
+        world_c
+    )
+    app_c = _full_app(service_c, "dev-admc", "admc")
+    ep_c = service_c.handle(
+        _req(
+            "POST",
+            "/api/1.0/webhook-endpoints",
+            app_c,
+            body={
+                "url": "https://consumer-adm45-c.test/hook",
+                "event_types": ["connectivity_intent.created"],
+            },
+            idempotency_key="adm45-c-ep-1",
+        )
+    )
+    ep_c_id = ep_c.body["data"]["id"]
+    intent_body_c = {"intent": {"subscriber": "admission-boundary"}}
+    # (2)+(3)+(4): the mutation becomes durable; the
+    # ADMISSION-record append fails; the API returns the
+    # deterministic non-success
+    first_c = service_c.handle(
+        _req(
+            "POST",
+            "/api/1.0/intents",
+            app_c,
+            body=intent_body_c,
+            idempotency_key="adm45-c-1",
+        )
+    )
+    if first_c.status != 500 or (
+        first_c.body.get("error", {}).get("reason") != "store-failed"
+    ):
+        problems.append(
+            "admission-record write failure did not fail admission "
+            "(C): status %s reason %r"
+            % (
+                first_c.status,
+                first_c.body.get("error", {}).get("reason"),
+            )
+        )
+    else:
+        message = first_c.body["error"].get("message", "")
+        if "adm45-c-1" not in message:
+            problems.append(
+                "admission failure message lost the key (C)"
+            )
+        if "NOT rolled back or re-executed" not in message:
+            problems.append(
+                "admission failure message lost the durability truth (C)"
+            )
+        if "SAME idempotency key" not in message:
+            problems.append(
+                "admission failure message lost the retry contract (C)"
+            )
+    # (5)+(6): no false success, no canonical mutation rollback
+    if "adm45-c-1" not in service_c.index().mutations:
+        problems.append("durable mutation missing after the failure (C)")
+    if len(core_c.journal_records()) != 1 or len(core_c.transactions()) != 1:
+        problems.append(
+            "canonical mutation not durable (C): %d/%d"
+            % (len(core_c.journal_records()), len(core_c.transactions()))
+        )
+    if store_c.failures != 1:
+        problems.append(
+            "injection (C) did not fire at the admission append "
+            "(failures=%d)" % store_c.failures
+        )
+    # nothing was fabricated: no admission for the key, no
+    # obligation, no queue record, no contained incident
+    admissions_c = [
+        record
+        for record in service_c.journal_records()
+        if isinstance(record, WebhookAdmissionRecord)
+        and record.idempotency_key == "adm45-c-1"
+    ]
+    if admissions_c:
+        problems.append("admission recorded despite the failed write (C)")
+    if service_c.index().obligations or service_c.index().deliveries:
+        problems.append("obligation/delivery fabricated (C)")
+    if service_c.webhook_observation_incidents():
+        problems.append(
+            "admission failure misclassified as a contained incident (C)"
+        )
+    # (7) the process crashes; both planes are reconstructed
+    # from the durable stores
+    core_c2 = CommercialCore.load(
+        store=core_store_c,
+        clock=shared_c,
+        references=_references(manager_c, integrator_c, session_c),
+    )
+    reloaded_c = DeveloperApiService.load(
+        environment="sandbox",
+        core=core_c2,
+        usage=usage_c,
+        allocation=allocation_c,
+        store=store_c,
+        clock=shared_c,
+        issuance_key=b"w046-platform-issuance-key",
+    )
+    if "adm45-c-1" not in reloaded_c.index().mutations:
+        problems.append("idempotency did not survive the crash (C)")
+    # (8)+(9)+(10): the same-key retry establishes the admission
+    # state from the request + the durable canonical mutation
+    # ONLY, and only then returns the canonical success
+    retry_c = reloaded_c.handle(
+        _req(
+            "POST",
+            "/api/1.0/intents",
+            app_c,
+            body=intent_body_c,
+            idempotency_key="adm45-c-1",
+        )
+    )
+    prior_c = reloaded_c.index().mutations["adm45-c-1"]
+    if retry_c.status != 200 or (
+        retry_c.headers.get("X-ADCOS-Idempotent-Replay") != "true"
+    ):
+        problems.append(
+            "healing retry not a 200 replay (C): %s" % retry_c.status
+        )
+    if retry_c.canonical_body_bytes() != canonical_json_bytes(
+        json.loads(prior_c.response_body)
+    ):
+        problems.append("healing replay body diverged (C)")
+    # (11) the canonical mutation executes exactly ZERO
+    # additional times
+    if len(core_c2.journal_records()) != 1:
+        problems.append("healing retry re-executed the mutation (C)")
+    transaction_c = prior_c.response_body and json.loads(
+        prior_c.response_body
+    ).get("data", {}).get("id", "")
+    if transaction_c and (
+        core_c2.transaction(transaction_c).to_dict().get("event_count") != 1
+    ):
+        problems.append("canonical transaction mutated during healing (C)")
+    # the admission + obligation were established by the retry
+    # (exactly one of each, carrying the endpoint and the
+    # canonical event identity)
+    admissions_c2 = [
+        record
+        for record in reloaded_c.journal_records()
+        if isinstance(record, WebhookAdmissionRecord)
+        and record.idempotency_key == "adm45-c-1"
+    ]
+    if len(admissions_c2) != 1:
+        problems.append(
+            "healed admission count (C) %d" % len(admissions_c2)
+        )
+    else:
+        adm_c = admissions_c2[0]
+        if adm_c.status != "required":
+            problems.append("healed admission status (C) %r" % adm_c.status)
+        if tuple(adm_c.endpoints) != (ep_c_id,):
+            problems.append(
+                "healed admission audience (C) %s" % (adm_c.endpoints,)
+            )
+        core_event_c = core_c2.journal_records()[0].event.to_dict()
+        if adm_c.event_id != core_event_c.get("event_id"):
+            problems.append(
+                "healed admission event id diverged from the canonical "
+                "event (C)"
+            )
+    obligations_c = [
+        record
+        for record in reloaded_c.journal_records()
+        if record.to_dict().get("record_kind") == "webhook-obligation"
+    ]
+    if len(obligations_c) != 1:
+        problems.append("healed obligation count (C) %d" % len(obligations_c))
+    elif ep_c_id not in tuple(
+        obligations_c[0].to_dict().get("endpoints", ())
+    ):
+        problems.append("healed obligation lost the endpoint (C)")
+    # the delivery pump completes the observation exactly once
+    consumer_c = _Consumer(reloaded_c.endpoint_signing_secret(ep_c_id))
+    reloaded_c._transports[ep_c_id] = consumer_c
+    reloaded_c.process_due_deliveries()
+    if len(consumer_c.deliveries) != 1:
+        problems.append(
+            "consumer (C) received %d events (expected exactly one)"
+            % len(consumer_c.deliveries)
+        )
+    journal_c_before = len(reloaded_c.journal_records())
+    reloaded_c.process_due_deliveries()
+    if len(reloaded_c.journal_records()) != journal_c_before:
+        problems.append("second pump pass grew the journal (C)")
+    reloaded_c.verify_integrity()
+
+    # -- the structural audit (journal family + AST) ------------------
+    problems.extend(_audit_observation_admission_structure())
+
+    if problems:
+        results.append(
+            fail(
+                "45 durable observation admission state",
+                "; ".join(problems),
+            )
+        )
+    else:
+        results.append(
+            ok(
+                "45 durable observation admission state",
+                "no-audience replay stays obligation-free after late "
+                "registration; the audience-drift retry heals with the "
+                "FROZEN admission audience; the admission-record write "
+                "failure returns deterministic non-success and heals "
+                "from request + durable mutation with zero "
+                "re-execution; one canonical admission path "
+                "(AST-audited)",
+            )
+        )
+
+
+def _audit_observation_admission_structure() -> List[str]:
+    """The structural audit for the durable observation-admission
+    state: journal family membership, and the AST audit of the
+    observation-emission call sites in the gateway (ONE
+    canonical admission path, no audience re-resolution on the
+    historical replay path, no process-local observation
+    state)."""
+    problems: List[str] = []
+
+    # -- the journal record family membership ------------------------
+    from developerapi.journal import RECORD_KINDS, RECORD_TYPES
+
+    if "webhook-admission" not in RECORD_KINDS:
+        problems.append("webhook-admission missing from RECORD_KINDS")
+    if WebhookAdmissionRecord not in RECORD_TYPES:
+        problems.append("WebhookAdmissionRecord missing from RECORD_TYPES")
+    # constructor validation: status/endpoints consistency
+    try:
+        WebhookAdmissionRecord(
+            sequence=1,
+            record_id="pending",
+            admission_id="sha256:" + "1" * 64,
+            idempotency_key="audit-1",
+            event_id="sha256:" + "2" * 64,
+            status="maybe",
+            developer_id="dev-audit",
+            environment="sandbox",
+            event_type="offer.published",
+            occurred_at="2026-09-01T00:00:00Z",
+            resource_kind="offer",
+            resource_id="sha256:" + "3" * 64,
+            resource_version=1,
+            correlation="",
+            data={"id": "x"},
+            endpoints=(),
+        )
+        problems.append("admission constructor accepted a bad status")
+    except DeveloperApiError:
+        pass
+    # the fold fail-closed: an admission for a mutation the
+    # journal does not hold is journal-corrupt (an admission is
+    # written only AFTER its mutation record)
+    mut = MutationRecord.build(
+        sequence=1,
+        prev_record_id="sha256:" + "0" * 64,
+        idempotency_key="audit-key",
+        application_id="app-audit",
+        developer_id="dev-audit",
+        method="POST",
+        route="/api/1.0/offers",
+        api_version="1.0",
+        request_id="sha256:" + "4" * 64,
+        request_digest="sha256:" + "5" * 64,
+        resource_kind="offer",
+        resource_id="sha256:" + "6" * 64,
+        resource={},
+        response_status=200,
+        response_body="{}",
+    )
+    orphan = WebhookAdmissionRecord.build(
+        sequence=2,
+        prev_record_id=mut.record_id,
+        admission_id=webhook_platform.derive_admission_id(
+            "sandbox", "sha256:" + "7" * 64, "offer.published"
+        ),
+        idempotency_key="audit-ORPHAN",
+        event_id="sha256:" + "7" * 64,
+        status="not-required",
+        developer_id="dev-audit",
+        environment="sandbox",
+        event_type="offer.published",
+        occurred_at="2026-09-01T00:00:00Z",
+        resource_kind="offer",
+        resource_id="sha256:" + "8" * 64,
+        resource_version=1,
+        correlation="",
+        data={"id": "x"},
+        endpoints=(),
+    )
+    try:
+        fold_index((mut, orphan))
+        problems.append(
+            "the fold accepted an admission for an unknown mutation"
+        )
+    except DeveloperApiError as error:
+        if error.reason != DeveloperApiReasonCode.JOURNAL_CORRUPT:
+            problems.append(
+                "orphan admission rejected with %r" % error.reason
+            )
+
+    # -- the AST audit of the gateway's admission call sites ---------
+    source = (REPO_ROOT / "developerapi" / "gateway.py").read_text(
+        encoding="utf-8"
+    )
+    if "_pending_emissions" in source or "pending_emissions" in source:
+        problems.append("process-local observation state exists")
+
+    tree = ast.parse(source, filename="developerapi/gateway.py")
+
+    # (function name -> set of self.<method> names called there)
+    method_calls: Dict[str, set] = {}
+    # (function name -> set of <Class>.build class-method calls)
+    build_calls: Dict[str, set] = {}
+
+    def _enclosing(node: ast.AST) -> Optional[ast.FunctionDef]:
+        for candidate in ast.walk(tree):
+            if isinstance(candidate, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                for child in ast.walk(candidate):
+                    if child is node:
+                        return candidate
+        return None
+
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        if isinstance(func, ast.Attribute) and isinstance(
+            func.value, ast.Name
+        ):
+            owner = func.value.id
+            if owner == "self":
+                enclosing = _enclosing(node)
+                if enclosing is not None:
+                    method_calls.setdefault(enclosing.name, set()).add(
+                        func.attr
+                    )
+            elif func.attr == "build" and owner in (
+                "WebhookAdmissionRecord",
+                "WebhookObligationRecord",
+                "WebhookQueueRecord",
+            ):
+                enclosing = _enclosing(node)
+                if enclosing is not None:
+                    build_calls.setdefault(enclosing.name, set()).add(owner)
+
+    resolver_callers = sorted(
+        name
+        for name, calls in method_calls.items()
+        if "_resolve_observation_audience" in calls
+    )
+    if resolver_callers != ["_emit_event", "_establish_observation_admission"]:
+        problems.append(
+            "audience resolution is not confined to the canonical "
+            "admission path (callers: %s)" % resolver_callers
+        )
+    admission_builders = sorted(
+        name
+        for name, builds in build_calls.items()
+        if "WebhookAdmissionRecord" in builds
+    )
+    if admission_builders != ["_append_observation_admission"]:
+        problems.append(
+            "the admission record is not written from the single "
+            "canonical site (builders: %s)" % admission_builders
+        )
+    admission_callers = sorted(
+        name
+        for name, calls in method_calls.items()
+        if "_append_observation_admission" in calls
+    )
+    if admission_callers != ["_emit_event", "_establish_observation_admission"]:
+        problems.append(
+            "the admission write is reachable outside the canonical "
+            "admission paths (callers: %s)" % admission_callers
+        )
+    obligation_builders = sorted(
+        name
+        for name, builds in build_calls.items()
+        if "WebhookObligationRecord" in builds
+    )
+    if obligation_builders != ["_append_observation_obligation"]:
+        problems.append(
+            "the obligation record is not written from the single "
+            "canonical site (builders: %s)" % obligation_builders
+        )
+    # the historical replay path never re-resolves the audience:
+    # _complete_prior_admission uses ONLY the frozen admission
+    # (via _ensure_obligation_from_admission) or establishes a
+    # first admission (via _establish_observation_admission /
+    # _reconstruct_emission); it never calls the resolver itself
+    completion_calls = method_calls.get("_complete_prior_admission", set())
+    if "_resolve_observation_audience" in completion_calls:
+        problems.append(
+            "the historical replay path re-resolves the audience "
+            "from current endpoint state"
+        )
+    ensure_calls = method_calls.get("_ensure_obligation_from_admission", set())
+    if "_resolve_observation_audience" in ensure_calls:
+        problems.append(
+            "the frozen-admission obligation recovery re-resolves the "
+            "audience"
+        )
+    return problems
+
+
 def case_35_determinism_two_run(results: List[Result]) -> None:
     """Two fresh in-process runs of the golden scenario produce
     byte-identical digest streams."""
@@ -5360,6 +6220,7 @@ def main() -> int:
         case_42_post_finality_webhook_isolation,
         case_43_durable_webhook_obligation_crash_recovery,
         case_44_obligation_write_admission_gate,
+        case_45_durable_observation_admission_state,
     ):
         case(results)
     failures = [result for result in results if not result[1]]

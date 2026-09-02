@@ -22,6 +22,23 @@ journals):
   append = one atomic persist-then-ack; there is no intermediate
   state where a mutation is admitted without its response.
 
+- **durable observation-admission records**: every mutation
+  whose emission is owed an observation decision appends a
+  :class:`WebhookAdmissionRecord` AFTER its mutation record and
+  BEFORE the successful API response: the admission-time
+  audience is FROZEN there (``required`` with the exact
+  resolved endpoints, or terminal ``not-required`` with none),
+  so the same mutation + the same idempotency key always
+  resolves to the SAME historical admission decision and NEVER
+  re-interprets current endpoint state.  A required admission
+  is followed by its derived
+  :class:`WebhookObligationRecord` (the delivery duty for the
+  frozen audience); a ``not-required`` admission is terminal
+  (no later endpoint registration can produce a webhook for
+  the historical mutation).  Both writes are part of the
+  successful-admission contract (a failure returns the
+  deterministic admission failure, never a false success).
+
 - **content-derived ids**: every ``record_id`` is the
   fingerprint of (sequence, ``chain_content()``, previous
   record id) -- the hash chain; every ``request_digest`` is the
@@ -88,6 +105,7 @@ RECORD_KINDS = (
     "mutation",
     "credential-issue",
     "credential-revoke",
+    "webhook-admission",
     "webhook-obligation",
     "webhook-queue",
     "webhook-attempt",
@@ -876,10 +894,254 @@ class WebhookObligationRecord:
         )
 
 
+@dataclass(frozen=True)
+class WebhookAdmissionRecord:
+    """One DURABLE webhook observation-ADMISSION decision for
+    exactly one mutation's emission: the observation-admission
+    state machine's own journal record, persisted BEFORE the
+    API response is returned for the admitting mutation (post-
+    finality for the business mutation, pre-response for the
+    caller).
+
+    The record answers ONE question -- "was observation
+    required, and what was the audience frozen at admission
+    time?" -- and nothing else:
+
+    - ``status="not-required"``: no matching webhook endpoints
+      existed when the mutation was admitted.  ``endpoints`` is
+      EMPTY and the decision is TERMINAL: no later endpoint
+      registration may ever produce a webhook for that
+      historical mutation, and an idempotent replay of the same
+      key must never re-resolve the audience.
+
+    - ``status="required"``: an audience existed.  ``endpoints``
+      is the EXACT audience resolved at admission time and the
+      emission identity/payload (``event_id``/``event_type``/
+      ``occurred_at``/resource members/``correlation``/``data``)
+      are FROZEN here.  Retry/recovery MUST use these stored
+      values; current endpoint registrations MUST NOT be
+      consulted for a historical replay.  The derived delivery
+      OBLIGATION (:class:`WebhookObligationRecord`) is appended
+      only for a required admission and answers the LATER
+      question ("the required observation has not yet reached
+      queue state for all frozen audience members"); the queue
+      and attempt records remain delivery state.  This is the
+      separation of truths:
+
+        business truth (MutationRecord)
+        ≠ observation-admission truth (this record)
+        ≠ delivery-obligation truth (WebhookObligationRecord)
+        ≠ delivery state (queue/attempt records)
+
+    ``idempotency_key`` binds the admission to its admitting
+    API mutation (the retry lookup key); it is empty for the
+    platform-side observation surface (emissions that are not
+    an HTTP mutation response).  No mutable "satisfied" flag
+    exists anywhere: satisfaction of the required admission is
+    DERIVED (every frozen audience member holds its queue
+    record), exactly like the obligation's satisfaction.
+
+    The write is part of the successful-admission contract:
+    when it fails the boundary returns the deterministic
+    admission failure (never a false success), the canonical
+    mutation stays durable (no rollback, no re-execution), and
+    the same-key retry establishes the admission state from the
+    request and the durable canonical mutation alone.
+    """
+
+    sequence: int
+    record_id: str
+    admission_id: str = ""
+    idempotency_key: str = ""
+    event_id: str = ""
+    status: str = ""
+    developer_id: str = ""
+    environment: str = ""
+    event_type: str = ""
+    occurred_at: str = ""
+    resource_kind: str = ""
+    resource_id: str = ""
+    resource_version: int = 0
+    correlation: str = ""
+    data: Tuple[Tuple[str, Any], ...] = ()
+    endpoints: Tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.sequence, int) or isinstance(
+            self.sequence, bool
+        ) or self.sequence < 1:
+            raise DeveloperApiError(
+                DeveloperApiReasonCode.JOURNAL_CORRUPT,
+                "sequence must be an integer >= 1",
+            )
+        for label, value in (
+            ("record_id", self.record_id),
+            ("admission_id", self.admission_id),
+            ("event_id", self.event_id),
+            ("status", self.status),
+            ("environment", self.environment),
+            ("event_type", self.event_type),
+            ("occurred_at", self.occurred_at),
+            ("resource_kind", self.resource_kind),
+            ("resource_id", self.resource_id),
+        ):
+            _require_text(value, label)
+        if not isinstance(self.idempotency_key, str):
+            raise DeveloperApiError(
+                DeveloperApiReasonCode.JOURNAL_CORRUPT,
+                "idempotency_key must be a string (or empty for the "
+                "platform-side observation surface)",
+            )
+        if not isinstance(self.developer_id, str):
+            raise DeveloperApiError(
+                DeveloperApiReasonCode.JOURNAL_CORRUPT,
+                "developer_id must be a string (the admission-time "
+                "resource owner; empty when no owner exists)",
+            )
+        if self.status not in ("not-required", "required"):
+            raise DeveloperApiError(
+                DeveloperApiReasonCode.JOURNAL_CORRUPT,
+                "admission status %r must be not-required or required"
+                % self.status,
+            )
+        if not isinstance(self.resource_version, int) or isinstance(
+            self.resource_version, bool
+        ) or self.resource_version < 1:
+            raise DeveloperApiError(
+                DeveloperApiReasonCode.JOURNAL_CORRUPT,
+                "resource version must be a positive integer",
+            )
+        if not isinstance(self.correlation, str):
+            raise DeveloperApiError(
+                DeveloperApiReasonCode.JOURNAL_CORRUPT,
+                "correlation must be a string (or empty)",
+            )
+        if not isinstance(self.data, tuple) or not self.data:
+            raise DeveloperApiError(
+                DeveloperApiReasonCode.JOURNAL_CORRUPT,
+                "an admission must carry the observed data payload "
+                "whose audience it decided",
+            )
+        if not isinstance(self.endpoints, tuple):
+            raise DeveloperApiError(
+                DeveloperApiReasonCode.JOURNAL_CORRUPT,
+                "admission endpoints must be a tuple",
+            )
+        for endpoint_id in self.endpoints:
+            if not isinstance(endpoint_id, str) or not endpoint_id:
+                raise DeveloperApiError(
+                    DeveloperApiReasonCode.JOURNAL_CORRUPT,
+                    "admission endpoints must be non-empty strings",
+                )
+        if self.status == "not-required" and self.endpoints:
+            raise DeveloperApiError(
+                DeveloperApiReasonCode.JOURNAL_CORRUPT,
+                "a not-required admission must carry an empty frozen "
+                "audience",
+            )
+        if self.status == "required" and not self.endpoints:
+            raise DeveloperApiError(
+                DeveloperApiReasonCode.JOURNAL_CORRUPT,
+                "a required admission must carry its frozen audience",
+            )
+
+    # -- the hash-chain content (single site) --------------------------
+
+    def chain_content(self) -> Dict[str, Any]:
+        return {
+            "record_kind": "webhook-admission",
+            "admission_id": self.admission_id,
+            "idempotency_key": self.idempotency_key,
+            "event_id": self.event_id,
+            "status": self.status,
+            "developer_id": self.developer_id,
+            "environment": self.environment,
+            "event_type": self.event_type,
+            "occurred_at": self.occurred_at,
+            "resource_kind": self.resource_kind,
+            "resource_id": self.resource_id,
+            "resource_version": self.resource_version,
+            "correlation": self.correlation,
+            "data": self.data_dict(),
+            "endpoints": list(self.endpoints),
+        }
+
+    def data_dict(self) -> Dict[str, Any]:
+        return dict(self.data)
+
+    def to_dict(self) -> Dict[str, Any]:
+        out = self.chain_content()
+        out["sequence"] = self.sequence
+        out["record_id"] = self.record_id
+        return out
+
+    @classmethod
+    def build(
+        cls,
+        *,
+        sequence: int,
+        prev_record_id: str,
+        admission_id: str,
+        idempotency_key: str,
+        event_id: str,
+        status: str,
+        developer_id: str,
+        environment: str,
+        event_type: str,
+        occurred_at: str,
+        resource_kind: str,
+        resource_id: str,
+        resource_version: int,
+        correlation: str,
+        data: Mapping[str, Any],
+        endpoints: Tuple[str, ...],
+    ) -> "WebhookAdmissionRecord":
+        proto = cls(
+            sequence=sequence,
+            record_id="pending",
+            admission_id=admission_id,
+            idempotency_key=idempotency_key,
+            event_id=event_id,
+            status=status,
+            developer_id=developer_id,
+            environment=environment,
+            event_type=event_type,
+            occurred_at=occurred_at,
+            resource_kind=resource_kind,
+            resource_id=resource_id,
+            resource_version=resource_version,
+            correlation=correlation,
+            data=tuple(sorted(dict(data).items())),
+            endpoints=tuple(endpoints),
+        )
+        record_id = derive_record_id(
+            sequence, proto.chain_content(), prev_record_id
+        )
+        return cls(
+            sequence=sequence,
+            record_id=record_id,
+            admission_id=admission_id,
+            idempotency_key=idempotency_key,
+            event_id=event_id,
+            status=status,
+            developer_id=developer_id,
+            environment=environment,
+            event_type=event_type,
+            occurred_at=occurred_at,
+            resource_kind=resource_kind,
+            resource_id=resource_id,
+            resource_version=resource_version,
+            correlation=correlation,
+            data=proto.data,
+            endpoints=proto.endpoints,
+        )
+
+
 #: The record types the journal discriminates.
 RECORD_TYPES = (
     MutationRecord,
     CredentialRecord,
+    WebhookAdmissionRecord,
     WebhookQueueRecord,
     WebhookAttemptRecord,
     WebhookObligationRecord,
@@ -1034,6 +1296,25 @@ def _record_from_dict(data: object) -> Any:
             response_code=data.get("response_code", -1),
             instant=data.get("instant", ""),
             next_attempt_at=data.get("next_attempt_at", ""),
+        )
+    if kind == "webhook-admission":
+        return WebhookAdmissionRecord(
+            sequence=sequence,
+            record_id=data.get("record_id", ""),
+            admission_id=data.get("admission_id", ""),
+            idempotency_key=data.get("idempotency_key", ""),
+            event_id=data.get("event_id", ""),
+            status=data.get("status", ""),
+            developer_id=data.get("developer_id", ""),
+            environment=data.get("environment", ""),
+            event_type=data.get("event_type", ""),
+            occurred_at=data.get("occurred_at", ""),
+            resource_kind=data.get("resource_kind", ""),
+            resource_id=data.get("resource_id", ""),
+            resource_version=data.get("resource_version", 0),
+            correlation=data.get("correlation", ""),
+            data=tuple(sorted(dict(data.get("data") or {}).items())),
+            endpoints=tuple(data.get("endpoints") or ()),
         )
     if kind == "webhook-obligation":
         return WebhookObligationRecord(
@@ -1235,6 +1516,8 @@ class ApiIndex:
         self.mutations: Dict[str, MutationRecord] = {}
         self.offers: Dict[str, Dict[str, Any]] = {}
         self.endpoints: Dict[str, Dict[str, Any]] = {}
+        self.admissions: Dict[str, WebhookAdmissionRecord] = {}
+        self.admissions_by_key: Dict[str, WebhookAdmissionRecord] = {}
         self.obligations: Dict[str, WebhookObligationRecord] = {}
         self.deliveries: Dict[str, WebhookDeliveryState] = {}
         self.delivery_sequences: Dict[str, int] = {}
@@ -1277,6 +1560,36 @@ class ApiIndex:
                         % record.application_id,
                     )
                 entry["status"] = "revoked"
+        elif isinstance(record, WebhookAdmissionRecord):
+            if record.admission_id in self.admissions:
+                raise DeveloperApiError(
+                    DeveloperApiReasonCode.JOURNAL_CORRUPT,
+                    "webhook admission %r recorded twice"
+                    % record.admission_id,
+                )
+            self.admissions[record.admission_id] = record
+            if record.idempotency_key:
+                # a mutation-bound admission: exactly ONE
+                # admission decision per admitted mutation, and
+                # the mutation record must precede it (the write
+                # ordering the request path guarantees); anything
+                # else is an inconsistent journal -- fail closed
+                # rather than guessing
+                if record.idempotency_key in self.admissions_by_key:
+                    raise DeveloperApiError(
+                        DeveloperApiReasonCode.JOURNAL_CORRUPT,
+                        "webhook admission for idempotency key %r "
+                        "recorded twice" % record.idempotency_key,
+                    )
+                if record.idempotency_key not in self.mutations:
+                    raise DeveloperApiError(
+                        DeveloperApiReasonCode.JOURNAL_CORRUPT,
+                        "webhook admission for mutation %r that the "
+                        "journal does not hold (an admission is "
+                        "written only AFTER its mutation record)"
+                        % record.idempotency_key,
+                    )
+                self.admissions_by_key[record.idempotency_key] = record
         elif isinstance(record, WebhookObligationRecord):
             if record.obligation_id in self.obligations:
                 raise DeveloperApiError(

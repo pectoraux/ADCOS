@@ -14,26 +14,31 @@ W046 frozen contract's interface boundary):
       -> append the atomic journal record (persist-then-ack)
          -- the FINALITY POINT: the canonical mutation result
          and its response are final from here
-      -> append the DURABLE webhook observation obligation
-         (the delivery obligation survives a process crash).
-         The obligation is part of the SUCCESSFUL-ADMISSION
-         CONTRACT: it must be durable BEFORE the response is
-         returned.  If the obligation cannot be durably
-         recorded, the boundary fails DETERMINISTICALLY
-         (store-failed, 500) and NEVER claims successful
-         admission of a mutation whose required observation
-         obligation was not established -- no rollback, no
-         re-execution; the durable mutation stays durable, and
-         the SAME request retried with the SAME idempotency
-         key completes the admission and then receives the
+      -> append the DURABLE webhook observation-ADMISSION
+         record (the admission-time audience and emission
+         identity FROZEN: ``required`` with the exact resolved
+         endpoints, or terminal ``not-required`` with none) and,
+         when required, its derived delivery OBLIGATION record.
+         Both are part of the SUCCESSFUL-ADMISSION CONTRACT:
+         they must be durable BEFORE the response is returned.
+         If either cannot be durably recorded, the boundary
+         fails DETERMINISTICALLY (store-failed, 500) and NEVER
+         claims successful admission of a mutation whose
+         required observation admission was not established --
+         no rollback, no re-execution; the durable mutation
+         stays durable, and the SAME request retried with the
+         SAME idempotency key completes the admission (the
+         historical admission decision, once durable, is
+         AUTHORITATIVE: an idempotent replay NEVER re-resolves
+         the current endpoint state) and then receives the
          canonical stored response byte-identically
       -> return the canonical response envelope
       -> webhook queue writes + delivery attempts STRICTLY
-         AFTER the obligation is durable and fully contained: a
-         webhook queue or delivery failure may affect only
-         webhook observability/retry state, never the
-         response -- and never the loss of the durable
-         obligation to observe
+         AFTER the admission + obligation are durable and fully
+         contained: a webhook queue or delivery failure may
+         affect only webhook observability/retry state, never
+         the response -- and never the loss of the durable
+         admission/obligation to observe
 
 Authority discipline (the frozen boundary -- battery-pinned
 structurally by the import audit and the cross-authority call
@@ -154,6 +159,7 @@ from .journal import (
     AppendOnlyApiJournal,
     CredentialRecord,
     MutationRecord,
+    WebhookAdmissionRecord,
     WebhookAttemptRecord,
     WebhookObligationRecord,
     WebhookQueueRecord,
@@ -399,15 +405,19 @@ class _MutationEmission:
     state by itself).
 
     The eight primary members are the COMPLETE observation
-    payload: they are exactly what the durable obligation record
+    payload: they are exactly what the durable admission record
+    (:class:`journal.WebhookAdmissionRecord`) and, for a
+    required admission, the obligation record
     (:class:`journal.WebhookObligationRecord`) and the queue
     records persist.  ``developer_id`` and ``endpoints`` are
-    empty until the audience is RESOLVED at admission time
-    (post-finality: the mutation record is durable, the response
-    is final, and the audience lives in the folded endpoint
-    index); :meth:`resolved` returns the admission-ready
-    emission.  Building the spec re-executes NOTHING: every
-    member comes from the mutation's own executed result."""
+    empty until the audience is RESOLVED at admission time --
+    EXACTLY ONCE -- and then FROZEN into the admission record
+    (post-finality: the mutation record is durable, the
+    response is final, and the audience lives in the folded
+    endpoint index at admission time);
+    :meth:`resolved` returns the admission-ready emission.
+    Building the spec re-executes NOTHING: every member comes
+    from the mutation's own executed result."""
 
     event_type: str
     event_id: str
@@ -597,6 +607,20 @@ class DeveloperApiService:
                 DeveloperApiReasonCode.JOURNAL_CORRUPT,
                 "live webhook obligation index diverges from the "
                 "journal fold",
+            )
+        if sorted(folded.admissions) != sorted(self._index.admissions):
+            raise DeveloperApiError(
+                DeveloperApiReasonCode.JOURNAL_CORRUPT,
+                "live webhook admission index diverges from the "
+                "journal fold",
+            )
+        if sorted(folded.admissions_by_key) != sorted(
+            self._index.admissions_by_key
+        ):
+            raise DeveloperApiError(
+                DeveloperApiReasonCode.JOURNAL_CORRUPT,
+                "live webhook admission-by-key index diverges from "
+                "the journal fold",
             )
         if sorted(folded.deliveries) != sorted(self._index.deliveries):
             raise DeveloperApiError(
@@ -842,8 +866,9 @@ class DeveloperApiService:
     ) -> None:
         """Run the contained webhook queue and delivery phase of
         one mutation, strictly after the mutation's finality
-        point AND strictly after the observation obligation is
-        durable.
+        point AND strictly after the observation's durable
+        admission state exists (the admission record and, for a
+        required admission, the obligation).
 
         Containment semantics (the frozen W046 invariant): the
         per-endpoint queue writes (dedupe by delivery identity)
@@ -945,55 +970,103 @@ class DeveloperApiService:
     def _admit_observation(
         self, emission: _MutationEmission, *, key: str, request_id: str
     ) -> None:
-        """The ADMISSION GATE for the durable observation
-        obligation (the W046 successful-admission contract).
+        """The ADMISSION GATE for the durable observation-
+        admission state (the W046 successful-admission contract).
 
         Sequence: resolve the observation's audience from the
-        folded endpoint index (a public read; no audience means
-        no obligation exists and the contract is trivially
-        satisfied); append the DURABLE obligation record -- this
-        write is NOT contained: when it fails the boundary raises
-        the deterministic admission failure (:meth:`_admission_failure`)
-        and NEVER returns the success whose required observation
-        obligation was not established; only after the obligation
-        is durable does the fully contained queue + delivery
-        phase run (:meth:`_observe_after_finality`).  The mutation
+        folded endpoint index EXACTLY ONCE (a public read; the
+        resolved audience is an ADMISSION-TIME FACT and is
+        FROZEN into the durable admission record -- it is never
+        re-resolved for a historical mutation); persist the
+        DURABLE admission record (``required`` with the exact
+        frozen audience, or terminal ``not-required`` with
+        none); when required, persist the DURABLE obligation
+        record (the delivery duty for the frozen audience).
+        BOTH writes are NOT contained: when either fails the
+        boundary raises the deterministic admission failure
+        (:meth:`_admission_failure`) and NEVER returns the
+        success whose required observation admission was not
+        established; only after the REQUIRED durable state
+        exists does the fully contained queue + delivery phase
+        run (:meth:`_observe_after_finality`).  The mutation
         itself stays durable either way: no rollback, no
         re-execution (the same-key retry completes the admission
         through :meth:`_complete_prior_admission`)."""
         try:
-            audience = self._resolve_observation_audience(emission)
-            if audience is not None:
-                developer_id, endpoints = audience
-                resolved = emission.resolved(developer_id, endpoints)
-                self._append_observation_obligation(resolved)
+            developer_id, endpoints = self._establish_observation_admission(
+                emission, key=key
+            )
         except Exception as error:
             raise self._admission_failure(key, request_id, error) from error
-        if audience is None:
-            # no audience: no delivery obligation exists (the
-            # admission contract is trivially satisfied).  The
-            # inline delivery pass still runs -- every mutation
-            # emission is the pump's deterministic turn (the
-            # healthy-path journal stream is clock-stable).
+        if not endpoints:
+            # terminal not-required admission: no delivery
+            # obligation exists (the admission contract is
+            # satisfied).  The inline delivery pass still runs --
+            # every mutation emission is the pump's deterministic
+            # turn (the healthy-path journal stream is
+            # clock-stable).
             self._run_delivery_pass()
             return
-        # the obligation is durable: the admission contract is
-        # satisfied for this response
-        self._observe_after_finality(resolved)
+        # the admission (and its obligation) is durable: the
+        # admission contract is satisfied for this response
+        self._observe_after_finality(
+            emission.resolved(developer_id, endpoints)
+        )
+
+    def _establish_observation_admission(
+        self, emission: _MutationEmission, *, key: str
+    ) -> Tuple[str, Tuple[str, ...]]:
+        """Resolve the audience EXACTLY ONCE and persist the
+        durable observation-admission state: the admission
+        record (with the frozen audience and the frozen emission
+        identity/payload) and, when required, the obligation
+        record.  The single admission-establishment site for the
+        API mutation gate (:meth:`_admit_observation`) AND the
+        same-key admission completion
+        (:meth:`_complete_prior_admission` -- the branch where
+        no admission record exists yet and the admission is
+        established NOW from the request + durable canonical
+        mutation).  CAN raise: the caller owns the failure
+        semantics -- in the request path a failure here is the
+        deterministic admission failure, never a contained
+        incident.  Returns (developer_id, frozen endpoints)."""
+        developer_id, endpoints = self._resolve_observation_audience(emission)
+        self._append_observation_admission(
+            key=key,
+            emission=emission,
+            developer_id=developer_id,
+            endpoints=endpoints,
+        )
+        if endpoints:
+            self._append_observation_obligation(
+                emission.resolved(developer_id, endpoints)
+            )
+        return developer_id, endpoints
 
     def _resolve_observation_audience(
         self, emission: _MutationEmission
-    ) -> Optional[Tuple[str, Tuple[str, ...]]]:
-        """Resolve one emission's audience: the owning developer
-        (or the platform-level marker) and the endpoints
-        subscribed to the event type, from the folded endpoint
-        index ONLY (the audience at admission time).  Returns
-        None when no audience exists (no delivery obligation)."""
+    ) -> Tuple[str, Tuple[str, ...]]:
+        """Resolve one emission's admission-time audience: the
+        owning developer (or the platform-level marker; empty
+        when no owner exists) and the endpoints subscribed to
+        the event type, from the folded endpoint index ONLY (the
+        audience at admission time).  The endpoints are EMPTY
+        iff no audience exists (no delivery obligation; the
+        admission is terminal ``not-required``).
+
+        This is the ONLY audience-resolution site in the family
+        (battery AST-audited): it is called exactly once per
+        admission -- the result is frozen into the durable
+        admission record and NEVER re-resolved for a historical
+        mutation.  The same mutation + the same idempotency key
+        therefore always resolve to the SAME historical
+        admission decision; a late-registered endpoint cannot
+        change what a completed admission meant."""
         developer_id = self._resource_owner(
             emission.resource_kind, emission.resource_id
         )
         if developer_id is None:
-            return None
+            return "", ()
         endpoints = tuple(
             endpoint_id
             for endpoint_id in sorted(self._index.endpoints)
@@ -1002,9 +1075,56 @@ class DeveloperApiService:
             and emission.event_type
             in self._index.endpoints[endpoint_id].get("event_types", ())
         )
-        if not endpoints:
-            return None
         return developer_id, endpoints
+
+    def _append_observation_admission(
+        self,
+        *,
+        key: str,
+        emission: _MutationEmission,
+        developer_id: str,
+        endpoints: Tuple[str, ...],
+    ) -> None:
+        """Append the durable observation-admission record
+        (idempotent by admission identity; persist-then-ack):
+        the admission-time audience and emission identity/payload,
+        frozen as the historical admission decision.
+
+        The single admission-record-write site for EVERY
+        admission path (the API mutation gate, the same-key
+        admission completion, and the platform-side observation
+        surface).  CAN raise: the caller owns the failure
+        semantics -- in the request path a failure here is the
+        deterministic admission failure, never a contained
+        incident."""
+        admission_id = webhook_platform.derive_admission_id(
+            self._environment, emission.event_id, emission.event_type
+        )
+        if admission_id in self._index.admissions:
+            # the historical admission decision is already
+            # durable (a prior attempt or the platform surface
+            # established it): never re-decide
+            return
+        record = WebhookAdmissionRecord.build(
+            sequence=self._journal.tail_sequence() + 1,
+            prev_record_id=self._journal.tail_record_id(),
+            admission_id=admission_id,
+            idempotency_key=key,
+            event_id=emission.event_id,
+            status="required" if endpoints else "not-required",
+            developer_id=developer_id,
+            environment=self._environment,
+            event_type=emission.event_type,
+            occurred_at=emission.occurred_at,
+            resource_kind=emission.resource_kind,
+            resource_id=emission.resource_id,
+            resource_version=emission.resource_version,
+            correlation=emission.correlation,
+            data=emission.data,
+            endpoints=endpoints,
+        )
+        self._journal.append(record)
+        self._index.apply(record)
 
     def _append_observation_obligation(
         self, resolved: _MutationEmission
@@ -1042,12 +1162,47 @@ class DeveloperApiService:
         self._journal.append(record)
         self._index.apply(record)
 
+    def _ensure_obligation_from_admission(
+        self, admission: WebhookAdmissionRecord
+    ) -> None:
+        """(Re)establish the durable observation obligation for
+        one REQUIRED historical admission from its FROZEN values
+        alone: the stored event identity/payload and the frozen
+        audience, never a current-audience re-resolution
+        (idempotent by obligation identity; persist-then-ack).
+        This is the recovery half of the admission record: a
+        prior attempt that wrote the admission but failed the
+        obligation append (its first response was the
+        deterministic admission failure) heals HERE, with
+        exactly the audience that was frozen at admission time
+        -- endpoints registered after the admission can never
+        drift into the historical audience.  The queue/delivery
+        recovery of the still-missing endpoints is the delivery
+        pump's own machinery (the request path establishes the
+        obligation only).  CAN raise: the caller owns the
+        failure semantics."""
+        self._append_observation_obligation(
+            _MutationEmission(
+                event_type=admission.event_type,
+                event_id=admission.event_id,
+                occurred_at=admission.occurred_at,
+                resource_kind=admission.resource_kind,
+                resource_id=admission.resource_id,
+                resource_version=admission.resource_version,
+                correlation=admission.correlation,
+                data=admission.data_dict(),
+                developer_id=admission.developer_id,
+                endpoints=tuple(admission.endpoints),
+            )
+        )
+
     def _admission_failure(
         self, key: str, request_id: str, error: BaseException
     ) -> DeveloperApiError:
         """The deterministic admission-failure error for a
-        mutation whose required observation obligation could not
-        be durably recorded.
+        mutation whose required observation-admission state
+        (the durable admission record, and the delivery
+        obligation it requires) could not be durably recorded.
 
         The boundary reason is preserved from the underlying
         boundary failure (store-failed stays store-failed; an
@@ -1061,23 +1216,25 @@ class DeveloperApiService:
         if isinstance(error, DeveloperApiError):
             return DeveloperApiError(
                 error.reason,
-                "the webhook observation obligation for the admitted "
-                "mutation (idempotency key %r) could not be durably "
-                "recorded: %s.  The canonical mutation is durable and "
-                "was NOT rolled back or re-executed; retry the SAME "
-                "request with the SAME idempotency key to complete "
-                "the admission and receive the canonical response"
+                "the webhook observation admission (admission record "
+                "+ delivery obligation) for the admitted mutation "
+                "(idempotency key %r) could not be durably recorded: "
+                "%s.  The canonical mutation is durable and was NOT "
+                "rolled back or re-executed; retry the SAME request "
+                "with the SAME idempotency key to complete the "
+                "admission and receive the canonical response"
                 % (key, error.detail),
                 request_id=request_id,
             )
         return DeveloperApiError(
             DeveloperApiReasonCode.STORE_FAILED,
-            "the webhook observation obligation for the admitted "
-            "mutation (idempotency key %r) could not be durably "
-            "recorded: %r.  The canonical mutation is durable and "
-            "was NOT rolled back or re-executed; retry the SAME "
-            "request with the SAME idempotency key to complete "
-            "the admission and receive the canonical response"
+            "the webhook observation admission (admission record "
+            "+ delivery obligation) for the admitted mutation "
+            "(idempotency key %r) could not be durably recorded: %r.  "
+            "The canonical mutation is durable and was NOT rolled "
+            "back or re-executed; retry the SAME request with the "
+            "SAME idempotency key to complete the admission and "
+            "receive the canonical response"
             % (key, error),
             request_id=request_id,
         )
@@ -1092,35 +1249,78 @@ class DeveloperApiService:
         credential: ApplicationCredential,
         prior: MutationRecord,
     ) -> None:
-        """Complete the admission of a prior mutation whose
-        observation obligation was not established (the first
-        attempt returned the deterministic admission failure).
+        """Complete the admission of a prior mutation on its
+        idempotent replay (the historical admission decision is
+        AUTHORITATIVE -- the frozen-state recovery).
 
-        The emission is re-derived from DURABLE truth alone
-        (:meth:`_reconstruct_emission`: the prior record's stored
-        resource and canonical response, the canonical
-        subsystems' PUBLIC journals, and the retry request itself
-        -- the digest match guarantees the request is
-        byte-identical); the audience is resolved; the obligation
-        is appended through the SAME admission gate.  The cached
-        canonical response is replayed by the caller ONLY after
-        this gate passes -- a replay is therefore never a false
-        success either.  No re-execution anywhere.  The queue +
-        delivery recovery of any still-missing endpoints is the
-        delivery pump's own machinery (the durable obligation
-        owns it), never the request path."""
+        Three -- and only three -- durable states exist for a
+        prior mutation's observation admission, and each has
+        exactly one deterministic behavior:
+
+        - the admission record exists with status
+          ``not-required``: the historical mutation completed
+          with NO audience and that decision is TERMINAL.  The
+          audience is NOT resolved, nothing is created, and no
+          later endpoint registration can produce a webhook for
+          the historical mutation.  Pure replay.
+
+        - the admission record exists with status ``required``:
+          the stored event/payload and the FROZEN audience are
+          the admission.  The audience is NEVER re-resolved
+          (``_resolve_observation_audience`` is not called for
+          a historical replay at all); the missing obligation
+          (a prior attempt that failed its obligation write)
+          is re-established from the frozen values alone
+          (:meth:`_ensure_obligation_from_admission`), so a
+          retry can never acquire a different audience than
+          the one frozen at admission time.  The queue/
+          delivery recovery of still-missing endpoints is the
+          delivery pump's own machinery, never the request
+          path.
+
+        - NO admission record exists: the prior attempt
+          returned the deterministic admission failure BEFORE
+          the admission record became durable (the only way a
+          current-format mutation exists without its admission
+          record).  The admission is established NOW from the
+          request and the durable canonical mutation alone:
+          the emission is re-derived from durable truth
+          (:meth:`_reconstruct_emission`), the audience is
+          resolved once, and the admission record (+ the
+          obligation it requires) is written through the SAME
+          admission gate.  Nothing re-executes.
+
+        In every branch the cached canonical response is
+        replayed by the caller ONLY after this gate passes -- a
+        replay is therefore never a false success either.  No
+        re-execution anywhere."""
+        admission = self._index.admissions_by_key.get(
+            prior.idempotency_key
+        )
+        if admission is not None:
+            if admission.status == "not-required":
+                # the terminal no-audience decision: replay
+                # WITHOUT resolving the audience and WITHOUT
+                # creating anything
+                return
+            try:
+                self._ensure_obligation_from_admission(admission)
+            except Exception as error:
+                raise self._admission_failure(
+                    prior.idempotency_key, request_id, error
+                ) from error
+            return
+        # no admission record: the prior attempt failed at the
+        # admission-record write itself; establish the admission
+        # NOW from the request + the durable canonical mutation
         emission = self._reconstruct_emission(
             request, version, spec, positional, credential, prior
         )
         if emission is None:
             return
         try:
-            audience = self._resolve_observation_audience(emission)
-            if audience is None:
-                return
-            developer_id, endpoints = audience
-            self._append_observation_obligation(
-                emission.resolved(developer_id, endpoints)
+            self._establish_observation_admission(
+                emission, key=prior.idempotency_key
             )
         except Exception as error:
             raise self._admission_failure(
@@ -1821,19 +2021,37 @@ class DeveloperApiService:
         # coordinator for the commercial plane -- the W046 frozen
         # observational-only invariant; battery case 42
         # failure-injects the exact sequence).  The observation's
-        # DELIVERY OBLIGATION, however, is part of the
-        # SUCCESSFUL-ADMISSION CONTRACT: it is made DURABLE HERE
-        # (a journal record carrying the full event payload and
-        # the resolved audience), BEFORE this response is
-        # returned.  The obligation write is NOT contained: when
-        # it fails the boundary raises the deterministic
-        # admission failure (store-failed, 500 -- never a false
-        # 200), the durable mutation is neither rolled back nor
-        # re-executed, and the obligation survives a process
-        # crash so the same-key retry completes the admission
-        # (battery case 43 failure-injects the queue-write crash;
-        # battery case 44 failure-injects the OBLIGATION-write
-        # failure, the crash, and the healing retry).
+        # ADMISSION STATE, however, is part of the
+        # SUCCESSFUL-ADMISSION CONTRACT and is made DURABLE HERE,
+        # BEFORE this response is returned, in the deterministic
+        # order:
+        #
+        #   MutationRecord (finality)
+        #       -> WebhookAdmissionRecord (the FROZEN admission-
+        #          time audience: required with the exact resolved
+        #          endpoints, or terminal not-required with none)
+        #       -> WebhookObligationRecord (only when required)
+        #       -> the successful response
+        #
+        # Neither write is contained: when either fails the
+        # boundary raises the deterministic admission failure
+        # (store-failed, 500 -- never a false 200), the durable
+        # mutation is neither rolled back nor re-executed, and
+        # the same-key retry completes the admission from durable
+        # truth alone -- using the FROZEN admission when it
+        # exists (an idempotent replay never re-resolves the
+        # current endpoint state, so a late-registered endpoint
+        # can neither create a webhook for a mutation that
+        # completed with no audience nor drift a required
+        # admission's historical audience) and establishing the
+        # admission from the request + the durable canonical
+        # mutation when it does not (battery case 43
+        # failure-injects the queue-write crash; battery case 44
+        # failure-injects the OBLIGATION-write failure, the
+        # crash, and the frozen-audience healing retry; battery
+        # case 45 failure-injects the ADMISSION-record write, the
+        # crash, and the audience-freeze/no-audience/no-drift
+        # semantics).
         if emission is not None:
             self._admit_observation(
                 emission, key=key, request_id=request_id
@@ -2189,20 +2407,35 @@ class DeveloperApiService:
         correlation: str,
         data: Mapping[str, Any],
     ) -> int:
-        """Emit one observation: FIRST the durable delivery
-        obligation (the audience resolved at emission time; the
-        obligation survives a process crash), THEN the
+        """Emit one observation through the SAME durable
+        observation-admission model as the API mutation path (one
+        canonical admission architecture; the platform surface
+        is not a second webhook-admission path -- it writes the
+        SAME admission record family, with an EMPTY idempotency
+        key because this emission is not an HTTP mutation
+        response).
+
+        FIRST the durable admission record (the audience
+        resolved at admission time and FROZEN: a ``not-required``
+        admission is terminal -- a later observation of the same
+        unchanged event can never acquire an audience); THEN the
+        durable delivery obligation when required; THEN the
         per-endpoint queue writes (dedupe by delivery identity:
-        the same event never queues twice).
+        the same event never queues twice).  When the admission
+        already exists, its frozen decision is AUTHORITATIVE:
+        the audience is never re-resolved, and a ``required``
+        admission queues only its frozen audience's still-missing
+        endpoints.
 
         The PLATFORM-side observation surface (the operator's
-        transaction-observation emission): an obligation-write or
-        queue-write failure raises to the OPERATOR, never to a
-        developer response (there is no developer response on
-        this path -- the observed transaction's state is already
-        canonical and final).  The API mutation path never calls
-        this method: it drives the same shared pieces through
-        the admission gate (:meth:`_admit_observation`)."""
+        transaction-observation emission): an admission-record,
+        obligation-write, or queue-write failure raises to the
+        OPERATOR, never to a developer response (there is no
+        developer response on this path -- the observed
+        transaction's state is already canonical and final).
+        The API mutation path never calls this method: it drives
+        the same shared pieces through the admission gate
+        (:meth:`_admit_observation`)."""
         emission = _MutationEmission(
             event_type=event_type,
             event_id=event_id,
@@ -2213,11 +2446,43 @@ class DeveloperApiService:
             correlation=correlation,
             data=data,
         )
-        audience = self._resolve_observation_audience(emission)
-        if audience is None:
-            # no audience: no delivery obligation exists
+        admission_id = webhook_platform.derive_admission_id(
+            self._environment, emission.event_id, emission.event_type
+        )
+        admission = self._index.admissions.get(admission_id)
+        if admission is not None:
+            # the historical admission decision is already
+            # durable: never re-resolve the audience for a
+            # historical emission
+            if admission.status == "not-required":
+                return 0
+            self._ensure_obligation_from_admission(admission)
+            return self._queue_observation(
+                event_id=admission.event_id,
+                event_type=admission.event_type,
+                occurred_at=admission.occurred_at,
+                developer_id=admission.developer_id,
+                resource_kind=admission.resource_kind,
+                resource_id=admission.resource_id,
+                resource_version=admission.resource_version,
+                correlation=admission.correlation,
+                data=admission.data_dict(),
+                endpoints=tuple(admission.endpoints),
+            )
+        # first admission of this emission: resolve the audience
+        # once and freeze it
+        developer_id, endpoints = self._resolve_observation_audience(
+            emission
+        )
+        self._append_observation_admission(
+            key="",
+            emission=emission,
+            developer_id=developer_id,
+            endpoints=endpoints,
+        )
+        if not endpoints:
+            # no audience: the admission is terminal not-required
             return 0
-        developer_id, endpoints = audience
         resolved = emission.resolved(developer_id, endpoints)
         self._append_observation_obligation(resolved)
         return self._queue_observation(
