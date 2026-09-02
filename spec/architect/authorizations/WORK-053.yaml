@@ -1,13 +1,15 @@
-# ADCOS Work Item authorization record — WORK-053 active implementation.
-# Issued by DEC-0060 after W052 acceptance.
+# ADCOS Work Item authorization record — WORK-053 provenance.
+# Superseded by DEC-0062 after Architect acceptance of PR #124.
 work_item: WORK-053
-status: active
-authorized: true
+status: superseded
+authorized: false
+superseded_by: "WORK-044-CORE-001"
+supersession_decision: DEC-0062
 type: implementation
 authorization_id: "WORK-053-CORE-001"
 authorization_decision: DEC-0060
 baseline_sha: cdd2a9c011f573ba11a7bb39e7dc178e7f150b54
-review_basis: "DEC-0060 accepts W052 on PR #121 exact reviewed head a0d3b895; W053 issue #85 is the next hard-dependent commercial Work Item. The persistent execution snapshot has been reconciled to the current mainline by LEDGER-RECON-008 without changing the reviewed W052 facts."
+review_basis: "DEC-0060 activation; exact W053 scope and provenance retained here."
 dependencies:
   - WORK-052
 authority_inputs:
@@ -41,10 +43,11 @@ out_of_scope:
   - "wire-schema or frozen architecture changes"
   - "modifying spec/architect/ from the implementation PR"
 acceptance_gate:
-  status: "Architect review required after implementation"
+  status: "accepted-merged by DEC-0062"
   required_evidence:
-    - "dedicated deterministic EconomicAllocation battery covering all ten invariants and required verification areas"
-    - "exact reviewed delivery SHA, evidence manifest, scope audit, CI/provenance, replay and hash-seed determinism"
-    - "negative payment/reservation/provider-callback cases and exact conservation/rounding proofs"
+    - "exact reviewed delivery SHA 43591667b226b6239e8197816514b679af1e6154"
+    - "merge SHA c9a1f8589cddbbeb21756bdd8f72ed57ea515173"
+    - "44/44 EconomicAllocation deterministic battery; two-run and hash-seed determinism proofs; digest-neutral review correction"
+    - "SOFTWARE-class evidence and authority-boundary review; inherited mainline spec-check defects remain separately disclosed"
 handoff: docs/WORK-053-handoff.md
 handoff_required: true

@@ -4,8 +4,8 @@ package: "persistent-architect"
 last_updated: "2026-09-02"
 repository:
   canonical: "github.com/pectoraux/ADCOS"
-  main_sha: cdd2a9c011f573ba11a7bb39e7dc178e7f150b54
-  main_sha_semantics: "Post-W052 mainline reconciled with DEC-0060 W052 acceptance and W053 activation."
+  main_sha: c9a1f8589cddbbeb21756bdd8f72ed57ea515173
+  main_sha_semantics: "Post-W053 mainline reconciled with DEC-0062 W053 acceptance and W044 activation."
 versions:
   architecture_version_reference: "1.0"
   architecture_version_authority: "spec/architecture.md ## Status (single declaration site)"
@@ -13,12 +13,12 @@ versions:
   protocol_version_authority: "spec/schemas/protocol.json"
 execution:
   mode: "implementing"
-  active_work_item: WORK-053
-  active_authorization: "WORK-053-CORE-001"
-  halted_reason: "W053 is active-authorized; Z.ai may implement from this mainline."
+  active_work_item: WORK-044
+  active_authorization: "WORK-044-CORE-001"
+  halted_reason: "W044 is active-authorized; Z.ai may implement from this mainline."
   next_required_decisions:
-    - "Review the WORK-053 delivery PR on its exact head against the ten invariants and acceptance gate."
-    - "After W053 acceptance, evaluate the next eligible commercial Work Item from the canonical dependency graph."
+    - "Review the WORK-044 delivery PR on its exact head against the acceptance gate (provider-neutral payment adapter boundary; no provider semantics in canonical truth)."
+    - "After W044 acceptance, evaluate the next eligible commercial Work Item (W045) from the canonical dependency graph."
 in_review:
   - work_item: WORK-040
     branch: "work-040-pilot-deployment"
@@ -51,8 +51,8 @@ accepted_acrs:
 open_architectural_questions: []
 accepted_work_items:
   first: "WORK-001"
-  last: "WORK-052"
-  note: "WORK-001..WORK-039, WORK-041, WORK-042, WORK-051, and WORK-052 are accepted-merged; WORK-040 remains in-review and unaccepted."
+  last: "WORK-053"
+  note: "WORK-001..WORK-039, WORK-041, WORK-042, WORK-051, WORK-052, and WORK-053 are accepted-merged; WORK-040 remains in-review and unaccepted."
 planned_work_items:
   - work_item: WORK-040
     issue: 48
@@ -62,9 +62,9 @@ planned_work_items:
     prerequisite: "independent physical-evidence continuation"
   - work_item: WORK-044
     issue: 88
-    status: "ready-candidate"
+    status: "active authorized"
     contract: "issue #88"
-    authorization: "none"
+    authorization: "WORK-044-CORE-001"
     prerequisite: "W051 and W053 accepted-merged"
   - work_item: WORK-045
     issue: 89
@@ -116,10 +116,10 @@ planned_work_items:
     prerequisite: "accepted by DEC-0059 and DEC-0060"
   - work_item: WORK-053
     issue: 85
-    status: "active authorized"
+    status: "accepted-merged"
     contract: "issue #85"
-    authorization: "WORK-053-CORE-001"
-    prerequisite: "W052 accepted-merged"
+    authorization: "WORK-053-CORE-001 (superseded by DEC-0062)"
+    prerequisite: "accepted by DEC-0060 and DEC-0062"
 open_prs:
   - pr: 48
     subject: "WORK-040 Pilot deployment"

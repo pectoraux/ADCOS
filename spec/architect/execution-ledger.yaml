@@ -50,9 +50,26 @@
 # The snapshot baseline is reconciled 96db8aa -> fe6e6e3 (the post-PR-
 # #110/#111/#115 mainline). No W001..W041 entry is rewritten; no frozen
 # semantic changes.
+#
+# DEC-0062 (2026-09-02, LEDGER-RECON-009): WORK-053 is accepted
+# (PR #124, reviewed head 43591667, merge c9a1f858; 44/44 battery after
+# a digest-neutral review correction; no successful CI run exists on the
+# exact head — the recorded runs stop at the inherited mainline condition)
+# and its ledger entry transitions registered -> accepted-merged with
+# acceptance_decision DEC-0062. The stale WORK-051 entry is reconciled to
+# its already-decided accepted-merged state (DEC-0059; PR #117, reviewed
+# head 94743283, merge 1dd354ac, CI 33482893687 SUCCESS) because the
+# activated WORK-044's hard dependency WORK-051 must be satisfied in this
+# ledger. The single active execution slot transfers from
+# WORK-053-CORE-001 (superseded, DEC-0062, scope and provenance preserved)
+# to WORK-044-CORE-001 (DEC-0062; baseline c9a1f858; dependencies
+# WORK-051/WORK-053) whose registered ledger entry records the active
+# authorization in its note and describes NO delivery. The snapshot
+# baseline is reconciled cdd2a9c0 -> c9a1f858. No other work-item entry
+# is rewritten; no frozen semantic changes.
 
 schema_version: 1
-main_sha: cdd2a9c011f573ba11a7bb39e7dc178e7f150b54
+main_sha: c9a1f8589cddbbeb21756bdd8f72ed57ea515173
 last_updated: "2026-09-02"
 work_items:
   - work_item: WORK-001
@@ -818,7 +835,7 @@ work_items:
     handoff: null
     handoff_required: false
     lifecycle: registered
-    note: "registered-only entry added by ACR-011: WORK-044 is formally registered in the frozen registry (Phase 10, canonical commercial phase) with NO delivery yet. Definition source: tracking issue #88 and the canonical commercial dependency model (docs/roadmap/commercial-dependency-model.md, LEDGER-RECON-005; ACR-009 accepted by DEC-0050). Dependencies (hard, declared in spec/work-items.md): WORK-051, WORK-053. Authorization: none — registration is representation only, never authorization (review-protocol §3.1, ARCH-03/ARCH-08); the item stays a ready-candidate until its own repository-local authorization issues. WORK-043 is retired and its slot stays vacant."
+    note: "registered-only entry added by ACR-011: WORK-044 is formally registered in the frozen registry (Phase 10, canonical commercial phase). Definition source: tracking issue #88 and the canonical commercial dependency model (docs/roadmap/commercial-dependency-model.md, LEDGER-RECON-005; ACR-009 accepted by DEC-0050). Dependencies (hard, declared in spec/work-items.md): WORK-051, WORK-053 — both now accepted-merged (the DEC-0059-reconciled W051 entry; DEC-0062 for W053). Authorization: active — WORK-044-CORE-001 issued by DEC-0062 with baseline c9a1f858 (the post-PR-#124 mainline) as the single active implementation slot, recorded in execution-state.yaml and spec/architect/authorizations/WORK-044.yaml; registration remains representation of the frozen registry only, and this entry describes NO implementation delivery for WORK-044 (every delivery field stays null until a real delivery exists). WORK-043 is retired and its slot stays vacant."
   - work_item: WORK-045
     title: "Connectivity Eligibility, Provider Trust & Jurisdiction Policy"
     phase: 10
@@ -930,21 +947,21 @@ work_items:
   - work_item: WORK-051
     title: "CommercialCore: connectivity intent, offers, reservation, lease, and transaction lifecycle"
     phase: 10
-    branch: null
-    baseline_sha: null
-    pr: null
-    pr_head: null
-    reviewed_sha: null
-    merge_sha: null
-    merged_at: null
-    ci_run: null
-    review_rounds: null
-    acceptance_decision: null
+    branch: "work-051-commercial-core"
+    baseline_sha: 9f0ebfc7ecaac6cc12c1ccb27b60c9ea7e69dce8
+    pr: 117
+    pr_head: 94743283ba99c9f757db7024b7ddf22362e76caa
+    reviewed_sha: 94743283ba99c9f757db7024b7ddf22362e76caa
+    merge_sha: 1dd354ac4c9db7482837c777a67df102f5212cc1
+    merged_at: 2026-09-01T12:22:26Z
+    ci_run: 33482893687
+    review_rounds: 1
+    acceptance_decision: DEC-0059
     correction_decisions: []
-    handoff: null
-    handoff_required: false
-    lifecycle: registered
-    note: "registered-only entry added by ACR-011: WORK-051 is formally registered in the frozen registry (Phase 10, canonical commercial phase) with NO delivery yet. Canonical identity: issue #83, CommercialCore, ACR-009 / DEC-0050. It owns the canonical commercial state lifecycle ConnectivityIntent, OfferSelected, ReservationHeld, SessionAuthorized, PathActive, DeliveryStarted, UsageAccruing, DeliveryCompleted, BillableFinal, SettlementPending, Settled (with compensating states/events), referencing — never owning — logical session, NetworkPath, and delivery evidence identities. Dependencies: none (chain head; ACR-009 acceptance is its architectural precondition, not a Work Item dependency). Authorization: none — ACR-011 does NOT activate WORK-051; it stays a ready-candidate until its own repository-local authorization issues."
+    handoff: docs/WORK-051-handoff.md
+    handoff_required: true
+    lifecycle: accepted-merged
+    note: "delivery accepted by DEC-0059 on the exact reviewed head 94743283 (PR #117, single atomic commit, branch cut from 9f0ebfc; authoritative CI run 33482893687 SUCCESS; 35-case deterministic commercial battery; SOFTWARE-only evidence, docs/WORK-051-evidence.md). PR #117 merged at 1dd354ac; W040 physical obligations remain independent and open. The DEC-0059 transition left this entry in its registered-only stale form; it is reconciled to the already-decided accepted-merged facts by LEDGER-RECON-009 because the activated WORK-044's hard dependency WORK-051 must be satisfied in this ledger — every field is taken from DEC-0059, PR #117, and repository history, with no invented fact. This entry is the durable fact that makes WORK-044's hard dependency WORK-051 satisfied."
   - work_item: WORK-052
     title: "UsageLedger: delivered-usage metering, billable finality, and append-only reconciliation"
     phase: 10
@@ -966,21 +983,21 @@ work_items:
   - work_item: WORK-053
     title: "EconomicAllocation: developer/provider/ADCOS revenue-share policy and external payment boundary"
     phase: 10
-    branch: null
-    baseline_sha: null
-    pr: null
-    pr_head: null
-    reviewed_sha: null
-    merge_sha: null
-    merged_at: null
+    branch: "work-053-economic-allocation"
+    baseline_sha: 9e77861586b19303a4e46558ebed172c82399595
+    pr: 124
+    pr_head: 43591667b226b6239e8197816514b679af1e6154
+    reviewed_sha: 43591667b226b6239e8197816514b679af1e6154
+    merge_sha: c9a1f8589cddbbeb21756bdd8f72ed57ea515173
+    merged_at: 2026-09-02T03:10:08Z
     ci_run: null
-    review_rounds: null
-    acceptance_decision: null
+    review_rounds: 2
+    acceptance_decision: DEC-0062
     correction_decisions: []
-    handoff: null
-    handoff_required: false
-    lifecycle: registered
-    note: "registered-only entry added by ACR-011: WORK-053 is formally registered in the frozen registry (Phase 10, canonical commercial phase) with NO delivery yet. Definition source: tracking issue #85 and the canonical commercial dependency model. Dependencies (hard): WORK-052 (billable-final usage facts consumed). Authorization: none — registration is representation only, never authorization; the item stays a ready-candidate until its own repository-local authorization issues."
+    handoff: docs/WORK-053-handoff.md
+    handoff_required: true
+    lifecycle: accepted-merged
+    note: "delivery accepted by DEC-0062 on the exact reviewed head 43591667 after the review-correction cycle: round 1 (REQUEST CORRECTIONS at 43f8ad1) returned two blocking defects — resolved W052 billable-final facts were not proven fully populated, and allocation projections were shallowly mutable through the public API; both were corrected failing-tests-first on PR #124 and verified in round 2 (resolved BILLABLE_FINAL facts fully populated with fail-closed fact-incomplete admission; deeply immutable projections and durable idempotency ledgers; digest-neutral correction with the golden digest stream byte-identical across the correction; 44/44 deterministic battery). PR #124 merged at c9a1f858; no successful CI run exists on the exact head or the merge commit (the recorded specification-consistency runs stop at the already-known inherited spec/architect condition, so the W053 battery step is skipped there — acceptance relies on the exact reviewed head, the 44/44 battery, and the determinism/digest-neutrality proofs); W040 physical obligations remain independent and open. The acceptance transition supersedes WORK-053-CORE-001 and activates WORK-044-CORE-001 as the sole active implementation authorization; this ledger entry is the durable fact that makes WORK-044's hard dependency WORK-053 satisfied."
 
 reconciliations:
   - reconciliation_id: LEDGER-RECON-001
@@ -1043,3 +1060,11 @@ reconciliations:
     to_main_sha: cdd2a9c011f573ba11a7bb39e7dc178e7f150b54
     reason: "W052 acceptance -> W053 activation reconciliation: main advanced through the accepted W052 delivery (PR #121, merged dad68cc5) and the subsequent commercial-execution charter alignment (DEC-0061). DEC-0060 durably records acceptance of W052 and activation of WORK-053-CORE-001; this reconciliation moves the execution-ledger snapshot from the prior W042/W051 transition baseline to the current mainline and records the real W052 delivery in the authoritative ledger."
     history: "No prior work-item history is rewritten: WORK-001..WORK-041, WORK-040's independent physical obligations, and the registered-only W044..W051/W053 entries remain otherwise unchanged. WORK-052 is the sole transitioned delivery entry, from registered to accepted-merged, with its exact reviewed head, merge SHA, and DEC-0060 acceptance. The active W053 authorization and execution-state transition remain governed by DEC-0060; this reconciliation only makes the ledger's historical delivery fact and snapshot baseline consistent with that already-persisted governance transition."
+
+  - reconciliation_id: LEDGER-RECON-009
+    recorded_by: DEC-0062
+    recorded_at: 2026-09-02T03:45:00Z
+    from_main_sha: cdd2a9c011f573ba11a7bb39e7dc178e7f150b54
+    to_main_sha: c9a1f8589cddbbeb21756bdd8f72ed57ea515173
+    reason: "post-PR-#124 mainline reconciliation and atomic governance transition: main advanced to c9a1f858 (PR #124 merged the WORK-053 implementation at exact reviewed head 43591667; review round 1 returned two blocking defects that were corrected failing-tests-first, and round 2 accepted the corrected head) while the persistent state still referenced the LEDGER-RECON-008 snapshot baseline cdd2a9c0. This reconciliation moves the snapshot baseline to c9a1f858 in lockstep with execution-state.yaml; records the WORK-053 acceptance (DEC-0062: reviewed_sha 43591667, merge_sha c9a1f858, merged_at 2026-09-02T03:10:08Z, decision ACCEPTED, ci_run null — no successful run exists on the exact head) with its execution-ledger entry transitioned registered -> accepted-merged; reconciles the stale WORK-051 entry to its already-decided accepted-merged state (DEC-0059: reviewed_sha 94743283, merge_sha 1dd354ac, merged_at 2026-09-01T12:22:26Z, ci_run 33482893687) because the activated WORK-044's hard dependency WORK-051 must be satisfied in this ledger; supersedes the WORK-053-CORE-001 authorization (status superseded, authorized false, scope/criteria/provenance preserved); and atomically records the W044 authorization activation — WORK-044-CORE-001 (DEC-0062; provider-neutral payment adapter boundary per issue #88 and the frozen registry; hard dependencies WORK-051/WORK-053, both satisfied) as the single active authorization with baseline c9a1f858 — together with the execution-state synchronization, so ARCH-03/ARCH-05 hold. The WORK-044 registered-only ledger entry records the active authorization in its note and describes NO implementation delivery for WORK-044."
+    history: "No work-item history is rewritten: every entry other than the two reconciled delivery facts (WORK-051, WORK-053) and the WORK-044 note is byte-identical; the WORK-040 entry (in-review, acceptance_decision null, EVID-007/EVID-008 OPEN and W040-owned) is unchanged; the registered-only entries for WORK-045..WORK-050 are unchanged. The WORK-051 reconciliation converts the stale registered entry to the already-decided accepted-merged facts of DEC-0059 — no W051 fact is invented (branch, PR, heads, merge, CI run, and review rounds are taken from DEC-0059, PR #117, and repository history; baseline_sha is the actual PR base 9f0ebfc) — and it closes the inherited DEC-0059/WORK-051 ledger staleness that spec_check ARCH-04 had been reporting on main. No frozen architecture document is modified and no registry file changes: spec/work-items.md, spec/dependency-graph.md, and tools/spec_check.py are byte-identical. No implementation code changes: allocation/, usage/, commercial/, platform/, networkpath/, tools/*_selftest.py, and all other implementation artifacts are byte-identical to the merged c9a1f858 mainline. The only spec/architect changes are the DEC-0062 decision record, the WORK-053.yaml supersession, the new WORK-044.yaml authorization, the WORK-051/WORK-053 ledger entry transitions, the WORK-044 note update, this LEDGER-RECON-009 record, the snapshot baseline movement, and the synchronized execution-state.yaml, current-state.md, and decisions README updates. The inherited ARCH-02 schema drift in pre-existing historical records (the execution-state open_acrs field, the DEC-0059 downstream_effect shape, the WORK-051.yaml flow collection) and the ARCH-06 open-obligation visibility condition remain out of scope and unchanged."

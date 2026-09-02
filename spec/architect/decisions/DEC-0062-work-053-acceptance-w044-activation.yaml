@@ -1,0 +1,46 @@
+# ADCOS Architect decision record.
+# schema: spec/architect/decision-record-template.md; verified by tools/spec_check.py (ARCH-04).
+# Atomic W053 acceptance -> W044 activation transition (lean lane, DEC-0061).
+decision_id: DEC-0062
+type: governance
+work_item: WORK-053
+acr: null
+pr: 124
+reviewed_sha: 43591667b226b6239e8197816514b679af1e6154
+decision: ACCEPTED
+status: ACCEPTED
+reviewer: "Architect (pectoraux)"
+timestamp: 2026-09-02T03:45:00Z
+findings:
+  - "WORK-053 exact reviewed head 43591667 satisfies the ten EconomicAllocation invariants after the review-correction cycle: the two blocking round-1 defects were corrected failing-tests-first on the same PR, and the corrected battery is 44/44."
+  - "Resolved BILLABLE_FINAL usage facts are now proven fully populated at admission: thin citations and incomplete index entries fail closed (fact-incomplete) instead of admitting zero-value or finality-less allocations."
+  - "Public allocation projections and the durable idempotency ledgers are deeply immutable: every observable state change requires a journal append, and the correction is digest-neutral (the golden digest stream is byte-identical across the correction)."
+  - "The exact reviewed head 43591667b226b6239e8197816514b679af1e6154 is the accepted W053 implementation; PR #124 merged at c9a1f8589cddbbeb21756bdd8f72ed57ea515173 with no implementation changes after acceptance."
+  - "No physical or W040 evidence is being accepted by this decision: the delivery is SOFTWARE-only and EVID-007/EVID-008 remain OPEN and W040-owned."
+  - "No successful CI run is available on the exact accepted head or the merge commit at this decision time: the recorded specification-consistency runs stop at the already-known inherited mainline condition (ARCH-02 schema drift in pre-existing historical records, the pre-reconciliation DEC-0059/WORK-051 ledger staleness, and ARCH-06 open-obligation visibility), so the W053 battery step is skipped in those runs. Acceptance relies on the exact Architect-reviewed head, the recorded 44/44 battery, determinism and digest-neutrality proofs, and provenance review."
+  - "WORK-044 is the deterministic next commercial Work Item in the accepted execution lane: its hard dependencies WORK-051 and WORK-053 are both accepted-merged, and its provider-neutral payment boundary follows the frozen registry definition (issue #88)."
+blockers: []
+required_corrections: []
+evidence:
+  merge_sha: c9a1f8589cddbbeb21756bdd8f72ed57ea515173
+  ci_run: null
+  artifacts:
+    - "docs/WORK-053-evidence.md"
+    - "docs/WORK-053-handoff.md"
+accepted_scope:
+  - "WORK-053 EconomicAllocation as delivered on exact reviewed head 43591667b226b6239e8197816514b679af1e6154 and merged as c9a1f8589cddbbeb21756bdd8f72ed57ea515173."
+  - "The allocation model, validation, journal, lifecycle, digest, evidence boundary, deeply immutable projection semantics, and the fail-closed resolved-fact population gate evidenced by the delivery record."
+  - "The SOFTWARE evidence classification only; no physical evidence is accepted or implied."
+rejected_scope:
+  - "Any modification to frozen architecture or protocol semantics."
+  - "Any acceptance or closure of W040 physical evidence obligations EVID-007/EVID-008."
+  - "Any W044 implementation, payment-provider code, or provider onboarding in this governance transition."
+  - "Any live-money custody, real provider onboarding, or regulated funds movement."
+downstream_effect:
+  - "WORK-053-CORE-001 is superseded; its authorization record remains durable provenance."
+  - "WORK-044-CORE-001 is created as the sole active implementation authorization with baseline c9a1f8589cddbbeb21756bdd8f72ed57ea515173 and hard dependencies WORK-051 and WORK-053."
+  - "The single active execution slot transfers from WORK-053 to WORK-044 in this governance transition."
+  - "The stale WORK-051 execution-ledger entry is reconciled to its already-decided accepted-merged state (DEC-0059) as the explicit downstream requirement of WORK-044's hard dependency WORK-051; no W051 fact is invented — every field is taken from DEC-0059, PR #117, and repository history."
+  - "W044 implementation remains SOFTWARE-only and must consume public CommercialCore/UsageLedger/EconomicAllocation facts without becoming a usage, delivery-evidence, session/path/routing, or regulated-funds custody authority."
+  - "W040 remains independent, in-review, and unaccepted; its physical evidence obligations remain OPEN and W040-owned."
+resolved_by: null
