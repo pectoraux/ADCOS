@@ -10,7 +10,7 @@ Durable Architect decision records live here as `DEC-NNNN-<short-slug>.yaml`. ID
 
 All prior decisions remain authoritative historical records. New decisions are appended; prior decisions are never rewritten.
 
-The acceptance records are DEC-0001..DEC-0039 for WORK-001..WORK-039, plus DEC-0054 for WORK-041, DEC-0057 for WORK-042, DEC-0059 for WORK-051, DEC-0060 for WORK-052, and DEC-0062 for WORK-053. Governance, correction, and architecture decisions DEC-0040..DEC-0053 and DEC-0055/DEC-0056/DEC-0058/DEC-0061 remain in their original files.
+The acceptance records are DEC-0001..DEC-0039 for WORK-001..WORK-039, plus DEC-0054 for WORK-041, DEC-0057 for WORK-042, DEC-0059 for WORK-051, DEC-0060 for WORK-052, DEC-0062 for WORK-053, and DEC-0064 for WORK-044. Governance, correction, and architecture decisions DEC-0040..DEC-0053 and DEC-0055/DEC-0056/DEC-0058/DEC-0061 remain in their original files.
 
 | ID | Type | Work Item | Verdict | Standing | Subject |
 |---|---|---|---|---|---|
@@ -24,6 +24,7 @@ The acceptance records are DEC-0001..DEC-0039 for WORK-001..WORK-039, plus DEC-0
 | DEC-0061 | governance | null | ACCEPTED | ACCEPTED | Continuous commercial execution lane; lean successor transitions |
 | DEC-0062 | governance | WORK-053 | ACCEPTED | ACCEPTED | W053 EconomicAllocation acceptance → W044 activation |
 | DEC-0063 | governance | WORK-044 | ACCEPTED | ACCEPTED | W044 baseline reconciliation to actual current main |
+| DEC-0064 | governance | WORK-044 | ACCEPTED | ACCEPTED | W044 payment adapters acceptance → W045 activation |
 
 ## Rules
 

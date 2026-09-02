@@ -4,8 +4,8 @@ package: "persistent-architect"
 last_updated: "2026-09-02"
 repository:
   canonical: "github.com/pectoraux/ADCOS"
-  main_sha: 66f6c4f0ae2c5e4cd4498e6090f876acb1859e45
-  main_sha_semantics: "Actual post-PR-#125 mainline: DEC-0063 / LEDGER-RECON-010 reconcile the repository snapshot and the W044 implementation baseline to this exact current main (baseline-advancement-only) while W044 remains the active implementation track."
+  main_sha: 90864ac257a3d93d94852cfa3a74577903f508d3
+  main_sha_semantics: "Actual post-PR-#127 mainline: DEC-0064 / LEDGER-RECON-011 accept WORK-044 (reviewed head 6720d22, merge 90864ac2) and record WORK-045 as the active implementation track at this exact baseline (the PR #126 governance merge d7a7645 and the PR #127 implementation merge 90864ac2 both landed while the persistent state referenced 66f6c4f0)."
 versions:
   architecture_version_reference: "1.0"
   architecture_version_authority: "spec/architecture.md ## Status (single declaration site)"
@@ -13,12 +13,12 @@ versions:
   protocol_version_authority: "spec/schemas/protocol.json"
 execution:
   mode: "implementing"
-  active_work_item: WORK-044
-  active_authorization: "WORK-044-CORE-001"
-  halted_reason: "W044 is active-authorized; Z.ai may implement from this mainline."
+  active_work_item: WORK-045
+  active_authorization: "WORK-045-CORE-001"
+  halted_reason: "W045 is active-authorized; Z.ai may implement from this mainline."
   next_required_decisions:
-    - "Review the WORK-044 delivery PR on its exact head against the acceptance gate (provider-neutral payment adapter boundary; no provider semantics in canonical truth)."
-    - "After W044 acceptance, evaluate the next eligible commercial Work Item (W045) from the canonical dependency graph."
+    - "Review the WORK-045 delivery PR on its exact head against the acceptance gate (deterministic fail-closed eligibility policy layer; no connectivity/session/path mutation; payment and connectivity authorization independence)."
+    - "After W045 acceptance, evaluate the next eligible commercial Work Item (W046) from the canonical dependency graph."
 in_review:
   - work_item: WORK-040
     branch: "work-040-pilot-deployment"
@@ -51,8 +51,8 @@ accepted_acrs:
 open_architectural_questions: []
 accepted_work_items:
   first: "WORK-001"
-  last: "WORK-053"
-  note: "WORK-001..WORK-039, WORK-041, WORK-042, WORK-051, WORK-052, and WORK-053 are accepted-merged; WORK-040 remains in-review and unaccepted."
+  last: "WORK-044"
+  note: "WORK-001..WORK-039, WORK-041, WORK-042, WORK-051, WORK-052, WORK-053, and WORK-044 are accepted-merged; WORK-040 remains in-review and unaccepted."
 planned_work_items:
   - work_item: WORK-040
     issue: 48
@@ -62,16 +62,16 @@ planned_work_items:
     prerequisite: "independent physical-evidence continuation"
   - work_item: WORK-044
     issue: 88
-    status: "active authorized"
+    status: "accepted-merged"
     contract: "issue #88"
-    authorization: "WORK-044-CORE-001"
-    prerequisite: "W051 and W053 accepted-merged"
+    authorization: "WORK-044-CORE-001 (superseded by DEC-0064)"
+    prerequisite: "accepted by DEC-0064 on PR #127 (reviewed 6720d22, merge 90864ac2)"
   - work_item: WORK-045
     issue: 89
-    status: "ready-candidate"
+    status: "active authorized"
     contract: "issue #89"
-    authorization: "none"
-    prerequisite: "W051/W053/W044 accepted-merged"
+    authorization: "WORK-045-CORE-001"
+    prerequisite: "W051, W053, and W044 accepted-merged"
   - work_item: WORK-046
     issue: 90
     status: "ready-candidate"
