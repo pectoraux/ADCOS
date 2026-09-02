@@ -1,21 +1,22 @@
 # ADCOS Current State
 
-**Persistent Architect snapshot — W045 accepted; W046 active.**
+**Persistent Architect snapshot — W046 accepted; W047 active.**
 
 ## Repository
 
 - Repository: `github.com/pectoraux/ADCOS`
-- Baseline: `3db7500d7b79a8cd3e3a651e1461fbb320efd67e` (exact post-transition governance mainline: PR #130 merged the DEC-0065 / LEDGER-RECON-012 transition at this commit, and DEC-0066 / LEDGER-RECON-013 advance the recorded mainline and the WORK-046-CORE-001 baseline to it — the W046 implementation branch is cut from this exact mainline)
+- Baseline: `3db7500d7b79a8cd3e3a651e1461fbb320efd67e3` (persistent snapshot remains at the pre-DEC-0067 governance mainline until the acceptance governance transition itself merges; DEC-0067 / LEDGER-RECON-014 records W046 acceptance from the W046 implementation merge `f45be6dd0544a2fd6cbc910805def28bbe0c71eb`)
 - Architecture version: `1.0`
 - Protocol version: `1.0`
 
 ## Execution
 
-- Active Work Item: `WORK-046`
-- Active authorization: `WORK-046-CORE-001`
-- Authorization decision: `DEC-0065`
-- Implementation baseline for W046: `3db7500d7b79a8cd3e3a651e1461fbb320efd67e` (the exact post-transition governance mainline, reconciled by DEC-0066; original DEC-0065 issuance baseline `a789d9b403d0e2a6e05276bb3cdc2b7d092c6d88` remains recorded as provenance)
-- W045: `accepted-merged` by DEC-0065; PR #129 reviewed at the correction-round head `827234ec3a245a6b9f2f2de5d6525afb495684cc` (round 1 CHANGES REQUIRED at `9894d83` with two blockers corrected in-review: the atomic command/event journal and the single lifecycle event_count increment), merged `a789d9b403d0e2a6e05276bb3cdc2b7d092c6d88`; 46/46 deterministic battery in raw-branch, merge-ref, and clean-clone contexts with failure-injection and lifecycle-count proofs
+- Active Work Item: `WORK-047`
+- Active authorization: `WORK-047-CORE-001`
+- Authorization decision: `DEC-0067`
+- Implementation baseline for W047: `f45be6dd0544a2fd6cbc910805def28bbe0c71eb` (the exact W046 acceptance mainline recorded by DEC-0067; W046 implementation reviewed at `09960ea24315e5d0ccfd516d3bdca0802b62d8b7` and merged at `f45be6dd0544a2fd6cbc910805def28bbe0c71eb`)
+- W046: `accepted-merged` by DEC-0067; PR #132 reviewed at exact correction-round head `09960ea24315e5d0ccfd516d3bdca0802b62d8b7`, merged `f45be6dd0544a2fd6cbc910805def28bbe0c71eb`; 45/45 deterministic battery with durable observation-admission proofs; SOFTWARE-only; no physical evidence accepted
+- W045: `accepted-merged` by DEC-0065; PR #129 reviewed at the correction-round head `827234ec3a245a6b9f2f2de5d6525afb495684cc`, merged `a789d9b403d0e2a6e05276bb3cdc2b7d092c6d88`; 46/46 deterministic battery in raw-branch, merge-ref, and clean-clone contexts with failure-injection and lifecycle-count proofs
 - W044: `accepted-merged` by DEC-0064; PR #127 reviewed at `6720d220e390999e17707537ab587c1da3b09eb9`, merged `90864ac257a3d93d94852cfa3a74577903f508d3`; 44/44 deterministic battery in raw-branch and merge-ref contexts; the seven mandatory negative proofs pass
 - W053: `accepted-merged` by DEC-0062; PR #124 reviewed at `43591667b226b6239e8197816514b679af1e6154`, merged `c9a1f8589cddbbeb21756bdd8f72ed57ea515173`; 44/44 deterministic battery after a digest-neutral review correction
 - W052: `accepted-merged` by DEC-0060
@@ -24,20 +25,22 @@
 - W041: `accepted-merged` by DEC-0054
 - W040: `in-review`, NOT accepted; EVID-007/EVID-008 remain W040-owned and open
 
-## W046
+## W047
 
-Developer Connectivity API, SDK & Webhook Platform (issue #90) is the sole active authorized implementation track. It exposes the canonical server-side commercial model as stable APIs and SDK primitives for developers to publish connectivity offers, create connectivity intents, reserve/lease capacity, observe lifecycle, retrieve usage/billing records, configure economic policy, and receive signed webhooks: a versioned API schema with backward-compatibility guarantees, sandbox/production namespace isolation, idempotency keys for mutating requests, scoped application credentials, signed webhook delivery with replay/duplicate/out-of-order protection, developer-facing errors that preserve canonical ADCOS reason codes, and SDK contract tests that reproduce the canonical server semantics. It must never become authoritative for identity, logical sessions, NetworkPath, routing, transport, packet state, payment custody, or physical connectivity truth: API success never implies physical connectivity success, webhooks remain observations/projections of canonical ADCOS state (never a second source of truth), and SDK behavior must reproduce canonical server semantics rather than create business authority. No W046 implementation exists yet.
+Connectivity Marketplace Discovery, Proximity & Path Selection (issue #91) is now the sole active authorized implementation track. It exposes deterministic, eligibility-filtered, privacy-preserving marketplace discovery and candidate selection while delegating path validation/activation to the accepted NetworkPath machinery. It must not become a session, routing, transport, identity, payment-custody, or physical-connectivity authority. No W047 implementation exists yet.
 
 ## Commercial chain
 
 `WORK-051 CommercialCore → WORK-052 UsageLedger → WORK-053 EconomicAllocation → WORK-044 Payment Provider Adapters → WORK-045 Connectivity Eligibility → WORK-046 → WORK-047 → WORK-048 → WORK-049`
 
-W051, W052, W053, W044, and W045 are accepted-merged; W046 is the active implementation track; W047-W050 remain future candidates.
+W051, W052, W053, W044, W045, and W046 are accepted-merged; W047 is the active implementation track; W048-W050 remain future candidates.
 
 ## Governance
 
-DEC-0065 accepts W045 on PR #129 exact reviewed correction-round head `827234ec3a245a6b9f2f2de5d6525afb495684cc` (merge `a789d9b403d0e2a6e05276bb3cdc2b7d092c6d88`) and transfers the single active implementation slot to W046 (lean lane, DEC-0061), superseding `WORK-045-CORE-001` while preserving its durable provenance (DEC-0064 issuance at baseline `90864ac257a3d93d94852cfa3a74577903f508d3`). The transition merged as PR #130 at `3db7500d7b79a8cd3e3a651e1461fbb320efd67e` (2026-09-02T14:59:16Z, single-Architect merge authority, review-protocol §7). DEC-0066 / LEDGER-RECON-013 complete the cycle with the baseline-advancement-only reconciliation to the exact post-transition governance mainline. These transitions change governance state only; no frozen architecture semantic, protocol schema, or physical evidence obligation changes, and no physical evidence was accepted: W040 physical obligations remain open and W040-owned. Inherited repository verification conditions remain explicitly represented: the ARCH-02 schema drift in pre-existing historical records and the ARCH-06 open-obligation visibility condition are inherited mainline conditions, unchanged by these transitions, and the recorded CI runs stop there with zero new failures versus the clean main baseline.
+DEC-0067 accepts W046 on PR #132 exact reviewed correction-round head `09960ea24315e5d0ccfd516d3bdca0802b62d8b7` (merge `f45be6dd0544a2fd6cbc910805def28bbe0c71eb`) after five Architect review rounds, including durable webhook observation-admission state and historical-audience replay proofs. `WORK-046-CORE-001` is superseded while `WORK-047-CORE-001` becomes the sole active implementation authorization. No frozen architecture semantic, protocol schema, or physical evidence obligation changes; W040 physical obligations remain open and W040-owned. Inherited ARCH-02/ARCH-06 conditions remain separately disclosed and unchanged.
 
 ## Reconciliation
 
-LEDGER-RECON-013 (DEC-0066) is the baseline-advancement-only reconciliation completing the cycle: the snapshot baseline and the WORK-046-CORE-001 authorization baseline advance `a789d9b403d0e2a6e05276bb3cdc2b7d092c6d88` → `3db7500d7b79a8cd3e3a651e1461fbb320efd67e` (the PR #130 governance merge), so the W046 implementation branch is cut from the exact mainline that carries the transition. LEDGER-RECON-012 (DEC-0065) is the post-PR-#129 mainline reconciliation and the atomic W045 acceptance → W046 activation transition: the snapshot baseline advanced `90864ac257a3d93d94852cfa3a74577903f508d3` → `a789d9b403d0e2a6e05276bb3cdc2b7d092c6d88` (the PR #129 implementation merge landed while the persistent state referenced `90864ac257a3d93d94852cfa3a74577903f508d3`); the WORK-045 ledger entry transitions registered → accepted-merged with review_rounds 2 and the correction history preserved in the entry note. LEDGER-RECON-011 (DEC-0064) remains the record of the W044 acceptance/W045 activation transition; LEDGER-RECON-010 (DEC-0063) remains the baseline-advancement-only record for the W044 implementation baseline; LEDGER-RECON-009 remains the record of the W053 delivery, the WORK-051 dependency reconciliation, and the W053 acceptance/W044 activation transition; the W053 merge fact keeps its merge SHA `c9a1f8589cddbbeb21756bdd8f72ed57ea515173`. No prior work-item history is rewritten; W040 remains independent and unaccepted.
+LEDGER-RECON-014 (DEC-0067) records the W046 implementation acceptance → W047 activation transition from the W046 acceptance mainline `f45be6dd0544a2fd6cbc910805def28bbe0c71eb`. It supersedes the W046 authorization, marks W046 accepted-merged with its exact reviewed/merge facts, and creates the W047 active authorization at the exact accepted mainline. The persistent snapshot remains at the pre-transition governance baseline until this governance PR merges, following the established baseline-reconciliation convention. No prior work-item history is rewritten; W040 remains independent and unaccepted; W048-W050 remain unauthorized.
+
+LEDGER-RECON-013 (DEC-0066) remains the baseline-advancement-only reconciliation for the preceding W045 → W046 governance transition; LEDGER-RECON-012 (DEC-0065) remains the W045 acceptance/W046 activation transition; earlier reconciliations remain authoritative historical records.

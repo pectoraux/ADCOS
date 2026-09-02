@@ -5,7 +5,7 @@ last_updated: "2026-09-02"
 repository:
   canonical: "github.com/pectoraux/ADCOS"
   main_sha: 3db7500d7b79a8cd3e3a651e1461fbb320efd67e
-  main_sha_semantics: "Exact post-transition governance mainline: PR #130 merged the DEC-0065 / LEDGER-RECON-012 governance transition (accept WORK-045 at reviewed correction head 827234ec / merge a789d9b2; activate WORK-046) at 3db7500 (2026-09-02T14:59:16Z), and DEC-0066 / LEDGER-RECON-013 advance this recorded mainline and the WORK-046-CORE-001 authorization baseline to that exact governance commit, so the W046 implementation branch is cut from the mainline that carries the transition."
+  main_sha_semantics: "Persistent snapshot remains at the pre-DEC-0067 governance mainline 3db7500 until the acceptance governance transition itself merges; DEC-0067 / LEDGER-RECON-014 records W046 acceptance at reviewed head 09960ea24315e5d0ccfd516d3bdca0802b62d8b7, merged as f45be6dd0544a2fd6cbc910805def28bbe0c71eb, and activates WORK-047 from that implementation merge. A follow-up baseline reconciliation will advance the snapshot to the exact governance-transition merge mainline."
 versions:
   architecture_version_reference: "1.0"
   architecture_version_authority: "spec/architecture.md ## Status (single declaration site)"
@@ -13,12 +13,11 @@ versions:
   protocol_version_authority: "spec/schemas/protocol.json"
 execution:
   mode: "implementing"
-  active_work_item: WORK-046
-  active_authorization: "WORK-046-CORE-001"
-  halted_reason: "W046 is active-authorized at the reconciled post-transition governance baseline 3db7500; Z.ai may implement from this exact mainline."
+  active_work_item: WORK-047
+  active_authorization: "WORK-047-CORE-001"
+  halted_reason: "W047 is active-authorized from the exact W046 acceptance mainline f45be6d; Z.ai may implement only after this governance transition merges and the persistent snapshot is reconciled."
   next_required_decisions:
-    - "Review the WORK-046 delivery PR on its exact head against the acceptance gate (versioned API schema with backward-compatibility guarantees; sandbox/production isolation; idempotency keys under retries and duplicates; scoped application credentials; signed webhooks with replay/duplicate/out-of-order protection; webhook state observational only; API success never implying physical connectivity; canonical reason codes visible at the developer boundary; SDK semantics matching the canonical server model)."
-    - "After W046 acceptance, evaluate the next eligible commercial Work Item (W047) from the canonical dependency graph."
+    - "Review the next authorized Work Item delivery against its exact W047 acceptance gate and persist the Architect verdict before downstream work."
 in_review:
   - work_item: WORK-040
     branch: "work-040-pilot-deployment"
@@ -51,8 +50,8 @@ accepted_acrs:
 open_architectural_questions: []
 accepted_work_items:
   first: "WORK-001"
-  last: "WORK-045"
-  note: "WORK-001..WORK-039, WORK-041, WORK-042, WORK-051, WORK-052, WORK-053, WORK-044, and WORK-045 are accepted-merged; WORK-040 remains in-review and unaccepted."
+  last: "WORK-046"
+  note: "WORK-001..WORK-039, WORK-041, WORK-042, WORK-051, WORK-052, WORK-053, WORK-044, WORK-045, and WORK-046 are accepted-merged; WORK-040 remains in-review and unaccepted."
 planned_work_items:
   - work_item: WORK-040
     issue: 48
@@ -74,15 +73,15 @@ planned_work_items:
     prerequisite: "accepted by DEC-0065 on PR #129 (reviewed 827234ec, merge a789d9b2)"
   - work_item: WORK-046
     issue: 90
-    status: "active authorized"
+    status: "accepted-merged"
     contract: "issue #90"
-    authorization: "WORK-046-CORE-001"
-    prerequisite: "W051, W052, W053, W044, and W045 accepted-merged"
+    authorization: "WORK-046-CORE-001 (superseded by DEC-0067)"
+    prerequisite: "accepted by DEC-0067 on PR #132 (reviewed 09960ea, merge f45be6d)"
   - work_item: WORK-047
     issue: 91
-    status: "ready-candidate"
+    status: "active authorized"
     contract: "issue #91"
-    authorization: "none"
+    authorization: "WORK-047-CORE-001"
     prerequisite: "W051/W044/W045/W046 accepted-merged"
   - work_item: WORK-048
     issue: 92

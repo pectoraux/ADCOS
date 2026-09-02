@@ -1,0 +1,44 @@
+# ADCOS Architect decision record.
+# schema: spec/architect/decision-record-template.md; verified by tools/spec_check.py (ARCH-04).
+# Acceptance of W046 after the exact-head correction/review cycle; W047 activation is the downstream governance effect.
+decision_id: DEC-0067
+type: governance
+work_item: WORK-046
+acr: null
+pr: 132
+reviewed_sha: 09960ea24315e5d0ccfd516d3bdca0802b62d8b7
+decision: ACCEPTED
+status: ACCEPTED
+reviewer: "Architect (pectoraux)"
+timestamp: 2026-09-02T19:59:40Z
+findings:
+  - "WORK-046 exact reviewed head 09960ea24315e5d0ccfd516d3bdca0802b62d8b7 satisfies the WORK-046-CORE-001 acceptance criteria after five review rounds."
+  - "The correction sequence closed the webhook finality contamination defect, durable post-finality crash-loss defect, false-success obligation-write defect, and historical observation-admission ambiguity. The final implementation persists an explicit observation-admission decision with NOT_REQUIRED or REQUIRED status and a frozen admission-time audience, so idempotent replay never reinterprets current endpoint state."
+  - "The W046 deterministic developer API battery is 45/45 in branch, simulated merge-ref, and base-less clean-clone contexts, with PYTHONHASHSEED 0/1/7919/unset and repeated in-process determinism. The correction evidence records the required failure-injection negative controls and byte-level golden-stream comparison against the previous correction anchor."
+  - "The developer platform remains an interface boundary rather than a second authority: cross-authority calls remain sanctioned, webhook delivery remains observational, API success never implies physical connectivity success, canonical ADCOS reason codes remain visible, and the SDK reproduces the canonical server semantics."
+  - "The implementation remains SOFTWARE-only. No physical connectivity evidence is accepted or implied. W040 remains independent, in-review, unaccepted, with EVID-007/EVID-008 open and W040-owned."
+  - "The inherited mainline ARCH-02/ARCH-06 conditions remain unchanged and are not introduced by W046. No frozen architecture or protocol semantics were changed by the implementation delivery."
+blockers: []
+required_corrections: []
+evidence:
+  merge_sha: f45be6dd0544a2fd6cbc910805def28bbe0c71eb
+  ci_run: null
+  artifacts:
+    - "docs/WORK-046-evidence.md"
+accepted_scope:
+  - "WORK-046 Developer Connectivity API, SDK & Webhook Platform as delivered on exact reviewed head 09960ea24315e5d0ccfd516d3bdca0802b62d8b7 and merged as f45be6dd0544a2fd6cbc910805def28bbe0c71eb."
+  - "The versioned developer API, sandbox/production isolation, scoped application credentials, idempotency, signed webhook observations, durable observation-admission state, recovery semantics, canonical reason-code preservation, and SDK/server contract parity within WORK-046-CORE-001."
+  - "The SOFTWARE evidence classification only; no physical or production connectivity evidence is accepted."
+rejected_scope:
+  - "Any modification to frozen architecture or protocol semantics."
+  - "Any acceptance or closure of W040 physical evidence obligations EVID-007/EVID-008."
+  - "Any implementation of W047 or later Work Items beyond the activation authorization recorded below."
+  - "Any payment custody, physical connectivity truth, identity/session/NetworkPath/routing/transport authority, or second developer-platform business authority."
+downstream_effect:
+  - "WORK-046-CORE-001 is superseded; its authorization record remains durable provenance."
+  - "WORK-046 transitions to accepted-merged with reviewed_sha 09960ea24315e5d0ccfd516d3bdca0802b62d8b7, merge_sha f45be6dd0544a2fd6cbc910805def28bbe0c71eb, and five review rounds preserved in the execution ledger."
+  - "WORK-047-CORE-001 is created as the sole active implementation authorization with baseline f45be6dd0544a2fd6cbc910805def28bbe0c71eb."
+  - "The single active execution slot transfers from WORK-046 to WORK-047."
+  - "WORK-047 remains implementation-empty and must be implemented only from the repository-local authorization created by this governance transition."
+  - "W040 remains independent and unaccepted; W048-W050 remain unauthorized ready-candidates."
+resolved_by: null
