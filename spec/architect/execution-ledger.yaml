@@ -937,7 +937,7 @@ work_items:
     title: "Connectivity Marketplace Discovery, Proximity & Path Selection"
     phase: 10
     branch: "work-047-marketplace-discovery"
-    baseline_sha: f45be6dd0544a2fd6cbc910805def28bbe0c71eb
+    baseline_sha: 825f48f814926223665c1761beaba6cbdd2c2640
     pr: null
     pr_head: null
     reviewed_sha: null
