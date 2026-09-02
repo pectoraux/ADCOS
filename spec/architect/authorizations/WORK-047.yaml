@@ -6,9 +6,9 @@ authorized: true
 type: implementation
 authorization_id: "WORK-047-CORE-001"
 authorization_decision: DEC-0067
-baseline_sha: e3b2c48441725b42a22f1bd82a73fae10d25c5f2
+baseline_sha: 825f48f814926223665c1761beaba6cbdd2c2640
 baseline_reconciliation_decision: DEC-0068
-review_basis: "DEC-0067 accepts WORK-046 on PR #132 exact reviewed head 09960ea24315e5d0ccfd516d3bdca0802b62d8b7, merged at f45be6dd0544a2fd6cbc910805def28bbe0c71eb. DEC-0068 reconciles the W047 authorization baseline to the exact post-DEC-0067 governance mainline e3b2c48441725b42a22f1bd82a73fae10d25c5f2. W047 issue #91 is the next canonical commercial Work Item; its hard dependencies WORK-051, WORK-044, WORK-045, and WORK-046 are accepted-merged."
+review_basis: "DEC-0067 accepts WORK-046 on PR #132 exact reviewed head 09960ea24315e5d0ccfd516d3bdca0802b62d8b7, merged at f45be6dd0544a2fd6cbc910805def28bbe0c71eb. DEC-0068 / LEDGER-RECON-015 reconciles the W047 authorization baseline to the exact post-DEC-0067 governance mainline 825f48f814926223665c1761beaba6cbdd2c2640. W047 issue #91 is the next canonical commercial Work Item; its hard dependencies WORK-051, WORK-044, WORK-045, and WORK-046 are accepted-merged."
 dependencies:
   - WORK-051
   - WORK-044
