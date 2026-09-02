@@ -1,0 +1,46 @@
+# ADCOS Architect decision record.
+# schema: spec/architect/decision-record-template.md; verified by tools/spec_check.py (ARCH-04).
+# Atomic W045 acceptance -> W046 activation transition (lean lane, DEC-0061).
+decision_id: DEC-0065
+type: governance
+work_item: WORK-045
+acr: null
+pr: 129
+reviewed_sha: 827234ec3a245a6b9f2f2de5d6525afb495684cc
+decision: ACCEPTED
+status: ACCEPTED
+reviewer: "Architect (pectoraux)"
+timestamp: 2026-09-02T13:52:55Z
+findings:
+  - "WORK-045 exact reviewed head 827234ec3a245a6b9f2f2de5d6525afb495684cc satisfies the WORK-045-CORE-001 acceptance criteria: the deterministic eligibility battery is 46/46 in the raw-branch context, the Architect-simulated CI merge-ref context, and base-less clean clones, with two-run and PYTHONHASHSEED determinism and the correction-round golden digest stream 6c54627097a093fb032c29b8103b3b03bfc204b14a31973045fea35e85111192."
+  - "The delivery completed one correction cycle: review round 1 (issuecomment 5510023240, 2026-09-02T13:07:39Z) returned two blocking defects on head 9894d83 — (1) command/event persistence was not atomic, leaving an orphaned command as a permanent duplicate after a crash between the two writes; (2) one conferment event incremented provider event_count twice. The correction round (issuecomment 5510517141) advanced the head to 827234ec with the journal refactored to the accepted W044 atomic single-record shape (one durable record = one admitted command + its event + the action-owned identity digests; the command ledger entry is born with its real event id; journal construction is recovery; legacy stranded records fail closed) and with_conferment as the single owner of the conferment increment (register 1 -> conferment 2 -> renewal 3 -> suspension 4, replay-identical, mutation-verified)."
+  - "The round-2 Architect re-review (review 5090543215, 2026-09-02T13:52:55Z) verified both defects corrected at the exact head 827234ec, including the new failure-injection evidence covering the old command/event boundary, post-write restart/retry, and legacy stranded-record rejection, and rendered the verdict ACCEPTED for WORK-045 implementation acceptance on the exact head only."
+  - "The W045 boundary holds as authorized: eligibility is a deterministic, versioned, fail-closed policy layer (provider trust lifecycle, jurisdiction capability/requirement registries, offer-level checks, device/platform signals, risk/compliance decision records with provenance and expiry, suspension/reinstatement); expired/revoked eligibility fails closed; payment authorization and connectivity authorization remain independent in both directions; the KYC surface is reference-only with the regulated provider; eligibility never silently mutates connectivity/session/path state; command/event persistence is structurally atomic and recovery-safe; deterministic replay/recovery holds."
+  - "The delivery is scope-confined and provenance-clean: 19 files, +11246/-0, exactly the authorized WORK-045-CORE-001 scope list (the eligibility/ package with 16 modules and 61 frozen exports, tools/eligibility_selftest.py with 46 deterministic cases, docs/WORK-045-evidence.md, and one additive CI step) with zero spec/ files; the implementation branch is cut from the exact authorized baseline 90864ac257a3d93d94852cfa3a74577903f508d3 while main carries the DEC-0064 governance merge 4540dea (the W044-established branch-point offset, governance-only and Architect-reviewed)."
+  - "No successful CI run is available on the exact accepted head or the merge commit at this decision time: the specification-consistency runs 33637532465 (pull_request on 827234ec) and 33638489559 (push on the merge commit) stop at the already-known inherited mainline condition (ARCH-02 schema drift in pre-existing historical records, ARCH-06 open-obligation visibility); the correction evidence establishes that the failure set is byte-identical to the clean main baseline with zero new failures. This is an inherited repository verification condition, not a W045 implementation defect. Acceptance relies on the exact Architect-reviewed head, the Architect-executed 46/46 battery runs, the determinism and negative-proof evidence, and the round-2 re-review."
+  - "No physical or W040 evidence is being accepted by this decision: the delivery is SOFTWARE-only and EVID-007/EVID-008 remain OPEN and W040-owned."
+  - "WORK-046 is the deterministic next commercial Work Item in the accepted execution lane: its hard dependencies WORK-051, WORK-052, WORK-053, WORK-044, and WORK-045 are all accepted-merged after this decision, and its developer-connectivity API/SDK/webhook platform follows the frozen registry definition (issue #90; spec/work-items.md WORK-046)."
+blockers: []
+required_corrections: []
+evidence:
+  merge_sha: a789d9b403d0e2a6e05276bb3cdc2b7d092c6d88
+  ci_run: null
+  artifacts:
+    - "docs/WORK-045-evidence.md"
+accepted_scope:
+  - "WORK-045 Connectivity Eligibility, Provider Trust & Jurisdiction Policy as delivered on exact reviewed head 827234ec3a245a6b9f2f2de5d6525afb495684cc and merged as a789d9b403d0e2a6e05276bb3cdc2b7d092c6d88."
+  - "The deterministic eligibility policy layer: provider trust records and the five-state lifecycle, jurisdiction capability/requirement registries, offer-level eligibility checks, device/platform eligibility signals, provider capability declarations, risk/compliance decision records with explicit provenance and expiry, suspension/reinstatement controls, versioned deterministic policy evaluation, the atomic command/event journal with deterministic replay/recovery, and the corrected single lifecycle event_count increment."
+  - "The SOFTWARE evidence classification only; no physical evidence is accepted or implied."
+rejected_scope:
+  - "Any modification to frozen architecture or protocol semantics."
+  - "Any acceptance or closure of W040 physical evidence obligations EVID-007/EVID-008."
+  - "Any W046 implementation, developer API/SDK/webhook code, or marketplace surface in this governance transition."
+  - "Any jurisdiction-specific legal advice engine, KYC/KYB custody claim, payment settlement/custody authority claim, or regulator authority claim."
+downstream_effect:
+  - "WORK-045-CORE-001 is superseded; its authorization record remains durable provenance."
+  - "WORK-046-CORE-001 is created as the sole active implementation authorization with issuance baseline a789d9b403d0e2a6e05276bb3cdc2b7d092c6d88 (the actual current main) and hard dependencies WORK-051, WORK-052, WORK-053, WORK-044, and WORK-045, all accepted-merged; per the DEC-0063-established baseline-reconciliation convention, the authorization baseline advances to the exact post-transition governance mainline by the follow-up baseline-advancement-only reconciliation decision before the W046 implementation branch is cut."
+  - "The single active execution slot transfers from WORK-045 to WORK-046 in this governance transition."
+  - "The WORK-045 execution-ledger entry transitions registered -> accepted-merged with acceptance_decision DEC-0065 (reviewed_sha 827234ec, merge_sha a789d9b, review_rounds 2 with the correction history preserved in the entry note); the WORK-046 registered entry records the active authorization in its note and describes NO delivery."
+  - "W046 implementation remains SOFTWARE-only and must expose the canonical server-side commercial model without becoming authoritative for identity, logical sessions, NetworkPath, routing, transport, packet state, payment custody, or physical connectivity truth: API success must never imply physical connectivity success, webhooks must remain observations/projections of canonical ADCOS state and never a second source of truth, and SDK behavior must reproduce canonical server semantics rather than create business authority."
+  - "W040 remains independent, in-review, and unaccepted; its physical evidence obligations remain OPEN and W040-owned."
+resolved_by: null
