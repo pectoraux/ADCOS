@@ -30,16 +30,16 @@ jobs:
           git fetch origin main
           if ! grep -q '^main_sha: fe6e6e35a49cb2113315d0ec1569f7e93a3cf200$' spec/architect/execution-ledger.yaml; then
             echo 'W052 ledger already reconciled; nothing to do.'
-            exit 0
-          fi
-          test "$(git rev-parse origin/main)" = "$EXPECTED_MAIN_SHA"
-          python3 - <<'PY'
+          else
+            test "$(git rev-parse origin/main)" = "$EXPECTED_MAIN_SHA"
+            python3 - <<'PY'
           from pathlib import Path
           import re
           p = Path('spec/architect/execution-ledger.yaml')
           s = p.read_text()
           old_main = 'fe6e6e35a49cb2113315d0ec1569f7e93a3cf200'
           new_main = 'cdd2a9c011f573ba11a7bb39e7dc178e7f150b54'
+          assert s.count(f'main_sha: {old_main}') == 1
           s = s.replace(f'main_sha: {old_main}', f'main_sha: {new_main}', 1)
           s = s.replace('last_updated: "2026-09-01"', 'last_updated: "2026-09-02"', 1)
           pat = re.compile(r'  - work_item: WORK-052\n.*?(?=  - work_item: WORK-053\n)', re.S)
@@ -78,211 +78,121 @@ jobs:
           s = s.replace(marker, recon + marker, 1)
           p.write_text(s)
           PY
-          git add spec/architect/execution-ledger.yaml
-          git commit -m "governance: reconcile W052 acceptance and W053 activation ledger"
-          git push origin HEAD
+            git add spec/architect/execution-ledger.yaml
+            git commit -m "governance: reconcile W052 acceptance and W053 activation ledger"
+            git push origin HEAD
+          fi
+          if git diff --quiet origin/main -- .github/workflows/spec-check.yml; then
+            exit 0
+          fi
           git checkout origin/main -- .github/workflows/spec-check.yml
+          git add .github/workflows/spec-check.yml
           git commit -m "chore: restore canonical spec-check workflow after reconciliation"
           git push origin HEAD
 
       - name: Run specification consistency checks
-        if: github.ref != 'refs/heads/governance/w052-w053-activation'
         run: python3 tools/spec_check.py
-
       - name: Run experience/learning registry integrity checks
-        if: github.ref != 'refs/heads/governance/w052-w053-activation'
         run: python3 tools/experience_check.py
-
       - name: Run experience/learning registry negative tests
-        if: github.ref != 'refs/heads/governance/w052-w053-activation'
         run: python3 tools/experience_selftest.py
-
       - name: Run specification checker negative tests
-        if: github.ref != 'refs/heads/governance/w052-w053-activation'
         run: python3 tools/spec_check_selftest.py
-
       - name: Run schema/registry consistency checks
-        if: github.ref != 'refs/heads/governance/w052-w053-activation'
         run: python3 tools/schema_check.py
-
       - name: Run schema/registry compatibility tests
-        if: github.ref != 'refs/heads/governance/w052-w053-activation'
         run: python3 tools/schema_selftest.py
-
       - name: Run envelope/serialization tests
-        if: github.ref != 'refs/heads/governance/w052-w053-activation'
         run: python3 tools/envelope_selftest.py
-
       - name: Run identity lifecycle/security tests
-        if: github.ref != 'refs/heads/governance/w052-w053-activation'
         run: python3 tools/identity_selftest.py
-
       - name: Run capability statement/negotiation tests
-        if: github.ref != 'refs/heads/governance/w052-w053-activation'
         run: python3 tools/capability_selftest.py
-
       - name: Run peer discovery tests
-        if: github.ref != 'refs/heads/governance/w052-w053-activation'
         run: python3 tools/discovery_selftest.py
-
       - name: Run evidence-aware topology tests
-        if: github.ref != 'refs/heads/governance/w052-w053-activation'
         run: python3 tools/topology_selftest.py
-
       - name: Run resource model/measurement tests
-        if: github.ref != 'refs/heads/governance/w052-w053-activation'
         run: python3 tools/resource_selftest.py
-
       - name: Run intent/QoS normalization tests
-        if: github.ref != 'refs/heads/governance/w052-w053-activation'
         run: python3 tools/intent_selftest.py
-
       - name: Run policy engine tests
-        if: github.ref != 'refs/heads/governance/w052-w053-activation'
         run: python3 tools/policy_selftest.py
-
       - name: Run path computation/routing tests
-        if: github.ref != 'refs/heads/governance/w052-w053-activation'
         run: python3 tools/routing_selftest.py
-
       - name: Run session lifecycle tests
-        if: github.ref != 'refs/heads/governance/w052-w053-activation'
         run: python3 tools/session_selftest.py
-
       - name: Run multipath session semantics tests
-        if: github.ref != 'refs/heads/governance/w052-w053-activation'
         run: python3 tools/multipath_selftest.py
-
       - name: Run mobility and handover tests
-        if: github.ref != 'refs/heads/governance/w052-w053-activation'
         run: python3 tools/mobility_selftest.py
-
       - name: Run federation protocol tests
-        if: github.ref != 'refs/heads/governance/w052-w053-activation'
         run: python3 tools/federation_selftest.py
-
       - name: Run adapter SDK/runtime tests
-        if: github.ref != 'refs/heads/governance/w052-w053-activation'
         run: python3 tools/adapter_selftest.py
-
       - name: Run secure transport profile tests
-        if: github.ref != 'refs/heads/governance/w052-w053-activation'
         run: python3 tools/transport_selftest.py
-
       - name: Run IP integration boundary tests
-        if: github.ref != 'refs/heads/governance/w052-w053-activation'
         run: python3 tools/ipintegration_selftest.py
-
       - name: Run network path/platform boundary tests
-        if: github.ref != 'refs/heads/governance/w052-w053-activation'
         run: python3 tools/networkpath_selftest.py
-
       - name: Run 5G Core integration boundary tests
-        if: github.ref != 'refs/heads/governance/w052-w053-activation'
         run: python3 tools/fivegc_selftest.py
-
       - name: Run 5G RAN integration boundary tests
-        if: github.ref != 'refs/heads/governance/w052-w053-activation'
         run: python3 tools/ran_selftest.py
-
       - name: Run Wi-Fi/non-3GPP access adapter tests
-        if: github.ref != 'refs/heads/governance/w052-w053-activation'
         run: python3 tools/wifi_selftest.py
-
       - name: Run backhaul adapter family tests
-        if: github.ref != 'refs/heads/governance/w052-w053-activation'
         run: python3 tools/backhaul_selftest.py
-
       - name: Run mesh/relay adapter family tests
-        if: github.ref != 'refs/heads/governance/w052-w053-activation'
         run: python3 tools/mesh_selftest.py
-
       - name: Run distributed-core adapter family tests
-        if: github.ref != 'refs/heads/governance/w052-w053-activation'
         run: python3 tools/distcore_selftest.py
-
       - name: Run service registry/edge compute tests
-        if: github.ref != 'refs/heads/governance/w052-w053-activation'
         run: python3 tools/service_selftest.py
-
       - name: Run telemetry/observability tests
-        if: github.ref != 'refs/heads/governance/w052-w053-activation'
         run: python3 tools/telemetry_selftest.py
-
       - name: Run energy/resilience tests
-        if: github.ref != 'refs/heads/governance/w052-w053-activation'
         run: python3 tools/energy_selftest.py
-
       - name: Run cross-cutting security hardening tests
-        if: github.ref != 'refs/heads/governance/w052-w053-activation'
         run: python3 tools/security_selftest.py
-
       - name: Run upgrade/rollback/compatibility manager tests
-        if: github.ref != 'refs/heads/governance/w052-w053-activation'
         run: python3 tools/upgrade_selftest.py
-
       - name: Run management API tests
         if: github.event_name == 'pull_request'
         run: python3 tools/management_selftest.py
-
       - name: Run network/behavior simulator tests
         if: github.event_name == 'pull_request'
         run: python3 tools/simulator_selftest.py
-
       - name: Verify management/simulator CI wiring on main
         if: github.ref == 'refs/heads/main'
         run: |
           grep -Fq 'python3 tools/management_selftest.py' .github/workflows/spec-check.yml
           grep -Fq 'python3 tools/simulator_selftest.py' .github/workflows/spec-check.yml
-
       - name: Run protocol/adapter conformance suite tests
-        if: github.ref != 'refs/heads/governance/w052-w053-activation'
         run: python3 tools/conformance_selftest.py
-
       - name: Run Linux reference agent tests
-        if: github.ref != 'refs/heads/governance/w052-w053-activation'
         run: python3 tools/agent_selftest.py
-
       - name: Run Raspberry Pi edge gateway tests
-        if: github.ref != 'refs/heads/governance/w052-w053-activation'
         run: python3 tools/edge_selftest.py
-
       - name: Run Android mobile agent tests
-        if: github.ref != 'refs/heads/governance/w052-w053-activation'
         run: python3 tools/mobile_selftest.py
-
       - name: Run Network-in-a-Box appliance tests
-        if: github.ref != 'refs/heads/governance/w052-w053-activation'
         run: python3 tools/appliance_selftest.py
-
       - name: Run Open RAN/Core interop profile tests
-        if: github.ref != 'refs/heads/governance/w052-w053-activation'
         run: python3 tools/oran_selftest.py
-
       - name: Run Future IMT/6G adapter profile tests
-        if: github.ref != 'refs/heads/governance/w052-w053-activation'
         run: python3 tools/imt_selftest.py
-
       - name: Run federation-at-scale tests
-        if: github.ref != 'refs/heads/governance/w052-w053-activation'
         run: python3 tools/scale_selftest.py
-
       - name: Run first-class network path tests
-        if: github.ref != 'refs/heads/governance/w052-w053-activation'
         run: python3 tools/networkpath_selftest.py
-
       - name: Run event-driven platform integration tests
-        if: github.ref != 'refs/heads/governance/w052-w053-activation'
         run: python3 tools/platform_selftest.py
-
       - name: Run commercial core tests
-        if: github.ref != 'refs/heads/governance/w052-w053-activation'
         run: python3 tools/commercial_selftest.py
-
       - name: Run usage ledger tests
-        if: github.ref != 'refs/heads/governance/w052-w053-activation'
         run: python3 tools/usage_selftest.py
-
       - name: Verify execution-authorization provenance (PR context)
         if: github.event_name == 'pull_request'
         run: |
