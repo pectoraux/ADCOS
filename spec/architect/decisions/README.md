@@ -28,7 +28,7 @@ The acceptance records are DEC-0001..DEC-0039 for WORK-001..WORK-039, plus DEC-0
 | DEC-0065 | governance | WORK-045 | ACCEPTED | ACCEPTED | W045 eligibility acceptance → W046 activation |
 | DEC-0066 | governance | WORK-046 | ACCEPTED | ACCEPTED | W046 baseline reconciliation to the post-transition mainline |
 | DEC-0067 | acceptance | WORK-046 | ACCEPTED | ACCEPTED | W046 Developer API/SDK/Webhook Platform acceptance → W047 activation |
-| DEC-0068 | acceptance | WORK-047 | ACCEPTED | ACCEPTED | W046 acceptance baseline reconciliation / W047 active baseline |
+| DEC-0068 | governance | WORK-047 | ACCEPTED | ACCEPTED | W046 acceptance baseline reconciliation / W047 active baseline |
 
 ## Rules
 
