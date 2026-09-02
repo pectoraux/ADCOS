@@ -130,7 +130,7 @@
 # rewritten; no frozen semantic changes.
 
 schema_version: 1
-main_sha: 3db7500d7b79a8cd3e3a651e1461fbb320efd67e
+main_sha: 825f48f814926223665c1761beaba6cbdd2c2640
 last_updated: "2026-09-02"
 work_items:
   - work_item: WORK-001
@@ -1167,3 +1167,11 @@ reconciliations:
     to_main_sha: f45be6dd0544a2fd6cbc910805def28bbe0c71eb
     reason: "W046 implementation acceptance and W047 activation: PR #132 delivered the authorized WORK-046 implementation at exact reviewed head 09960ea24315e5d0ccfd516d3bdca0802b62d8b7 and merged at f45be6dd0544a2fd6cbc910805def28bbe0c71eb. DEC-0067 records acceptance of W046, supersedes WORK-046-CORE-001, and transfers the single active execution slot to WORK-047-CORE-001 from the W046 merge mainline."
     history: "No prior work-item history is rewritten. W040 remains independent, in-review, unaccepted, and its physical obligations remain open. W047 remains implementation-empty but becomes the sole active authorized commercial Work Item. W048-W050 remain unauthorized candidates. No frozen architecture/protocol semantics or evidence-class rules change."\n
+
+  - reconciliation_id: LEDGER-RECON-015
+    recorded_by: DEC-0068
+    recorded_at: 2026-09-02T20:14:05Z
+    from_main_sha: 3db7500d7b79a8cd3e3a651e1461fbb320efd67e3
+    to_main_sha: 825f48f814926223665c1761beaba6cbdd2c2640
+    reason: "Baseline-advancement-only reconciliation completing DEC-0067: PR #133 merged the W046 acceptance/W047 activation governance transition at e3b2c484; PR #134 merged the baseline reconciliation at 825f48f. The persistent Architect snapshot advances from 3db7500 to 825f48f, and WORK-047 authorization provenance is aligned to the same exact post-transition governance mainline by DEC-0068."
+    history: "No work-item history rewritten. W046 remains accepted-merged at reviewed head 09960ea with implementation merge f45be6d; W047 remains implementation-empty and the sole active authorization; W040 remains independent and unaccepted with its physical obligations open; W048-W050 remain unauthorized."

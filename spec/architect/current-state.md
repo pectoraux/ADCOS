@@ -5,7 +5,7 @@
 ## Repository
 
 - Repository: `github.com/pectoraux/ADCOS`
-- Baseline: `3db7500d7b79a8cd3e3a651e1461fbb320efd67e3` (persistent snapshot remains at the pre-DEC-0067 governance mainline until the acceptance governance transition itself merges; DEC-0067 / LEDGER-RECON-014 records W046 acceptance from the W046 implementation merge `f45be6dd0544a2fd6cbc910805def28bbe0c71eb`)
+- Baseline: `825f48f814926223665c1761beaba6cbdd2c2640` (exact post-DEC-0067 W046 acceptance/W047 activation governance mainline; reconciled by DEC-0068 / LEDGER-RECON-015)
 - Architecture version: `1.0`
 - Protocol version: `1.0`
 
@@ -41,6 +41,6 @@ DEC-0067 accepts W046 on PR #132 exact reviewed correction-round head `09960ea24
 
 ## Reconciliation
 
-LEDGER-RECON-014 (DEC-0067) records the W046 implementation acceptance → W047 activation transition from the W046 acceptance mainline `f45be6dd0544a2fd6cbc910805def28bbe0c71eb`. It supersedes the W046 authorization, marks W046 accepted-merged with its exact reviewed/merge facts, and creates the W047 active authorization at the exact accepted mainline. The persistent snapshot remains at the pre-transition governance baseline until this governance PR merges, following the established baseline-reconciliation convention. No prior work-item history is rewritten; W040 remains independent and unaccepted; W048-W050 remain unauthorized.
+LEDGER-RECON-014 (DEC-0067) records the W046 implementation acceptance → W047 activation transition from the W046 acceptance mainline `f45be6dd0544a2fd6cbc910805def28bbe0c71eb`. It supersedes the W046 authorization, marks W046 accepted-merged with its exact reviewed/merge facts, and creates the W047 active authorization at the exact accepted mainline. The persistent snapshot is reconciled to the exact post-transition governance mainline by DEC-0068 / LEDGER-RECON-015, following the established baseline-reconciliation convention. No prior work-item history is rewritten; W040 remains independent and unaccepted; W048-W050 remain unauthorized.
 
 LEDGER-RECON-013 (DEC-0066) remains the baseline-advancement-only reconciliation for the preceding W045 → W046 governance transition; LEDGER-RECON-012 (DEC-0065) remains the W045 acceptance/W046 activation transition; earlier reconciliations remain authoritative historical records.
