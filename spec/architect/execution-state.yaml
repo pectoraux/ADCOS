@@ -4,8 +4,8 @@ package: "persistent-architect"
 last_updated: "2026-09-02"
 repository:
   canonical: "github.com/pectoraux/ADCOS"
-  main_sha: 90864ac257a3d93d94852cfa3a74577903f508d3
-  main_sha_semantics: "Actual post-PR-#127 mainline: DEC-0064 / LEDGER-RECON-011 accept WORK-044 (reviewed head 6720d22, merge 90864ac2) and record WORK-045 as the active implementation track at this exact baseline (the PR #126 governance merge d7a7645 and the PR #127 implementation merge 90864ac2 both landed while the persistent state referenced 66f6c4f0)."
+  main_sha: a789d9b403d0e2a6e05276bb3cdc2b7d092c6d88
+  main_sha_semantics: "Actual post-PR-#129 mainline: DEC-0065 / LEDGER-RECON-012 accept WORK-045 (reviewed correction head 827234ec, merge a789d9b2) and record WORK-046 as the active implementation track at this exact issuance baseline. Per the DEC-0063-established convention, the follow-up baseline-advancement-only reconciliation moves this recorded mainline to the exact post-transition governance commit once the governance transition PR merges, so the W046 implementation branch is cut from the mainline that carries the transition."
 versions:
   architecture_version_reference: "1.0"
   architecture_version_authority: "spec/architecture.md ## Status (single declaration site)"
@@ -13,12 +13,13 @@ versions:
   protocol_version_authority: "spec/schemas/protocol.json"
 execution:
   mode: "implementing"
-  active_work_item: WORK-045
-  active_authorization: "WORK-045-CORE-001"
-  halted_reason: "W045 is active-authorized; Z.ai may implement from this mainline."
+  active_work_item: WORK-046
+  active_authorization: "WORK-046-CORE-001"
+  halted_reason: "W046 is active-authorized; Z.ai may implement from the post-transition governance mainline once the DEC-0066 baseline reconciliation records it."
   next_required_decisions:
-    - "Review the WORK-045 delivery PR on its exact head against the acceptance gate (deterministic fail-closed eligibility policy layer; no connectivity/session/path mutation; payment and connectivity authorization independence)."
-    - "After W045 acceptance, evaluate the next eligible commercial Work Item (W046) from the canonical dependency graph."
+    - "Review the WORK-046 delivery PR on its exact head against the acceptance gate (versioned API schema with backward-compatibility guarantees; sandbox/production isolation; idempotency keys under retries and duplicates; scoped application credentials; signed webhooks with replay/duplicate/out-of-order protection; webhook state observational only; API success never implying physical connectivity; canonical reason codes visible at the developer boundary; SDK semantics matching the canonical server model)."
+    - "Record the post-transition governance mainline as the WORK-046 implementation baseline via the follow-up baseline-advancement-only reconciliation decision before the implementation branch is cut."
+    - "After W046 acceptance, evaluate the next eligible commercial Work Item (W047) from the canonical dependency graph."
 in_review:
   - work_item: WORK-040
     branch: "work-040-pilot-deployment"
@@ -51,8 +52,8 @@ accepted_acrs:
 open_architectural_questions: []
 accepted_work_items:
   first: "WORK-001"
-  last: "WORK-044"
-  note: "WORK-001..WORK-039, WORK-041, WORK-042, WORK-051, WORK-052, WORK-053, and WORK-044 are accepted-merged; WORK-040 remains in-review and unaccepted."
+  last: "WORK-045"
+  note: "WORK-001..WORK-039, WORK-041, WORK-042, WORK-051, WORK-052, WORK-053, WORK-044, and WORK-045 are accepted-merged; WORK-040 remains in-review and unaccepted."
 planned_work_items:
   - work_item: WORK-040
     issue: 48
@@ -68,16 +69,16 @@ planned_work_items:
     prerequisite: "accepted by DEC-0064 on PR #127 (reviewed 6720d22, merge 90864ac2)"
   - work_item: WORK-045
     issue: 89
-    status: "active authorized"
+    status: "accepted-merged"
     contract: "issue #89"
-    authorization: "WORK-045-CORE-001"
-    prerequisite: "W051, W053, and W044 accepted-merged"
+    authorization: "WORK-045-CORE-001 (superseded by DEC-0065)"
+    prerequisite: "accepted by DEC-0065 on PR #129 (reviewed 827234ec, merge a789d9b2)"
   - work_item: WORK-046
     issue: 90
-    status: "ready-candidate"
+    status: "active authorized"
     contract: "issue #90"
-    authorization: "none"
-    prerequisite: "W051/W052/W053/W044/W045 accepted-merged"
+    authorization: "WORK-046-CORE-001"
+    prerequisite: "W051, W052, W053, W044, and W045 accepted-merged"
   - work_item: WORK-047
     issue: 91
     status: "ready-candidate"

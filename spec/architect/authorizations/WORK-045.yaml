@@ -1,13 +1,26 @@
-# ADCOS Work Item authorization record — WORK-045 active implementation.
-# Issued by DEC-0064 after W044 acceptance.
+# ADCOS Work Item authorization record — WORK-045 provenance.
+# Superseded by DEC-0065 after Architect acceptance of PR #129.
+#
+# Durable provenance: issued by DEC-0064 with the original issuance
+# baseline 90864ac2 (the post-PR-#127 mainline; no baseline
+# reconciliation was needed — the implementation branch was cut from the
+# exact recorded baseline). The accepted delivery is PR #129 exact
+# reviewed head 827234ec3a245a6b9f2f2de5d6525afb495684cc (the
+# correction-round head; round 1 returned two blockers at 9894d83 that
+# were corrected in-review) merged at
+# a789d9b403d0e2a6e05276bb3cdc2b7d092c6d88. The scope, dependencies,
+# acceptance criteria, and boundaries below are the original
+# authorization contract, preserved verbatim.
 work_item: WORK-045
-status: active
-authorized: true
+status: superseded
+authorized: false
+superseded_by: "WORK-046-CORE-001"
+supersession_decision: DEC-0065
 type: implementation
 authorization_id: "WORK-045-CORE-001"
 authorization_decision: DEC-0064
 baseline_sha: 90864ac257a3d93d94852cfa3a74577903f508d3
-review_basis: "DEC-0064 accepts W044 on PR #127 exact reviewed head 6720d22 (merged 90864ac2); W045 issue #89 is the deterministic next commercial Work Item in the accepted execution lane, with hard dependencies WORK-051, WORK-053, and WORK-044 all accepted-merged in the execution ledger. The persistent execution snapshot is reconciled to the post-merge mainline by LEDGER-RECON-011, so the W045 implementation baseline is the actual current main 90864ac2. The scope surface below follows the frozen registry definition (spec/work-items.md WORK-045), the operative issue #89 contract, and the repository's sibling package convention (commercial/, usage/, allocation/, payment/); no W045 implementation delivery exists."
+review_basis: "DEC-0064 activation; exact W045 scope and provenance retained here; accepted by DEC-0065 on PR #129 at the correction-round reviewed head 827234ec (round 1 CHANGES REQUIRED at 9894d83, two blockers corrected in-review) after the 46/46 deterministic battery, the failure-injection and lifecycle-count proofs, and the round-2 Architect re-review."
 dependencies:
   - WORK-051
   - WORK-053
@@ -41,10 +54,11 @@ out_of_scope:
   - "W040 physical evidence and its obligations"
   - "modifying spec/architect/ from the W045 implementation PR"
 acceptance_gate:
-  status: "Architect review required after implementation"
+  status: "accepted-merged by DEC-0065"
   required_evidence:
-    - "dedicated deterministic eligibility battery covering provider/offer/jurisdiction policy evaluation, versioned policy changes without historical rewrites, expired/revoked fail-closed, suspension/reinstatement, and the payment-vs-connectivity authorization independence negative tests"
-    - "negative proofs that eligibility never silently mutates connectivity/session/path state and that sensitive KYC material stays reference-only with the regulated provider"
-    - "exact reviewed delivery SHA, evidence manifest, scope audit, CI/provenance, replay and hash-seed determinism"
+    - "exact reviewed delivery SHA 827234ec3a245a6b9f2f2de5d6525afb495684cc"
+    - "merge SHA a789d9b403d0e2a6e05276bb3cdc2b7d092c6d88"
+    - "46/46 eligibility deterministic battery in raw-branch, merge-ref, and base-less clean-clone contexts; two-run and PYTHONHASHSEED determinism; correction-round golden digest stream 6c54627097a093fb032c29b8103b3b03bfc204b14a31973045fea35e85111192"
+    - "the W044 atomic single-record journal invariant with failure-injection recovery proofs (case 45) and the single lifecycle event_count increment with restart-replay count discipline (case 46); the payment-vs-connectivity authorization independence negative tests; ARCH-08 provenance at the merge ref; SOFTWARE-class evidence; inherited mainline spec-check defects remain separately disclosed"
 handoff: docs/roadmap/commercial-dependency-model.md
 handoff_required: false

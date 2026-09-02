@@ -1,0 +1,54 @@
+# ADCOS Work Item authorization record — WORK-046 active implementation.
+# Issued by DEC-0065 after W045 acceptance.
+work_item: WORK-046
+status: active
+authorized: true
+type: implementation
+authorization_id: "WORK-046-CORE-001"
+authorization_decision: DEC-0065
+baseline_sha: a789d9b403d0e2a6e05276bb3cdc2b7d092c6d88
+review_basis: "DEC-0065 accepts W045 on PR #129 exact reviewed head 827234ec (merged a789d9b); W046 issue #90 is the deterministic next commercial Work Item in the accepted execution lane, with hard dependencies WORK-051, WORK-052, WORK-053, WORK-044, and WORK-045 all accepted-merged in the execution ledger. The issuance baseline is the actual current main a789d9b (the post-PR-#129 mainline); per the DEC-0063-established baseline-reconciliation convention, the baseline advances to the exact post-transition governance mainline by the follow-up baseline-advancement-only reconciliation decision so the W046 implementation branch is cut from the mainline that carries this governance transition. The scope surface below follows the frozen registry definition (spec/work-items.md WORK-046), the operative issue #90 contract, and the repository's sibling package convention (commercial/, usage/, allocation/, payment/, eligibility/); no W046 implementation delivery exists."
+dependencies:
+  - WORK-051
+  - WORK-052
+  - WORK-053
+  - WORK-044
+  - WORK-045
+authority_inputs:
+  - "WORK-051 CommercialCore (accepted-merged by DEC-0059): canonical commercial state, connectivity intents, offers, reservations, leases, and transaction identities"
+  - "WORK-052 UsageLedger (accepted-merged by DEC-0060): billable-final usage facts and delivery correlation"
+  - "WORK-053 EconomicAllocation (accepted-merged by DEC-0062): finalized allocations, revenue-share policy, and settlement/reconciliation references"
+  - "WORK-044 Payment Provider Adapters (accepted-merged by DEC-0064): the provider-neutral payment/settlement boundary and payment-provider capability references"
+  - "WORK-045 Connectivity Eligibility (accepted-merged by DEC-0065): the deterministic eligibility/provider-trust/jurisdiction-policy boundary and eligibility decision references"
+authority_outputs:
+  - "the developer-facing connectivity API/SDK/webhook platform: a versioned API surface with backward-compatibility guarantees for publishing connectivity offers, creating connectivity intents, reserving/leasing capacity, observing lifecycle, retrieving usage/billing records, and configuring economic policy; scoped application credentials; idempotency keys for mutating requests; sandbox/production namespace isolation; deterministic resource identifiers with pagination/filtering; signed webhook delivery with replay/duplicate/out-of-order protection (observations of canonical ADCOS state, never a second source of truth); developer-facing errors that preserve canonical ADCOS reason codes; and SDK primitives whose semantics reproduce the canonical server-side commercial model exactly; never an identity authority, a logical-session authority, a NetworkPath/routing/transport/packet authority, a payment custody authority, or a physical connectivity truth authority — API success never implies physical connectivity success"
+scope:
+  - "developerapi/"
+  - "tools/developerapi_selftest.py"
+  - "docs/WORK-046-evidence.md"
+  - ".github/workflows/spec-check.yml"
+acceptance_criteria:
+  - "A versioned API schema with backward-compatibility tests generates or maintains the SDKs; sandbox and production namespaces remain isolated."
+  - "Mutating requests honor idempotency keys under retries and duplicates; scoped application credentials cannot mutate resources outside their declared capabilities."
+  - "Signed webhook delivery carries replay/duplicate/out-of-order protection; webhooks are observations of ADCOS state, not a second source of truth."
+  - "API success never implies physical connectivity success; developer-facing errors preserve canonical ADCOS reason codes."
+  - "SDK contract tests reproduce the same canonical server semantics with no hidden business authority diverging from the server-side commercial model."
+out_of_scope:
+  - "WORK-047 and later commercial Work Items (W047-W049; W050 advisory capability input)"
+  - "full marketplace UI implementation (WORK-047 owns discovery/marketplace surfaces)"
+  - "payment custody/settlement implementation and live provider onboarding (WORK-044 owns the payment boundary)"
+  - "direct mutation of identity, sessions, NetworkPath, routing, transport, or packet state through the API"
+  - "networking protocol changes and wire-schema or frozen architecture/protocol changes"
+  - "sandbox/test behavior represented as physical or production evidence"
+  - "W040 physical evidence and its obligations"
+  - "modifying spec/architect/ from the W046 implementation PR"
+acceptance_gate:
+  status: "Architect review required after implementation"
+  required_evidence:
+    - "deterministic schema/backward-compatibility battery over the versioned API surface, including sandbox/production isolation tests"
+    - "idempotency behavior under retries and duplicate requests; scope tests proving an application cannot mutate resources outside its declared capabilities"
+    - "signed webhook verification with replay/duplicate/out-of-order tests, with webhook state proven observational only"
+    - "negative proofs that API success never implies physical connectivity success, that canonical ADCOS reason codes remain visible at the developer boundary, and that SDK contract tests reproduce the same canonical server semantics"
+    - "exact reviewed delivery SHA, evidence manifest, scope audit, CI/provenance, replay and hash-seed determinism"
+handoff: docs/roadmap/commercial-dependency-model.md
+handoff_required: false
