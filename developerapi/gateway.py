@@ -12,7 +12,12 @@ W046 frozen contract's interface boundary):
          command surfaces ONLY) or the developerapi-owned
          resource projection
       -> append the atomic journal record (persist-then-ack)
-      -> emit webhook observations (queue + attempt)
+         -- the FINALITY POINT: the canonical mutation result
+         and its response are final from here
+      -> emit webhook observations (queue + attempt) STRICTLY
+         AFTER finality and fully contained: a webhook queue or
+         delivery failure may affect only webhook
+         observability/retry state, never the response
       -> the canonical response envelope
 
 Authority discipline (the frozen boundary -- battery-pinned
@@ -48,7 +53,15 @@ audit):
 - Webhook emission is OBSERVATION ONLY: events are built from
   public reads, queued before delivery, and delivered through
   the injectable transport seam; delivery state never feeds
-  back into any business state.
+  back into any business state.  The observation phase runs
+  strictly AFTER the mutation's finality point and is fully
+  contained: a webhook queue or delivery persistence failure
+  can never turn an admitted mutation into an API failure,
+  never alter the canonical mutation result, never cause a
+  duplicate canonical mutation, never invalidate idempotency,
+  and never act as a hidden transaction coordinator for the
+  commercial plane (battery case 42 failure-injects exactly
+  this).
 
 Durability (the idempotency contract): every mutation's
 request+response is ONE atomic journal record (the durable
@@ -417,6 +430,14 @@ class DeveloperApiService:
                 "DeveloperApiService.load for journal-first recovery",
             )
         self._index = ApiIndex()
+        # Post-finality webhook containment state (health data
+        # ONLY -- never business state): observations whose queue
+        # write failed are retained here for in-process recovery
+        # through the delivery pump; the contained failures are
+        # recorded as incidents.  Both are process-local: durable
+        # truth is the journal alone.
+        self._pending_emissions: List[Callable[[], int]] = []
+        self._observation_incidents: List[Dict[str, Any]] = []
 
     # -----------------------------------------------------------------
     # Journal-first recovery
@@ -631,10 +652,21 @@ class DeveloperApiService:
         """Attempt every due webhook delivery (deterministic
         order: delivery id ascending).
 
+        Pending observations retained by a contained post-finality
+        queue-write failure are retried FIRST (in-process
+        recovery): once the store is healthy again the observation
+        queues -- the queue dedupe (delivery identity) makes the
+        retry exactly-once -- and enters this same delivery pass.
+        A still-failing store keeps the observation pending and
+        records an incident; an observation failure never
+        surfaces as an API failure and never re-executes the
+        canonical mutation.
+
         Due = pending (never attempted) OR failed with a
         scheduled next attempt that has arrived AND schedule
         capacity remaining.  Delivered is terminal.  Returns the
         number of attempts performed."""
+        self._retry_pending_emissions()
         now = self._clock.now()
         performed = 0
         for delivery_id in sorted(self._index.deliveries):
@@ -651,6 +683,103 @@ class DeveloperApiService:
             self._attempt_delivery(delivery_id, now)
             performed += 1
         return performed
+
+    def webhook_observation_incidents(self) -> Tuple[Mapping[str, Any], ...]:
+        """The contained post-finality webhook observation
+        failures (health DATA only -- never business state, never
+        an API response, never the mutation result).
+
+        One incident per contained failure: the phase (queue
+        ``emission`` / pending ``emission-retry`` / the delivery
+        pass ``delivery``), the error class and message, the
+        boundary reason code when the failure is a boundary
+        error, and the instant.  Incidents are process-local
+        health data: they are NOT journal records, they never
+        survive a restart, and durable truth remains the journal
+        alone.  The platform operator reads them to diagnose
+        webhook-plane health; nothing in the commercial plane
+        reads them."""
+        return tuple(
+            dict(incident) for incident in self._observation_incidents
+        )
+
+    def _observe_after_finality(self, emission: Callable[[], int]) -> None:
+        """Run the webhook observation phase of one mutation,
+        strictly after the mutation's finality point, fully
+        contained.
+
+        Containment semantics (the frozen W046 invariant): a
+        webhook queue-write failure retains the observation in the
+        pending buffer for in-process recovery through the
+        delivery pump and records an incident; a delivery-pass
+        failure records an incident.  NOTHING raised here ever
+        reaches the caller: the mutation response was finalized
+        before this method is entered, and this method must never
+        raise.  The webhook system is an observer, never a
+        transaction coordinator for the commercial plane."""
+        try:
+            emission()
+        except Exception as error:
+            # the queue write failed (or the emission itself
+            # failed): retain the observation for recovery; the
+            # incident is webhook health data only
+            self._record_observation_incident("emission", error)
+            self._pending_emissions.append(emission)
+            return
+        try:
+            self.process_due_deliveries()
+        except Exception as error:
+            # the delivery pass failed after the observation
+            # queued: the queue record is durable and the pump
+            # will retry the delivery; the incident is health
+            # data only
+            self._record_observation_incident("delivery", error)
+
+    def _retry_pending_emissions(self) -> int:
+        """Retry the retained pending observations (contained:
+        never raises).
+
+        A still-failing store keeps the observation pending and
+        records an incident; a healthy store flushes it (the
+        queue dedupe by delivery identity makes this
+        exactly-once even after a partial multi-endpoint
+        emission).  Returns the number of observations flushed."""
+        if not self._pending_emissions:
+            return 0
+        still_pending: List[Callable[[], int]] = []
+        flushed = 0
+        for emission in self._pending_emissions:
+            try:
+                emission()
+                flushed += 1
+            except Exception as error:
+                self._record_observation_incident(
+                    "emission-retry", error
+                )
+                still_pending.append(emission)
+        self._pending_emissions = still_pending
+        return flushed
+
+    def _record_observation_incident(
+        self, phase: str, error: BaseException
+    ) -> None:
+        """Record one contained webhook observation failure as
+        health data (structured, deterministic, secret-free:
+        store/journal errors carry paths and record kinds only)."""
+        reason = ""
+        if isinstance(error, DeveloperApiError):
+            reason = error.reason
+        self._observation_incidents.append(
+            {
+                "kind": "webhook_observation_incident",
+                "phase": phase,
+                "error_class": type(error).__name__,
+                "error_message": str(error),
+                "reason_code": reason,
+                "instant": self._clock.now(),
+                "observational_only": True,
+            }
+        )
 
     # -----------------------------------------------------------------
     # The request path
@@ -1090,9 +1219,20 @@ class DeveloperApiService:
         self._journal.append(record)
         self._index.apply(record)
 
+        # FINALITY POINT: the canonical mutation is admitted, its
+        # idempotency record is durable, and the envelope above is
+        # THE response.  The webhook observation phase runs
+        # strictly after finality and is fully contained: a queue
+        # or delivery failure may affect only webhook
+        # observability/retry state.  It can NEVER turn an
+        # admitted mutation into an API failure, alter the
+        # canonical mutation result, cause a duplicate canonical
+        # mutation, invalidate idempotency, or act as a hidden
+        # transaction coordinator for the commercial plane (the
+        # W046 frozen observational-only invariant; battery case
+        # 42 failure-injects the exact sequence).
         if emission is not None:
-            emission()
-            self.process_due_deliveries()
+            self._observe_after_finality(emission)
         return envelope
 
     def _execute_mutation(

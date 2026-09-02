@@ -2,10 +2,10 @@
 
 **Authorization:** WORK-046-CORE-001 (active; DEC-0065; baseline advanced to the exact post-transition governance mainline `3db7500d7b79a8cd3e3a651e1461fbb320efd67e` by DEC-0066)
 **Baseline:** `3db7500d7b79a8cd3e3a651e1461fbb320efd67e` (the exact branch point of this delivery; per the W044-established delivery-cycle convention, the implementation branch is cut from the recorded baseline while `main` additionally carries the DEC-0066 baseline-reconciliation governance merge `a1fa795` — the branch-point offset is governance-only and is the honest delta the Architect reviews; CI evaluates the merge ref)
-**Review state:** DELIVERED FOR ARCHITECT REVIEW — **NOT claimed accepted**. The Architect's W046 review gate owns the disposition.
-**Repository surface:** `developerapi/` (12 modules, 83 frozen exports), `tools/developerapi_selftest.py` (41 deterministic cases), this manifest, and one additive CI step.
-**Battery result:** PASS 41/41 (branch context; base-less clean clones; hash-seed subprocesses 0/1/7919/unset).
-**Golden stream:** `sha256:46e15c9530f4f3e2845631d814e7098e8eae404d48f522bdc2d9c7a2bf1c1f5d` (journal digest; the full 12-key deterministic scenario stream is reproduced byte-identically across two fresh in-process runs and all four PYTHONHASHSEED contexts).
+**Review state:** CORRECTION ROUND DELIVERED (round 2) — **NOT claimed accepted**. The Architect's independent review of the first delivery (PR #132, head `917737b`) returned **CHANGES REQUIRED** with one P0 blocker: webhook queue/delivery persistence failures were not isolated from the mutation response (a post-finality webhook failure could surface as an API error for an already-admitted, already-durable mutation). This manifest records the correction (section 11); the disposition remains the Architect's.
+**Repository surface:** `developerapi/` (12 modules, 83 frozen exports), `tools/developerapi_selftest.py` (42 deterministic cases), this manifest, and one additive CI step.
+**Battery result:** PASS 42/42 (branch context; base-less clean clones; hash-seed subprocesses 0/1/7919/unset; the case-42 negative control against the pre-correction gateway fails exactly on the P0).
+**Golden stream:** `sha256:46e15c9530f4f3e2845631d814e7098e8eae404d48f522bdc2d9c7a2bf1c1f5d` (journal digest; UNCHANGED by the correction — the healthy path is byte-identical; the full 12-key deterministic scenario stream is reproduced byte-identically across two fresh in-process runs and all four PYTHONHASHSEED contexts).
 
 ## 0. Boundary statement (mandatory)
 
@@ -128,6 +128,27 @@ issuance key and never journaled (case 37).
   observational only — no code path turns a delivery outcome into commercial,
   usage, or allocation state (structural cases 28/29: the webhook machinery cannot
   even reach an authority mutation surface).
+- Post-finality isolation (case 42, the correction round's P0 fix): the webhook
+  observation phase runs STRICTLY AFTER the mutation's finality point (durable
+  idempotency record appended) and is fully contained in
+  `DeveloperApiService._observe_after_finality`: a webhook queue-write failure
+  retains the observation in the pending buffer for recovery and records a
+  process-local health incident; a delivery-pass failure records an incident;
+  NOTHING in the webhook phase can turn an admitted mutation into an API
+  failure, alter the canonical mutation result, cause a duplicate canonical
+  mutation, invalidate idempotency, or act as a hidden transaction coordinator
+  for the commercial plane. Case 42 failure-injects BOTH failure sites (the
+  queue write after a commercial `submit_intent`; the delivery attempt record
+  after a boundary-owned offer publish) and proves the exact required sequence:
+  admitted 200 → both records durable (boundary journal + canonical subsystem
+  journal, both surviving reload) → injected post-finality store failure → the
+  caller still receives the canonical success → the same-key retry replays it
+  byte-identically with zero journal growth and no core re-execution → the
+  failure stays observational (incidents never reach durable state) and
+  recoverable (the delivery pump flushes the pending observation exactly-once
+  once the store heals). The negative control (case 42 against the
+  pre-correction gateway) fails exactly on the P0: the response is an error
+  envelope with no data member.
 
 ### AC-4 "API success never implies physical connectivity success; developer-facing errors preserve canonical ADCOS reason codes."
 
@@ -180,9 +201,11 @@ issuance key and never journaled (case 37).
   policy) serialize the canonical subsystem projections with an envelope only — the
   member names, states, and reference families are the canonical ones; the crash-window
   reconstruction reads the canonical journal (public) rather than re-deriving truth.
-- **Webhook state is not business state** (cases 21, 29): delivery outcomes never
+- **Webhook state is not business state** (cases 21, 29, 42): delivery outcomes never
   mutate canonical state (byte-compared); the delivery fold feeds health reads and
-  retry scheduling only.
+  retry scheduling only; the webhook observation phase is isolated AFTER the
+  mutation finality point and contained, so even a webhook persistence failure
+  leaves the canonical mutation result and its response untouched (case 42).
 - **Rate limiting is not business state** (case 16): the limiter writes no journal
   record and mutates no authority.
 - **Usage truth is read-only** (case 26): no usage mutation route exists in the
@@ -211,6 +234,15 @@ request-and-response-per-mutation):
   mutation (the fold never saw the record; the retry over a healthy store admits
   cleanly); a raising transport is recorded as a failed attempt (code 0) without
   affecting the API response; a retry after the timeout backoff delivers.
+- **Post-finality webhook failure injection** (case 42, the correction round): a
+  store that fails ONLY in the post-finality webhook phase and heals afterwards
+  (`_FlakyApiStore`, a bounded failure window over the append-call index) proves
+  the corrected ordering — canonical business mutation → durable idempotency
+  record → canonical API response finalized (return) → contained webhook
+  observation/queue/delivery — for both an adapted commercial mutation and a
+  boundary-owned mutation, including the restart/reload leg (the idempotency
+  record and the recovered delivery state survive the reload; the incidents do
+  not, by design: health data is process-local, durable truth is the journal).
 - **Determinism** (cases 35, 36): the golden scenario stream (journal digest,
   mutation digests, credential/offer/endpoint/delivery counts, the transaction
   state) is byte-identical across two fresh in-process runs and across
@@ -220,7 +252,8 @@ request-and-response-per-mutation):
 
 | Context | Result |
 |---|---|
-| Branch context (this working tree) | `python3 tools/developerapi_selftest.py` → PASS 41/41 |
+| Branch context (this working tree) | `python3 tools/developerapi_selftest.py` → PASS 42/42 |
+| Case-42 negative control | against the pre-correction `gateway.py` the case fails exactly on the P0 (error envelope, no `data` member); against the corrected gateway it passes |
 | Hash-seed subprocesses | PYTHONHASHSEED=0/1/7919/unset → byte-identical golden stream (case 36) |
 | `python3 tools/spec_check.py` | 15/17 — the two failures are the INHERITED conditions (ARCH-02, ARCH-06), byte-identical to the clean baseline run; zero new failures introduced |
 | Frozen-family integrity | case 40: spec/architect, spec/work-items.md, tools/spec_check.py, and the unrelated families byte-identical to HEAD |
@@ -312,3 +345,104 @@ per-window exactly as the accepted families require (the sanctioned
   the execution state is not altered by this PR.
 - Credential and webhook secrets in this delivery are synthetic deterministic test
   values derived from injected battery keys — never live credentials.
+
+## 11. Correction round record (PR #132, CHANGES REQUIRED)
+
+**The finding (Architect's independent review, head `917737b`):** P0 — webhook
+failure could change the API mutation result. In the first delivery's
+`_handle_mutation`, the webhook emission and the delivery pass ran between the
+durable mutation append and the `return`:
+
+```text
+canonical mutation -> durable mutation record -> emit webhook queue records
+-> process webhook delivery -> return API success
+```
+
+`emission()` and `process_due_deliveries()` journal operations could raise
+`DeveloperApiError`, which propagated through `handle()`: a commercial mutation
+that had already succeeded AND already been durably journaled could surface to
+the developer as an API error. That violated the frozen W046 invariant that
+webhook delivery is observational only — the very invariant this manifest's
+first delivery claimed ("a delivery failure must not affect the API response").
+The claim was honest intent but the gateway did not fully enforce the
+separation. The verdict: HOLD PR #132, do not merge.
+
+**The corrected semantics (exactly as required):**
+
+```text
+canonical business mutation
+        ↓
+durable idempotency record
+        ↓
+canonical API response finalized
+        ↓
+webhook observation/queue/delivery   (contained, observational)
+```
+
+**The fix (`developerapi/gateway.py`, narrowly contained — no architecture
+change, no authorization-scope expansion):**
+
+- `_handle_mutation` now marks the FINALITY POINT explicitly: after
+  `self._journal.append(record)` + `self._index.apply(record)` the envelope is
+  THE response; the webhook phase runs strictly afterwards through
+  `_observe_after_finality(emission)` and can never change the returned result.
+- `_observe_after_finality` contains EVERY failure of the webhook phase: a
+  queue-write (emission) failure retains the observation in the pending buffer
+  for in-process recovery and records a health incident; a delivery-pass
+  failure records a health incident. It must never raise to the caller.
+- `process_due_deliveries` (the public delivery pump) retries the retained
+  pending observations FIRST: once the store heals, the observation queues
+  (the delivery-identity dedupe makes the retry exactly-once) and enters the
+  same delivery pass. A still-failing store keeps the observation pending and
+  records an incident — never an API failure, never a re-executed mutation.
+- `webhook_observation_incidents()` (platform-side, never an HTTP route):
+  the contained failures as structured health DATA — phase, error class,
+  message, boundary reason code, instant. Process-local by design; durable
+  truth is the journal alone.
+
+The fix satisfies every required never: an admitted mutation is never turned
+into an API failure; the canonical mutation result is never altered; no
+duplicate canonical mutation is caused; idempotency is never invalidated; the
+webhook system never becomes a hidden transaction coordinator for the
+commercial plane.
+
+**The proof (case 42, `tools/developerapi_selftest.py`):** the required
+failure-injection sequence, both failure sites:
+
+1. the mutation is admitted successfully (200 + the canonical resource) — a
+   commercial `submit_intent` for the queue-write site, a boundary-owned offer
+   publish for the delivery-attempt site;
+2. canonical mutation + idempotency record are durable — exactly one boundary
+   mutation record AND exactly one canonical subsystem journal record; both
+   survive `DeveloperApiService.load`;
+3. webhook persistence fails — `_FlakyApiStore(fail_from, fail_until)`, a
+   bounded failure window over the append-call index that begins strictly
+   AFTER the mutation record and heals afterwards (the injected failure
+   counter proves it fired: `store.failures == 1`);
+4. the caller still receives the canonical successful mutation response
+   (status 200, no error member);
+5. the same-key retry returns that same canonical response byte-identically
+   (replay header, zero journal growth, the core journal count still one);
+6. the webhook failure remains solely observational/recoverable — health
+   incidents only (never journal state; the reload proves the incidents do not
+   leak into durable truth while the idempotency record and the recovered
+   delivery state do survive), and the healed store + the delivery pump
+   recover the observation exactly-once and deliver it.
+
+**The negative control:** running case 42 against the pre-correction gateway
+fails exactly on the P0 — the first response is an error envelope with no
+`data` member (`KeyError: 'data'`), i.e. the post-finality webhook failure
+turned the admitted mutation into an API error. The corrected gateway passes
+the full battery 42/42 with the golden stream byte-identical to the recorded
+value (the healthy path is unchanged).
+
+**Scope discipline of the correction:** the delta is confined to
+`developerapi/gateway.py` (the finality containment + the recovery/health
+surfaces), `tools/developerapi_selftest.py` (case 42 + the `_FlakyApiStore`
+injectable + the header docstring), and this manifest — all inside the
+WORK-046-CORE-001 authorized set. No frozen surface changed: the package
+export list remains the 83 pinned exports (case 38); the frozen route table,
+schemas, reason vocabularies, backoff schedule, and signing construction are
+untouched; `spec/architect/` is untouched (case 40); the PR delta remains
+confined to the authorized paths (case 41); the CI step remains the single
+additive wiring.

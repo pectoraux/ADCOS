@@ -83,7 +83,13 @@ platform journal):
   command, duplicate webhook delivery, retry after timeout,
   restart after partial operation, unauthorized operation,
   invalid credential, invalid API version, invalid idempotency
-  request, invalid webhook signature, raising transport;
+  request, invalid webhook signature, raising transport, and
+  the post-finality webhook queue/delivery persistence failure
+  (a webhook failure AFTER the mutation is admitted never
+  changes the canonical mutation result: the caller receives
+  the canonical success, the idempotent retry replays it
+  byte-identically without re-executing the canonical mutation,
+  and the webhook failure stays observational and recoverable);
 - **delivery discipline**: frozen public API surface, frozen
   spec surfaces intact, PR delta confined to the authorized
   W046 scope (+ the sanctioned additive-only CI wiring).
@@ -657,6 +663,32 @@ class _FailingApiStore(MemoryApiStore):
             )
 
             raise _Err(_RC.STORE_FAILED, "injected store failure")
+        super().append_line(line)
+
+
+class _FlakyApiStore(MemoryApiStore):
+    """A store that fails appends whose 1-based call index falls
+    in the inclusive window [fail_from, fail_until) and recovers
+    afterwards (failure injection for the post-finality webhook
+    isolation proof: the mutation record persists, the webhook
+    phase fails, the store then heals)."""
+
+    def __init__(self, fail_from: int, fail_until: int) -> None:
+        super().__init__()
+        self._fail_from = fail_from
+        self._fail_until = fail_until
+        self._count = 0
+        self.failures = 0
+
+    def append_line(self, line: str) -> None:
+        self._count += 1
+        if self._fail_from <= self._count < self._fail_until:
+            self.failures += 1
+            raise DeveloperApiError(
+                DeveloperApiReasonCode.STORE_FAILED,
+                "injected post-finality store failure (call %d)"
+                % self._count,
+            )
         super().append_line(line)
 
 
@@ -3861,6 +3893,296 @@ def case_34_failure_injection(results: List[Result]) -> None:
         )
 
 
+def case_42_post_finality_webhook_isolation(results: List[Result]) -> None:
+    """Post-finality webhook isolation (the W046 frozen
+    observational-only invariant, failure-injected): a webhook
+    queue or delivery persistence failure AFTER the mutation is
+    admitted NEVER changes the API mutation result.
+
+    The exact required sequence, per phase:
+
+    1. the mutation is admitted successfully (200 + the canonical
+       resource);
+    2. the canonical mutation + the idempotency record are durable
+       (the boundary journal AND the canonical subsystem journal;
+       both survive a reload);
+    3. the webhook persistence fails (injected store failure in
+       the post-finality phase: the queue write in scenario A, the
+       delivery attempt record in scenario B);
+    4. the caller STILL receives the canonical successful mutation
+       response (no 500, no error body);
+    5. a retry with the same idempotency key returns that SAME
+       canonical response byte-identically (replay header; zero
+       journal growth; the canonical subsystem is NOT re-executed
+       -- no duplicate canonical mutation);
+    6. the webhook failure remains solely observational and
+       recoverable: it is recorded as webhook health data only
+       (incidents, process-local, never journal state), and once
+       the store heals the delivery pump recovers the observation
+       exactly-once (the queue dedupe) and delivers it."""
+    problems: List[str] = []
+
+    # -- scenario A: the commercial mutation (intent) with the
+    # webhook QUEUE write failing post-finality ------------------
+    # append calls: 1 credential, 2 endpoint mutation record,
+    # 3 intent boundary mutation record, 4 queue record (FAILS)
+    store = _FlakyApiStore(fail_from=4, fail_until=5)
+    service, core, *_ = _compose_service(store=store)
+    app = _full_app(service, "dev-iso", "iso")
+    endpoint_resp = service.handle(
+        _req(
+            "POST",
+            "/api/1.0/webhook-endpoints",
+            app,
+            body={
+                "url": "https://consumer-iso.test/hook",
+                "event_types": ["connectivity_intent.created"],
+            },
+            idempotency_key="iso-ep-1",
+        )
+    )
+    if endpoint_resp.status != 200:
+        problems.append("endpoint registration failed: %d" % endpoint_resp.status)
+    endpoint_id = endpoint_resp.body["data"]["id"]
+    consumer = _Consumer("unused")
+    service._transports[endpoint_id] = consumer
+
+    intent_body = {"intent": {"subscriber": "iso-window"}}
+    first = service.handle(
+        _req(
+            "POST",
+            "/api/1.0/intents",
+            app,
+            body=intent_body,
+            idempotency_key="iso-intent-1",
+        )
+    )
+    # (4) the caller receives the canonical successful response
+    if first.status != 200 or first.body.get("error") is not None:
+        problems.append(
+            "queue-write failure changed the mutation result: "
+            "status %s body %s"
+            % (
+                first.status,
+                first.body.get("error", {}).get("reason", "-"),
+            )
+        )
+    transaction_id = first.body["data"]["id"]
+    if not transaction_id or (
+        first.body["data"].get("state") != "CONNECTIVITY_INTENT"
+    ):
+        problems.append("canonical intent resource missing from response")
+    # (2) both records are durable
+    if "iso-intent-1" not in service.index().mutations:
+        problems.append("idempotency record not applied")
+    if len(core.journal_records()) != 1 or len(core.transactions()) != 1:
+        problems.append(
+            "canonical subsystem journal count %d/%d"
+            % (len(core.journal_records()), len(core.transactions()))
+        )
+    # (3) the injected failure really fired in the webhook phase
+    if store.failures != 1:
+        problems.append(
+            "injection did not fire post-finality (failures=%d)"
+            % store.failures
+        )
+    # the failure is observational: health data only, no delivery
+    incidents = service.webhook_observation_incidents()
+    if len(incidents) != 1 or incidents[0]["phase"] != "emission":
+        problems.append(
+            "queue-write failure not recorded as emission incident: %s"
+            % [dict(i)["phase"] for i in incidents]
+        )
+    elif incidents[0]["reason_code"] != "store-failed":
+        problems.append("incident reason %r" % incidents[0]["reason_code"])
+    if service.index().deliveries:
+        problems.append("phantom delivery after failed queue write")
+    # (5) the retry replays the SAME canonical response
+    journal_before = len(service.journal_records())
+    retry = service.handle(
+        _req(
+            "POST",
+            "/api/1.0/intents",
+            app,
+            body=intent_body,
+            idempotency_key="iso-intent-1",
+        )
+    )
+    if retry.status != 200 or (
+        retry.headers.get("X-ADCOS-Idempotent-Replay") != "true"
+    ):
+        problems.append("retry after webhook failure not a 200 replay")
+    if first.canonical_body_bytes() != retry.canonical_body_bytes():
+        problems.append("replay body differs from the canonical response")
+    if len(service.journal_records()) != journal_before:
+        problems.append("replay grew the journal")
+    if len(core.journal_records()) != 1:
+        problems.append("replay re-executed the canonical mutation")
+    # (6) recovery: the store healed; the pump flushes the pending
+    # observation (queue dedupe = exactly-once) and delivers it
+    service.process_due_deliveries()
+    deliveries = [
+        state
+        for state in service.index().deliveries.values()
+        if state.endpoint_id == endpoint_id
+    ]
+    if len(deliveries) != 1 or deliveries[0].last_status != "delivered":
+        problems.append(
+            "pending observation not recovered: %s"
+            % [s.last_status for s in deliveries]
+        )
+    if len(consumer.deliveries) != 1:
+        problems.append(
+            "recovered delivery count %d (expected exactly one)"
+            % len(consumer.deliveries)
+        )
+    if "iso-intent-1" not in service.index().mutations:
+        problems.append("idempotency invalidated by recovery")
+    if len(core.journal_records()) != 1:
+        problems.append("recovery re-executed the canonical mutation")
+    service.verify_integrity()
+    # incidents survive as health history but never as durable
+    # state: the reload sees the journal truth only
+    reloaded = DeveloperApiService.load(
+        environment="sandbox",
+        core=core,
+        usage=service._usage,
+        allocation=service._allocation,
+        store=store,
+        clock=service._clock,
+        issuance_key=b"w046-platform-issuance-key",
+    )
+    if "iso-intent-1" not in reloaded.index().mutations:
+        problems.append("idempotency did not survive the reload")
+    if len(reloaded.index().deliveries) != 1:
+        problems.append("delivery state did not survive the reload")
+    if reloaded.webhook_observation_incidents():
+        problems.append("incidents leaked into durable state")
+    post_reload = reloaded.handle(
+        _req(
+            "POST",
+            "/api/1.0/intents",
+            app,
+            body=intent_body,
+            idempotency_key="iso-intent-1",
+        )
+    )
+    if (
+        post_reload.status != 200
+        or post_reload.canonical_body_bytes() != first.canonical_body_bytes()
+        or post_reload.headers.get("X-ADCOS-Idempotent-Replay") != "true"
+    ):
+        problems.append("post-reload replay diverged")
+    if len(core.journal_records()) != 1:
+        problems.append("post-reload replay re-executed the mutation")
+
+    # -- scenario B: the boundary-owned mutation (offer) with the
+    # webhook DELIVERY attempt record failing post-finality ------
+    # append calls: 1 credential, 2 endpoint mutation record,
+    # 3 offer boundary mutation record, 4 queue record (OK),
+    # 5 delivery attempt record (FAILS), 6 the retry attempt (OK)
+    store_b = _FlakyApiStore(fail_from=5, fail_until=6)
+    service_b, *_ = _compose_service(store=store_b)
+    app_b = _full_app(service_b, "dev-iso-b", "iso-b")
+    endpoint_b = service_b.handle(
+        _req(
+            "POST",
+            "/api/1.0/webhook-endpoints",
+            app_b,
+            body={
+                "url": "https://consumer-iso-b.test/hook",
+                "event_types": ["offer.published"],
+            },
+            idempotency_key="iso-b-ep-1",
+        )
+    )
+    endpoint_b_id = endpoint_b.body["data"]["id"]
+    consumer_b = _Consumer("unused")
+    service_b._transports[endpoint_b_id] = consumer_b
+
+    offer_body = _offer_body("Isolation offer", amount=4242)
+    first_b = service_b.handle(
+        _req(
+            "POST",
+            "/api/1.0/offers",
+            app_b,
+            body=offer_body,
+            idempotency_key="iso-b-offer-1",
+        )
+    )
+    if first_b.status != 200 or first_b.body.get("error") is not None:
+        problems.append(
+            "attempt-record failure changed the mutation result: "
+            "status %s" % first_b.status
+        )
+    if "iso-b-offer-1" not in service_b.index().mutations:
+        problems.append("boundary idempotency record missing (B)")
+    if store_b.failures != 1:
+        problems.append(
+            "injection B did not fire post-finality (failures=%d)"
+            % store_b.failures
+        )
+    queued_b = [
+        state
+        for state in service_b.index().deliveries.values()
+        if state.endpoint_id == endpoint_b_id
+    ]
+    if len(queued_b) != 1 or queued_b[0].attempts != 0:
+        problems.append(
+            "queue record not durable after attempt failure: %s"
+            % [(s.last_status, s.attempts) for s in queued_b]
+        )
+    incidents_b = service_b.webhook_observation_incidents()
+    if len(incidents_b) != 1 or incidents_b[0]["phase"] != "delivery":
+        problems.append(
+            "attempt failure not recorded as delivery incident: %s"
+            % [dict(i)["phase"] for i in incidents_b]
+        )
+    journal_b = len(service_b.journal_records())
+    retry_b = service_b.handle(
+        _req(
+            "POST",
+            "/api/1.0/offers",
+            app_b,
+            body=offer_body,
+            idempotency_key="iso-b-offer-1",
+        )
+    )
+    if (
+        retry_b.status != 200
+        or retry_b.canonical_body_bytes() != first_b.canonical_body_bytes()
+        or retry_b.headers.get("X-ADCOS-Idempotent-Replay") != "true"
+    ):
+        problems.append("retry after attempt failure diverged (B)")
+    if len(service_b.journal_records()) != journal_b:
+        problems.append("replay grew the journal (B)")
+    # recovery: the pump retries the due delivery (at-least-once
+    # to the consumer; exactly one durable attempt record)
+    service_b.process_due_deliveries()
+    if queued_b[0].last_status != "delivered" or queued_b[0].attempts != 1:
+        problems.append(
+            "delivery not recovered (B): %s/%s"
+            % (queued_b[0].last_status, queued_b[0].attempts)
+        )
+    if not consumer_b.deliveries:
+        problems.append("consumer never received the event (B)")
+    service_b.verify_integrity()
+
+    if problems:
+        results.append(
+            fail("42 post-finality webhook isolation", "; ".join(problems))
+        )
+    else:
+        results.append(
+            ok(
+                "42 post-finality webhook isolation",
+                "queue-write and attempt-record failures after "
+                "finality: canonical 200 + byte-identical replay + "
+                "no duplicate mutation + observational recovery",
+            )
+        )
+
+
 def case_35_determinism_two_run(results: List[Result]) -> None:
     """Two fresh in-process runs of the golden scenario produce
     byte-identical digest streams."""
@@ -4238,6 +4560,7 @@ def main() -> int:
         case_39_py_compile,
         case_40_frozen_spec_intact,
         case_41_pr_delta_shape,
+        case_42_post_finality_webhook_isolation,
     ):
         case(results)
     failures = [result for result in results if not result[1]]
