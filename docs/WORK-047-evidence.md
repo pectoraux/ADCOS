@@ -20,9 +20,10 @@ PARTIAL, EVID-008 NOT-TESTABLE) remain open and W040-owned.
 A cohesive `marketplace/` package (the W047 surface defined by issue
 #91 and `docs/WORK-047-handoff.md`), plus its dedicated deterministic
 verification battery, evidence documentation, and additive CI wiring.
-The delivery now includes the CORRECTION ROUND for the Architect
+The delivery now includes the CORRECTION ROUNDS for the Architect
 review of head `fdd7691` (REQUEST CHANGES, PR #135 comment
-`5518682595` — §14):
+`5518682595` — §14) and the re-audit of head `ed6fae89`
+(REQUEST CHANGES, PR #135 comment `5518914690` — §15):
 
 ```text
 marketplace/                     (new package, 11 modules, 65 frozen exports)
@@ -88,8 +89,8 @@ All commands run from the implementation branch
 
 | Command | Result |
 | --- | --- |
-| `python3 tools/marketplace_selftest.py` | **PASS 44/44** |
-| `python3 tools/marketplace_selftest.py` (second run) | **PASS 44/44, byte-identical output** |
+| `python3 tools/marketplace_selftest.py` | **PASS 46/46** |
+| `python3 tools/marketplace_selftest.py` (second run) | **PASS 46/46, byte-identical output** |
 | `python3 tools/marketplace_selftest.py --determinism-stream` (twice) | **byte-identical golden scenario stream** |
 | `PYTHONHASHSEED=0 / 1 / 7919 / <unset>` subprocess golden scenario | **byte-identical across all four seeds** (case 19) |
 | `python3 tools/spec_check.py` | 11/17 blocking — the inherited ARCH-02/ARCH-06 conditions (unchanged, pre-existing on main) **plus ARCH-08** (see §10) |
@@ -122,9 +123,13 @@ reservation_tx=sha256:8ad7fbccd08d1de305d8528db8bb0e88663af30fd61806648bb3b47106
 ```
 
 (The discovery, journal, and proposal digests are UNCHANGED from the
-reviewed head `fdd7691` — the correction round adds no new digested
-inputs to those records; the stream gains exactly one key, the
-handoff-advanced proposal status.)
+first-round reviewed head `fdd7691` through BOTH correction rounds —
+the corrections add no new digested inputs to those records for the
+evidence-backed golden world; the stream gained exactly one key in
+round one, the handoff-advanced proposal status.  Every ranked
+golden-world candidate carries genuine coverage proximity evidence,
+so the round-two honest missing-evidence policy does not touch the
+golden digests; see §15.)
 
 ## 3. Frozen vocabularies (case 01-02)
 
@@ -180,12 +185,26 @@ handoff-advanced proposal status.)
   COARSENS; the equatorial meter basis overestimates east-west
   distance, keeping inclusion decisions fail-closed). Never an exact
   distance, never a reachability claim.
-- **Fail-closed proximity constraint** (cases 13 and 39): a candidate
-  is only within a distance limit when its ENTIRE bounded interval
-  is within the limit; with an EXPLICIT distance limit and absent
-  coverage evidence the candidate is EXCLUDED (absent evidence is
-  never an implicit within-limit claim), while without an explicit
-  limit the dimension is simply unconstrained by the buyer.
+- **Fail-closed proximity constraint** (cases 13, 39, and 45): a
+candidate is only within a distance limit when its ENTIRE bounded
+interval is within the limit; with an EXPLICIT distance limit and
+absent coverage evidence the candidate is EXCLUDED (absent evidence
+is never an implicit within-limit claim); with an EXPLICIT distance
+limit and NO query location the constraint is likewise never
+silently disabled — every candidate is excluded with the frozen
+`constraint-distance` reason (an UNANCHORED explicit constraint is
+not a satisfied constraint), while without an explicit limit the
+dimension is simply unconstrained by the buyer.
+- **Honest missing-proximity scoring** (case 46): a candidate
+  WITHOUT proximity evidence earns exactly ZERO proximity credit
+  (the component is 0, never the normalized maximum), is recorded
+  as an ABSENT bound (`null` — absence is never encoded as a
+  distance of 0, which fabricated the best possible proximity from
+  absence), and tie-breaks strictly AFTER every candidate with a
+  bounded distance.  Evidence-backed candidates normalize
+  set-relatively over the evidence-backed values ONLY, so absence
+  can never masquerade as the nearest candidate; in an all-unknown
+  set the dimension differentiates nothing.
 
 ## 5. Stale telemetry / evidence discipline (cases 07-09)
 
@@ -237,10 +256,11 @@ handoff-advanced proposal status.)
 
 ## 7. Deterministic ranking / selection (cases 13-22)
 
-- **Filters before ranking** (cases 13, 39): user constraints
+- **Filters before ranking** (cases 13, 39, 45): user constraints
   (currency/price/latency/throughput/sharing-mode/access-type/
-  metering) and the fail-closed distance bound (including the
-  fail-closed absent-coverage case) exclude with frozen reasons;
+  metering) and the fail-closed distance bound (the fail-closed
+  absent-coverage case AND the fail-closed unanchored-limit case)
+  exclude with frozen reasons;
   **paid offers additionally require the provider's CURRENT W044
   payment declaration to cover the offer's EXACT terms** (cases 14
   and 41) — the CURRENT declaration is deterministically the highest
@@ -251,16 +271,21 @@ handoff-advanced proposal status.)
   comparisons the W044 authority itself applies) — DATA-level
   composition only, no vendor semantics, no payment execution; free
   offers need none.
-- **Deterministic ranking** (cases 15-18): pure integer components
-  normalized over the candidate SET (identical sets → identical
-  components; degenerate single-value sets pin to the neutral
-  maximum), a composite weighted mean, and the frozen total order
-  (composite descending, then price/latency ascending, throughput/
-  availability descending, proximity ascending, then
-  `(provider_id, offer_id)` ascending — the final tie-break makes
-  the order total). The golden ordering over the five-listing world
-  is pinned byte-identically; three fresh runs produce identical
-  digests.
+- **Deterministic ranking** (cases 15-18, 46): pure integer
+  components normalized over the candidate SET (identical sets →
+  identical components; degenerate single-value sets pin to the
+  neutral maximum), a composite weighted mean, and the frozen total
+  order (composite descending, then price/latency ascending,
+  throughput/availability descending, proximity ascending with
+  ABSENT proximity evidence sorting strictly after every bounded
+  distance, then `(provider_id, offer_id)` ascending — the final
+  tie-break makes the order total).  A candidate without proximity
+  evidence earns exactly ZERO proximity credit and records an
+  absent bound (case 46: the evidence-backed twin outranks the
+  no-evidence twin — the pre-fix inversion, where absence scored as
+  distance 0, is impossible).  The golden ordering over the
+  five-listing world is pinned byte-identically; three fresh runs
+  produce identical digests.
 - **Hash-seed independence** (case 19): PYTHONHASHSEED 0/1/7919/unset
   subprocesses all reproduce the byte-identical full-chain golden
   scenario stream (discovery, proposal, reservation, handoff,
@@ -437,12 +462,15 @@ no-delta ARCH-08, plus this finding).
 
 ## 13. Provenance of this delivery
 
-- Branch: `work-047-marketplace-discovery` (the correction round is
-  a second commit on the same branch; the exact delivery SHA is
-  recorded in the PR and in the PR body — this document cannot
-  embed its own commit hash).  The reviewed first-round head was
+- Branch: `work-047-marketplace-discovery` (the correction rounds
+  are additional commits on the same branch; the exact delivery
+  SHA is recorded in the PR and in the PR body — this document
+  cannot embed its own commit hash).  The reviewed heads were
   `fdd7691f90581e9fd7fdd2940966d3ba47dafa15` (PR #135, Architect
-  review comment `5518682595`: REQUEST CHANGES).
+  review comment `5518682595`: REQUEST CHANGES) and then
+  `ed6fae89aabbaaaaca6c9c771674e9f544d4e59b` (PR #135, Architect
+  re-audit comment `5518914690`: REQUEST CHANGES — the six
+  first-round blockers confirmed corrected; §15).
 - Base: main `c2e1b3c` (authorization inherited byte-identically
   from the reconciled baseline `825f48f`; the baseline→main delta
   is governance-only).
@@ -479,3 +507,32 @@ signature now takes the machinery and the genuine outcome instead
 of a raw path id string.  The `marketplace` package `__all__`
 remains the same 65 frozen exports.  All first-round digests are
 preserved (§2).
+
+## 15. Correction round 2 — Architect re-audit of `ed6fae89` (PR #135)
+
+The Architect re-audit of the correction-round head
+`ed6fae89aabbaaaaca6c9c771674e9f544d4e59b` (PR #135 comment
+`5518914690`) confirmed the six first-round blockers substantively
+corrected and identified two further implementation-level gaps plus a
+PR-metadata inconsistency.  Both implementation gaps are corrected on
+the new head; the PR metadata is rewritten to match the honest
+implementation; ARCH-08 remains a separate governance-lane action
+exactly as before:
+
+| # | Blocker (re-audit wording, abridged) | Correction | Proof |
+| --- | --- | --- | --- |
+| 8 | An explicit `max_distance_m` with no query location silently DISABLES the distance constraint instead of failing closed | `distance_violation` now treats an explicit limit without a bounded query location as a fail-closed per-candidate exclusion (the frozen `constraint-distance` reason, deterministic detail naming the unanchored limit) — an unanchored explicit constraint is never an implicit within-limit claim; `propose` through such a query fails closed (`SELECTION_EMPTY`); the exported pure screen can never disable an explicit constraint even when called directly | case 45 (every candidate excluded; propose fails closed; direct `distance_violation` call returns the frozen reason; no-limit control presented; anchored-limit control presented; byte-identical repeat) |
+| 9 | Missing proximity evidence is encoded as distance `0` during ranking — unknown proximity scores as the BEST possible proximity | the frozen missing-evidence policy: a candidate without proximity evidence earns exactly ZERO proximity credit (component 0), is recorded as an ABSENT bound (`None`, canonical `null` — never a distance of 0), and tie-breaks strictly AFTER every bounded distance; evidence-backed candidates normalize set-relatively over the evidence-backed values ONLY | case 46 (evidence-backed twin outranks the no-evidence twin — the pre-fix inversion is impossible; absent bound is null, component 0; all-unknown set differentiates nothing and falls to the `(provider_id, offer_id)` tie-break; deterministic) |
+| — | PR metadata still contains the removed population-count claim text | the PR #135 body no longer contains the population-count privacy claim language (the claim phrase removed in round one and its by-construction variant); the body now states the honest bounded-spatial-resolution property, the current battery count, the correction-round history, and the exact current delivery SHA (uniformly honest across code, evidence manifest, worklog/report, and PR metadata) | PR #135 body (edited with the round-2 delivery); case 44 continues to enforce the absence of the claim text in the family and this document |
+| — | ARCH-08 authorization-scope governance remains unresolved | NOT fixed here — governance-lane, exactly as the re-audit directs ("resolve ARCH-08 separately in governance"); the implementation PR must not modify `spec/architect/`; the finding and its resolution path remain §10.1 | §10.1 + battery cases 37/38 (spec intact, delta confined) |
+
+Public-surface impact of this round: `ScoredCandidate.proximity_bound_m`
+is now `Optional[int]` — `None` (canonical `null`) for a candidate
+without proximity evidence, the unchanged conservative bound maximum
+otherwise; the recorded content of an evidence-backed candidate is
+byte-identical to the previous round, and every ranked golden-world
+candidate carries genuine coverage proximity evidence, so all §2 golden
+digests are preserved.  The `marketplace` package `__all__` remains the
+same 65 frozen exports; the typed reason vocabulary is unchanged (16
+codes — the round reuses the frozen `constraint-distance` exclusion
+reason and the existing `SELECTION_EMPTY` selection reason).

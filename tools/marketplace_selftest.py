@@ -4,8 +4,9 @@
 End-to-end verification of the Connectivity Marketplace Discovery,
 Proximity & Path Selection boundary (issue #91, authorization
 WORK-047-CORE-001 / DEC-0067, baseline 825f48f), including the
-correction round for the Architect review of head fdd7691
-(REQUEST CHANGES, PR #135 comment 5518682595):
+correction rounds for the Architect reviews of heads fdd7691
+(REQUEST CHANGES, PR #135 comment 5518682595) and ed6fae89
+(re-audit REQUEST CHANGES, PR #135 comment 5518914690):
 
 - frozen vocabularies: the precision vocabulary (privacy-bounded
   location), the evidence provenance vocabulary, the staleness
@@ -24,7 +25,14 @@ correction round for the Architect review of head fdd7691
   (integer math, harmonization only coarsens), never an exact
   distance and never a reachability claim, and an EXPLICIT
   distance limit fails closed when coverage evidence is absent
-  (case 39);
+  (case 39) AND when the query carries no bounded location to
+  anchor the constraint (an unanchored explicit constraint is
+  never an implicit within-limit claim; case 45);
+- honest missing-proximity scoring: a candidate WITHOUT proximity
+  evidence earns exactly ZERO proximity credit, is recorded as an
+  ABSENT bound (null -- never a distance of 0), and tie-breaks
+  strictly after every candidate with a bounded distance, so
+  absence can never masquerade as the nearest candidate (case 46);
 - stale telemetry: observations retain value/age/confidence/
   provenance, confidence decays deterministically with age, stale
   observations contribute nothing to expected quality while their
@@ -38,7 +46,8 @@ correction round for the Architect review of head fdd7691
   eligibility authority);
 - deterministic ranking: identical candidate sets produce a
   byte-identical total order (integer components, set-relative
-  normalization, frozen tie-breaks), stable across repeated runs
+  normalization over the evidence-backed values only, frozen
+  tie-breaks), stable across repeated runs
   and across PYTHONHASHSEED 0/1/7919/unset;
 - selection: proposals are content-derived, carry the ranked
   fallback chain and the deterministic deadline anchor, are
@@ -149,6 +158,7 @@ from marketplace import (  # noqa: E402
     BILLING_MODES,
     CAPACITY_BASIS_VALUES,
     DEFAULT_PRECISION_LEVEL,
+    DiscoveredCandidate,
     DiscoveryQuery,
     DiscoveryResult,
     EXCLUSION_VALUES,
@@ -182,6 +192,7 @@ from marketplace import (  # noqa: E402
     declare_coverage_cell,
     derive_coordination_command_id,
     distance_bound_m,
+    distance_violation,
     effective_confidence,
     instant_plus_seconds,
     observation_age_seconds,
@@ -1704,22 +1715,39 @@ def case_16_ranking_tie_breaks(results: List[Result]) -> None:
         ("provider-a", "twin"), ("provider-b", "twin"),
     ]:
         problems.append("tie-break order drifted: %s" % ordering)
-    # single-candidate set: every component is the neutral maximum
+    # single-candidate set: every EVIDENCE-BACKED component is the
+    # neutral maximum; the proximity component of a candidate with
+    # NO proximity evidence (this query carries no location) is
+    # exactly 0 -- absence earns no proximity credit, so the
+    # composite is the EARNED share of the scale, never the full
+    # scale (the honest missing-evidence policy; case 46)
     single = _service()
     single_result = single.discover(query=_query())
     if single_result.ranked:
         scored = single_result.ranked[0]
+        policy = RankingPolicy()
+        earned_weight = policy.total_weight() - policy.weight_proximity
         if scored.price_component != SCORE_SCALE:
             problems.append("single-value component is not neutral")
-        if scored.composite_score != SCORE_SCALE:
-            problems.append("single-value composite is not the scale maximum")
+        if scored.proximity_component != 0:
+            problems.append("absent proximity evidence earned proximity credit")
+        if scored.proximity_bound_m is not None:
+            problems.append("absent proximity evidence recorded a distance")
+        if scored.composite_score != (
+            SCORE_SCALE * earned_weight // policy.total_weight()
+        ):
+            problems.append(
+                "single-value composite is not the earned share (%d)"
+                % scored.composite_score
+            )
     if problems:
         results.append(fail(name, "; ".join(problems[:5])))
         return
     results.append(ok(
         name,
         "identical candidates tie-break by (provider, offer); "
-        "single-candidate components are neutral",
+        "single-candidate components are neutral; absent proximity "
+        "earns no credit (composite is the earned share)",
     ))
 
 
@@ -3313,6 +3341,222 @@ def case_44_no_population_count_claims(results: List[Result]) -> None:
     ))
 
 
+def case_45_unanchored_distance_limit_fails_closed(results: List[Result]) -> None:
+    name = "case_45_unanchored_distance_limit_fails_closed"
+    problems: List[str] = []
+    # re-audit blocker 8 (PR #135 comment 5518914690): an explicit
+    # max_distance_m with NO query location used to silently DISABLE
+    # the distance constraint; it now fails CLOSED -- an explicit
+    # spatial-distance constraint has no reference point in that
+    # state and is never interpreted as unconstrained
+    service = _service()
+    query = _query(max_distance_m=500)
+    if query.location is not None:
+        problems.append("fixture unexpectedly carries a location")
+    result = service.discover(query=query)
+    if result.ranked:
+        problems.append(
+            "candidates presented under an unanchored explicit distance limit"
+        )
+    excluded = [(entry.reason, entry.offer_id) for entry in result.excluded]
+    if ("constraint-distance", "wifi-basic") not in excluded:
+        problems.append(
+            "unanchored distance-limit exclusion missing: %s" % excluded
+        )
+    else:
+        detail = [
+            entry.detail for entry in result.excluded
+            if entry.reason == "constraint-distance"
+        ][0]
+        if "no bounded location to anchor" not in detail:
+            problems.append(
+                "unanchored-limit exclusion detail is not explicit: %s"
+                % detail
+            )
+    # selection through an unevaluable constraint fails closed too
+    try:
+        service.propose(query=query)
+        problems.append("propose succeeded under an unanchored distance limit")
+    except MarketplaceError as error:
+        if error.reason != MarketplaceReasonCode.SELECTION_EMPTY:
+            problems.append("propose raised %r" % error.reason)
+    # the exported pure screen itself can never disable an explicit
+    # constraint: the direct call returns the frozen reason for a
+    # hand-composed candidate even though the service path already
+    # excluded it (defense in depth over the public surface)
+    offer = service.index.offers()[0]
+    candidate = DiscoveredCandidate(
+        offer=offer,
+        quality=offer.quality_view(
+            now=_EVAL_NOW, max_observation_age_seconds=3600
+        ),
+        capacity=offer.capacity_view(
+            now=_EVAL_NOW, max_observation_age_seconds=3600
+        ),
+    )
+    reason, _detail = distance_violation(candidate, query)
+    if reason != "constraint-distance":
+        problems.append(
+            "direct distance_violation returned %r for an unanchored limit"
+            % reason
+        )
+    # control 1: NO explicit limit and no location -> the dimension
+    # is unconstrained by the buyer and the candidate is presented
+    control = service.discover(query=_query())
+    if not control.ranked:
+        problems.append("no-limit query without a location excluded everything")
+    # control 2: the SAME limit WITH a bounded location -> the
+    # anchored constraint evaluates normally (the default coverage
+    # cell is within a 1_000_000 m bound of the query cell)
+    anchored = service.discover(
+        query=_query(
+            location=bind_query_location(5_603_500, -13_000, "district-2500m"),
+            max_distance_m=1_000_000,
+        )
+    )
+    if not anchored.ranked:
+        problems.append("anchored distance limit excluded a within-bound offer")
+    # determinism: a fresh service/clock reproduces the all-excluded
+    # result byte-identically
+    if _service().discover(query=query).digest() != result.digest():
+        problems.append("unanchored-limit exclusion is not deterministic")
+    if problems:
+        results.append(fail(name, "; ".join(problems[:5])))
+        return
+    results.append(ok(
+        name,
+        "explicit max_distance_m without a query location -> every "
+        "candidate excluded with the frozen constraint-distance reason "
+        "(propose fails closed; the pure screen never disables an "
+        "explicit constraint; no-limit control presented; anchored "
+        "control presented; deterministic)",
+    ))
+
+
+def case_46_missing_proximity_is_not_best_case(results: List[Result]) -> None:
+    name = "case_46_missing_proximity_not_best_case"
+    problems: List[str] = []
+    # re-audit blocker 9 (PR #135 comment 5518914690): absent
+    # proximity evidence used to be encoded as distance 0 during
+    # ranking -- the BEST possible proximity, fabricated from
+    # absence.  The frozen missing-evidence policy is now explicit:
+    # absence earns exactly ZERO proximity credit, is recorded as an
+    # absent bound (None), and tie-breaks strictly after every
+    # bounded distance
+    known = _listing(
+        offer_id="twin", provider_id="provider-a",
+        interface_name=WIFI_IF, link_kind="wireless",
+    )  # carries the default near coverage cell
+    unknown = _listing(
+        offer_id="twin", provider_id="provider-b",
+        interface_name=WIFI_IF, link_kind="wireless",
+        coverage=(),
+    )
+    view = EligibilityView(
+        providers=(_trust("provider-a"), _trust("provider-b")),
+        offers=(_offer_facts("twin", "provider-a"), _offer_facts("twin", "provider-b")),
+        policies=(_policy(),),
+        capabilities=(_caps("provider-a"), _caps("provider-b")),
+    )
+    service = MarketplaceService(
+        index=MarketplaceIndex((unknown, known)),  # registration order reversed
+        clock=StepClock(_EVAL_NOW, 60), policy=RankingPolicy(),
+        eligibility=view,
+        payment_capabilities=(_paycaps("provider-a"), _paycaps("provider-b")),
+    )
+    query = _query(
+        location=bind_query_location(5_603_500, -13_000, "district-2500m"),
+    )
+    result = service.discover(query=query)
+    if len(result.ranked) != 2:
+        problems.append(
+            "expected both twins ranked: %s"
+            % ["%s/%s" % scored.offer_key for scored in result.ranked]
+        )
+    else:
+        first, second = result.ranked
+        # the evidence-backed twin outranks the no-evidence twin:
+        # before the fix the ABSENT one scored distance 0 (the best
+        # case) and INVERTED exactly this order
+        if first.candidate.offer.provider_id != "provider-a":
+            problems.append(
+                "no-evidence twin outranks the evidence-backed twin: %s"
+                % [scored.candidate.offer.provider_id for scored in result.ranked]
+            )
+        if not isinstance(first.proximity_bound_m, int):
+            problems.append(
+                "evidence-backed twin records no distance bound: %r"
+                % first.proximity_bound_m
+            )
+        if first.proximity_component != SCORE_SCALE:
+            problems.append(
+                "single evidence-backed value is not the neutral maximum: %d"
+                % first.proximity_component
+            )
+        if second.proximity_bound_m is not None:
+            problems.append(
+                "absent proximity evidence recorded a distance: %r"
+                % second.proximity_bound_m
+            )
+        if second.proximity_component != 0:
+            problems.append(
+                "absent proximity evidence earned credit: %d"
+                % second.proximity_component
+            )
+        # the honest canonical representation: absence is null,
+        # never a fabricated distance
+        if second.to_dict().get("proximity_bound_m") is not None:
+            problems.append("ranked content encodes absence as a distance")
+    # the all-unknown set (no query location, no coverage): NO
+    # candidate earns proximity credit, the dimension differentiates
+    # nothing, and the order falls to the frozen (provider_id,
+    # offer_id) tie-break
+    no_evidence_world = MarketplaceService(
+        index=MarketplaceIndex((unknown, known)),
+        clock=StepClock(_EVAL_NOW, 60), policy=RankingPolicy(),
+        eligibility=view,
+        payment_capabilities=(_paycaps("provider-a"), _paycaps("provider-b")),
+    )
+    unknown_result = no_evidence_world.discover(query=_query())
+    if [
+        "%s/%s" % scored.offer_key for scored in unknown_result.ranked
+    ] != ["provider-a/twin", "provider-b/twin"]:
+        problems.append(
+            "all-unknown ordering drifted: %s"
+            % ["%s/%s" % scored.offer_key for scored in unknown_result.ranked]
+        )
+    for scored in unknown_result.ranked:
+        if scored.proximity_component != 0:
+            problems.append(
+                "all-unknown world earned proximity credit (%s: %d)"
+                % (scored.offer_key[0], scored.proximity_component)
+            )
+        if scored.proximity_bound_m is not None:
+            problems.append(
+                "all-unknown world recorded a distance (%s)" % scored.offer_key[0]
+            )
+    # determinism: fresh service + fresh clock, byte-identical result
+    fresh = MarketplaceService(
+        index=MarketplaceIndex((unknown, known)),
+        clock=StepClock(_EVAL_NOW, 60), policy=RankingPolicy(),
+        eligibility=view,
+        payment_capabilities=(_paycaps("provider-a"), _paycaps("provider-b")),
+    )
+    if fresh.discover(query=query).digest() != result.digest():
+        problems.append("missing-evidence ranking is not deterministic")
+    if problems:
+        results.append(fail(name, "; ".join(problems[:5])))
+        return
+    results.append(ok(
+        name,
+        "absent proximity evidence earns ZERO proximity credit and is "
+        "recorded as an absent bound (null) -- never a distance of 0; "
+        "the evidence-backed twin outranks the no-evidence twin (the "
+        "pre-fix inversion is impossible); all-unknown sets "
+        "differentiate nothing; deterministic",
+    ))
+
+
 # ---------------------------------------------------------------------------
 # main
 # ---------------------------------------------------------------------------
@@ -3365,6 +3609,8 @@ def main() -> int:
         case_42_path_activation_requires_w041_active,
         case_43_proposal_lifecycle_advances,
         case_44_no_population_count_claims,
+        case_45_unanchored_distance_limit_fails_closed,
+        case_46_missing_proximity_is_not_best_case,
     ):
         case(results)
     failures = [result for result in results if not result[1]]

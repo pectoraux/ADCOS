@@ -19,7 +19,9 @@ Determinism contract:
 - the order is a TOTAL order: composite score descending, then the
   frozen tie-break chain (price ascending, latency ascending,
   throughput descending, availability descending, proximity
-  ascending, provider id ascending, offer id ascending);
+  ascending with ABSENT proximity evidence sorting strictly after
+  every bounded distance, provider id ascending, offer id
+  ascending);
 - the ranking READS NO CLOCK and consumes no nondeterminism: the
   evaluation instant is passed in (the discovery service's single
   clock read).
@@ -28,14 +30,19 @@ Fabrication discipline: every score component is derived from
 explicit EVIDENCE members (advertised DATA, age-degraded telemetry,
 bounded proximity interval).  Nothing in this module can turn
 advertisement into observation, a cell bound into an exact
-distance, or a selected candidate into a connected one.
+distance, or a selected candidate into a connected one.  ABSENT
+proximity evidence is never encoded as a distance: it earns
+exactly ZERO proximity credit, is recorded as an absent bound
+(``None``), and ties-break strictly after every candidate with a
+bounded distance -- absence can never masquerade as the nearest
+candidate.
 """
 
 from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass
-from typing import Any, Dict, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 from protocol.canonicalization import canonical_json_bytes
 
@@ -132,11 +139,18 @@ class RankingPolicy:
 class ScoredCandidate:
     """One candidate with its explicit deterministic score vector.
 
-    Every component (1..SCORE_SCALE), the composite, and the
+    Every component (0..SCORE_SCALE), the composite, and the
     evidence bases are recorded: the ranking is fully auditable
-    and byte-identical for identical candidate sets.  ``proximity``
-    is the conservative BOUND maximum used for scoring (0 when
-    proximity evidence is absent on either side).
+    and byte-identical for identical candidate sets.
+    ``proximity_bound_m`` is the conservative BOUND maximum used
+    for scoring, or ``None`` when proximity evidence is absent
+    (absence is recorded as absence -- never as a distance of
+    zero).  The ``proximity_component`` of a candidate without
+    proximity evidence is exactly ``0``: absence earns NO proximity
+    credit and never scores above any evidence-backed candidate;
+    candidates WITH evidence normalize set-relatively over the
+    evidence-backed values only (so the nearest evidence-backed
+    candidate always earns the full scale).
     """
 
     candidate: DiscoveredCandidate
@@ -157,14 +171,18 @@ class ScoredCandidate:
     @property
     def sort_key(self) -> Tuple[Any, ...]:
         """The frozen total-order key (composite DESC then the
-        frozen tie-break chain)."""
+        frozen tie-break chain).  The proximity tier places a
+        candidate WITHOUT proximity evidence strictly AFTER every
+        candidate with a bounded distance (absence is never
+        nearest)."""
         return (
             -self.composite_score,
             self.candidate.offer.price_minor,
             self.candidate.quality.expected_latency_ms,
             -self.candidate.quality.expected_throughput_kbps,
             -self.candidate.quality.expected_availability_percent,
-            self.proximity_bound_m,
+            (1, 0) if self.proximity_bound_m is None
+            else (0, self.proximity_bound_m),
             self.candidate.offer.provider_id,
             self.candidate.offer.offer_id,
         )
@@ -297,17 +315,36 @@ def distance_violation(
     within a distance limit when its ENTIRE bounded distance
     interval is within the limit (never a maybe).
 
-    When the buyer states an EXPLICIT distance limit, a candidate
-    WITHOUT coverage proximity evidence fails CLOSED: the
-    marketplace cannot establish that the offer lies within the
-    requested bound, so the candidate is excluded with the frozen
-    ``constraint-distance`` reason (presenting it would turn absent
-    evidence into an implicit within-limit claim).  Without an
-    explicit limit, absent proximity evidence is not a violation
-    (the distance dimension is simply unconstrained by the buyer).
+    An explicit distance limit is a constraint the marketplace must
+    PROVE per candidate, and it fails closed in BOTH evidence-absent
+    states:
+
+    - the buyer states an explicit limit but the query carries NO
+      bounded location: the constraint has no reference point, so
+      it is never silently interpreted as unconstrained -- the
+      candidate is excluded with the frozen ``constraint-distance``
+      reason (an UNANCHORED explicit constraint is not a satisfied
+      constraint);
+    - the query location exists but the offer declares no coverage
+      proximity evidence: the marketplace cannot establish that the
+      offer lies within the requested bound, so the candidate is
+      excluded the same way (presenting it would turn absent
+      evidence into an implicit within-limit claim).
+
+    Without an explicit limit the distance dimension is simply
+    unconstrained by the buyer (no violation is possible).
     """
-    if not query.max_distance_m or query.location is None:
+    if not query.max_distance_m:
         return ("", "")
+    if query.location is None:
+        return (
+            "constraint-distance",
+            "an explicit %d m distance limit cannot be evaluated: the "
+            "query carries no bounded location to anchor it (fail "
+            "closed: an unanchored explicit constraint is never an "
+            "implicit within-limit claim)"
+            % query.max_distance_m,
+        )
     interval = candidate.proximity_bound_m(query)
     if interval is None:
         return (
@@ -389,15 +426,35 @@ def rank_candidates(
         candidate.capacity.available_capacity_kbps
         for candidate in candidates
     )
-    proximity_values = tuple(
-        (candidate.proximity_bound_m(query) or (0, 0))[1]
-        for candidate in candidates
+    # the frozen missing-evidence policy: a candidate WITHOUT
+    # proximity evidence earns exactly ZERO proximity credit
+    # (component 0, recorded bound None) -- absence is never encoded
+    # as a distance (encoding it as 0 fabricated the BEST possible
+    # proximity from absence); candidates WITH evidence normalize
+    # set-relatively over the evidence-backed values only
+    proximity_intervals = tuple(
+        candidate.proximity_bound_m(query) for candidate in candidates
     )
+    evidence_backed_components = _normalize_ascending(tuple(
+        interval[1]
+        for interval in proximity_intervals
+        if interval is not None
+    ))
+    proximity_components: Tuple[int, ...] = ()
+    proximity_bounds: Tuple[Optional[int], ...] = ()
+    evidence_index = 0
+    for interval in proximity_intervals:
+        if interval is None:
+            proximity_components += (0,)
+            proximity_bounds += (None,)
+        else:
+            proximity_components += (evidence_backed_components[evidence_index],)
+            proximity_bounds += (interval[1],)
+            evidence_index += 1
     price_components = _normalize_ascending(price_values)
     quality_components = _normalize_descending(quality_values)
     latency_components = _normalize_ascending(latency_values)
     availability_components = _normalize_descending(availability_values)
-    proximity_components = _normalize_ascending(proximity_values)
     scored: Tuple[ScoredCandidate, ...] = tuple(
         ScoredCandidate(
             candidate=candidate,
@@ -420,7 +477,7 @@ def rank_candidates(
             proximity_component=proximity_components[index],
             quality_basis=candidate.quality.quality_basis,
             capacity_basis=candidate.capacity.capacity_basis,
-            proximity_bound_m=proximity_values[index],
+            proximity_bound_m=proximity_bounds[index],
         )
         for index, candidate in enumerate(candidates)
     )
