@@ -1,0 +1,47 @@
+# ADCOS Architect decision record.
+# schema: spec/architect/decision-record-template.md; verified by tools/spec_check.py (ARCH-04).
+# W048 activation: issuance of the repository-local WORK-048-CORE-001
+# implementation authorization after W047 acceptance (DEC-0070) and the
+# frozen containment authority (DEC-0072 / ACR-012).
+decision_id: DEC-0073
+type: governance
+work_item: WORK-048
+acr: null
+pr: null
+reviewed_sha: 7bc31f2899307c56639887416d602b41b4c16f43
+decision: ACCEPTED
+status: ACCEPTED
+reviewer: "Architect (pectoraux)"
+timestamp: 2026-09-03T03:40:00Z
+findings:
+  - "WORK-047 is accepted-merged (DEC-0070; PR #135 exact reviewed head 348154d063c0e0a12d5635cb2093c67a507a4064, merge 7bc31f2899307c56639887416d602b41b4c16f43), so the single active execution slot is free after its supersession and W048 is the next canonical commercial Work Item."
+  - "W048 hard dependencies are satisfied in the execution ledger: WORK-041 (accepted-merged, DEC-0054), WORK-042 (accepted-merged, DEC-0057), and WORK-051 (accepted-merged, DEC-0059) — exactly the frozen spec/work-items.md declaration; W047 (marketplace-selected provider flow), W045 (eligibility/trust policy), W046 (developer API boundary), and W044 (payment capability) are composition inputs where applicable, and W050 remains advisory, not a hard dependency."
+  - "The containment authority architecture is frozen: DEC-0072 accepts ACR-012 (Buyer-Traffic Containment Boundary), resolving the DEC-0071 gate. The W048 implementation therefore composes one ContainmentBoundary per sharing session instead of inventing containment semantics inside a runtime package."
+  - "W048 remains a local enforcement mechanism: it composes /identity, /session, W041 NetworkPath, /routing, /transport, W051 CommercialCore lease truth, W042 UsageLedger, platform isolation through the containment authority, and existing policy/telemetry authorities; it must never create a second identity, session, NetworkPath, routing, transport, commercial, usage, or payment-custody authority, and must never perform arbitrary packet inspection or plaintext payload inspection."
+  - "The authorization WORK-048-CORE-001 is issued with the exact reconciled baseline 7bc31f2899307c56639887416d602b41b4c16f43 (the W047 merge mainline this governance transition is cut from), a literal implementation scope (sharing/, containment/, the dedicated deterministic battery, the evidence document, the handoff, and additive CI wiring), acceptance criteria quoted from the frozen WORK-048 contract, explicit evidence classes, and explicit out-of-scope boundaries including no permission to modify spec/architect/."
+  - "Per the DEC-0063/DEC-0066/DEC-0068 baseline-reconciliation convention, a follow-up baseline-advancement-only reconciliation decision may move the snapshot and the WORK-048-CORE-001 baseline to the exact post-transition governance mainline once this governance PR merges; the W048 implementation branch must be cut from the mainline that carries the authorization record, with the W044-established governance-only branch-point offset convention applying in the interim."
+blockers: []
+required_corrections: []
+evidence:
+  merge_sha: null
+  ci_run: null
+  artifacts:
+    - "spec/architect/authorizations/WORK-048.yaml"
+    - "spec/acr/ACR-012-buyer-traffic-containment-boundary.md"
+    - "docs/WORK-048-handoff.md"
+    - "docs/WORK-048-provider-sharing-runtime-design.md"
+accepted_scope:
+  - "Issuance of the repository-local implementation authorization WORK-048-CORE-001 for WORK-048 with exact baseline 7bc31f2899307c56639887416d602b41b4c16f43 and the literal scope recorded in spec/architect/authorizations/WORK-048.yaml."
+  - "Transfer of the single active execution slot from the superseded WORK-047-CORE-001 to WORK-048-CORE-001; execution mode returns to implementing with WORK-048 as the active Work Item."
+  - "Activation of the W048 implementation handoff contract (docs/WORK-048-handoff.md) that binds the implementer to the composition and boundary rules."
+rejected_scope:
+  - "Any implementation of W048 by this decision itself; implementation may begin only from the authorized baseline under the issued authorization."
+  - "Any W049 activation or any second active execution authorization."
+  - "Any modification of frozen architecture, protocol schemas, the Work Item registry, or the dependency DAG."
+  - "Any W040 physical-evidence acceptance or obligation closure; EVID-007/EVID-008 remain open and W040-owned."
+downstream_effect:
+  - "WORK-048 is AUTHORIZED / ACTIVE as the sole active implementation authorization; an implementer may now deliver the W048 contract from the exact reconciled baseline."
+  - "The W048 delivery is subject to the exact-SHA Architect acceptance gate: deterministic battery, isolation fail-closed proofs, composition/authority audits, replay and determinism evidence, and the frozen acceptance criteria recorded in the authorization."
+  - "The execution ledger and persistent state record the W047 accepted-merged transition and the W048 activation atomically (LEDGER-RECON-016/LEDGER-RECON-017)."
+  - "W040 remains in-review/unaccepted and independent; WORK-049/WORK-050 remain unauthorized candidates."
+resolved_by: null
