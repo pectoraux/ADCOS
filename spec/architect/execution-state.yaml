@@ -4,8 +4,8 @@ package: "persistent-architect"
 last_updated: "2026-09-03"
 repository:
   canonical: "github.com/pectoraux/ADCOS"
-  main_sha: bd544dbce0aec345521d340f45ad4562567927cf
-  main_sha_semantics: "Exact post-PR-#137 governance mainline: PR #137 merged the already-reviewed governance transition carrying the W047 acceptance (DEC-0070), the ACR-012 containment freeze (DEC-0072), and the W048 activation (DEC-0073; head 704e68e, merge bd544db, 2026-09-03T03:49:46Z), and DEC-0074 / LEDGER-RECON-018 advance this recorded mainline and the WORK-048-CORE-001 authorization baseline to that exact governance commit, so the W048 implementation branch is cut from the mainline that carries the activation record."
+  main_sha: ce1ccaea328743a05cf8d6fa87a114e69d9e253c
+  main_sha_semantics: "Exact W048 implementation acceptance merge mainline: PR #139 delivered the authorized WORK-048 implementation at exact reviewed correction-round head e2af4bd20e403c1d4ee9717f7eea8809c16a53cd (three Architect review rounds over correction heads ba63371 -> fc856bb -> e2af4bd; canonical acceptance comment 5524305998) and merged by the Architect at ce1ccaea328743a05cf8d6fa87a114e69d9e253c (2026-09-03T10:30:47Z), which DEC-0075 / LEDGER-RECON-019 record as the accepted-merged W048 delivery and to which DEC-0076 / LEDGER-RECON-020 reconcile this snapshot while issuing WORK-049-CORE-001 with this exact mainline as the issuance baseline; per the DEC-0063/DEC-0066/DEC-0068/DEC-0074 convention, a follow-up baseline-advancement-only reconciliation moves this recorded mainline and the WORK-049-CORE-001 authorization baseline to the exact post-transition governance mainline once the governance PR carrying this transition merges, and the W049 implementation branch is cut from the mainline that carries the authorization record."
 versions:
   architecture_version_reference: "1.0"
   architecture_version_authority: "spec/architecture.md ## Status (single declaration site)"
@@ -13,11 +13,11 @@ versions:
   protocol_version_authority: "spec/schemas/protocol.json"
 execution:
   mode: "implementing"
-  active_work_item: WORK-048
-  active_authorization: "WORK-048-CORE-001"
-  halted_reason: "W048 is active-authorized from the exact reconciled post-PR-#137 governance mainline bd544db with the containment authority frozen by DEC-0072/ACR-012; Z.ai may implement from this exact mainline."
+  active_work_item: WORK-049
+  active_authorization: "WORK-049-CORE-001"
+  halted_reason: "W049 is active-authorized from the exact W048 acceptance merge mainline ce1ccae (issuance baseline of WORK-049-CORE-001, issued by DEC-0076 after DEC-0075 accepted W048 on PR #139) with the frozen client-runtime boundary contract recorded in spec/architect/authorizations/WORK-049.yaml, docs/WORK-049-handoff.md, and docs/WORK-049-evidence.md; Z.ai may implement from the exact mainline that carries the authorization record once this governance transition merges."
   next_required_decisions:
-    - "Review the next authorized Work Item delivery against its exact W048 acceptance gate (ACR-012 containment invariants included) and persist the Architect verdict before downstream work."
+    - "Review the next authorized Work Item delivery against its exact W049 acceptance gate (the frozen client-lifecycle/authority-preservation/offline-reconnect/capability/privacy/determinism/boundary-audit battery) and persist the Architect verdict before downstream work."
 in_review:
   - work_item: WORK-040
     branch: "work-040-pilot-deployment"
@@ -55,8 +55,8 @@ open_acrs: []
 open_architectural_questions: []
 accepted_work_items:
   first: "WORK-001"
-  last: "WORK-047"
-  note: "WORK-001..WORK-039, WORK-041, WORK-042, WORK-051, WORK-052, WORK-053, WORK-044, WORK-045, WORK-046, and WORK-047 are accepted-merged; WORK-040 remains in-review and unaccepted."
+  last: "WORK-048"
+  note: "WORK-001..WORK-039, WORK-041, WORK-042, WORK-051, WORK-052, WORK-053, WORK-044, WORK-045, WORK-046, WORK-047, and WORK-048 are accepted-merged; WORK-040 remains in-review and unaccepted."
 planned_work_items:
   - work_item: WORK-040
     issue: 48
@@ -90,16 +90,16 @@ planned_work_items:
     prerequisite: "accepted by DEC-0070 on PR #135 (reviewed 348154d063c0e0a12d5635cb2093c67a507a4064, merge 7bc31f2899307c56639887416d602b41b4c16f43); 46/46 deterministic battery; SOFTWARE-only"
   - work_item: WORK-048
     issue: 92
-    status: "active authorized"
+    status: "accepted-merged"
     contract: "issue #92"
-    authorization: "WORK-048-CORE-001"
-    prerequisite: "containment authority frozen by DEC-0072/ACR-012; W041/W042/W051 accepted-merged; W050 advisory"
+    authorization: "WORK-048-CORE-001 (superseded by DEC-0075)"
+    prerequisite: "accepted by DEC-0075 on PR #139 (reviewed e2af4bd20e403c1d4ee9717f7eea8809c16a53cd, merge ce1ccaea328743a05cf8d6fa87a114e69d9e253c); 46/46 deterministic battery; SOFTWARE-only"
   - work_item: WORK-049
     issue: 98
-    status: "ready-candidate"
+    status: "active authorized"
     contract: "issue #98"
-    authorization: "none"
-    prerequisite: "W046/W047/W048 accepted-merged"
+    authorization: "WORK-049-CORE-001"
+    prerequisite: "W046/W047/W048 accepted-merged (DEC-0067/DEC-0070/DEC-0075); client-runtime boundary contract frozen by DEC-0076; W050 advisory"
   - work_item: WORK-050
     issue: 96
     status: "ready-candidate"

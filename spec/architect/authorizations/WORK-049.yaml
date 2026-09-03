@@ -1,0 +1,96 @@
+# ADCOS Work Item authorization record — WORK-049 active implementation.
+# Issued by DEC-0076 after W048 acceptance (DEC-0075) on the W048 acceptance
+# merge mainline. The authorization is the ONLY durable authority to
+# implement WORK-049.
+# W049 is a CLIENT/CONSUMER/PROJECTION BOUNDARY, not a new authority: every
+# canonical truth and enforcement stays with its existing owner (identity,
+# sessions, W041 NetworkPath, routing, transport, W051 CommercialCore, W042
+# UsageLedger, W047 discovery, W048 provider sharing / ACR-012 containment,
+# W046 developer API). No new ACR was manufactured for this activation.
+work_item: WORK-049
+status: active
+authorized: true
+type: implementation
+authorization_id: "WORK-049-CORE-001"
+authorization_decision: DEC-0076
+baseline_sha: ce1ccaea328743a05cf8d6fa87a114e69d9e253c
+review_basis: "DEC-0076 activation on the exact current main ce1ccaea328743a05cf8d6fa87a114e69d9e253c (the PR #139 W048 acceptance merge mainline this governance transition is cut from; per the DEC-0063/DEC-0066/DEC-0068/DEC-0074 baseline-reconciliation convention, a follow-up baseline-advancement-only reconciliation may advance the recorded mainline and this WORK-049-CORE-001 baseline to the exact post-transition governance mainline once the governance PR carrying the activation merges — the implementation branch is then cut from the mainline that carries the authorization record, exactly one implementation PR, no self-authorization, no self-merge). DEC-0075 accepts WORK-048 on PR #139 exact reviewed head e2af4bd20e403c1d4ee9717f7eea8809c16a53cd (three Architect review rounds over correction heads ba63371 -> fc856bb -> e2af4bd; canonical acceptance comment 5524305998; 46/46 deterministic battery; SOFTWARE-only), merged at ce1ccaea328743a05cf8d6fa87a114e69d9e253c (2026-09-03T10:30:47Z), superseding WORK-048-CORE-001 and releasing the single active execution slot. WORK-049 issue #98 is the next canonical commercial Work Item; its hard dependencies WORK-046, WORK-047, and WORK-048 (exactly the frozen spec/work-items.md declaration) are accepted-merged in the execution ledger (DEC-0067, DEC-0070, DEC-0075). WORK-050 is deliberately NOT a hard dependency (advisory capability input, not a gate; the ACR-011-sanctioned advisory DAG edge yields a sanctioned ADV-01 advisory) and WORK-040 remains advisory-only experience input (DEC-0051). No W049 implementation delivery exists."
+dependencies:
+  - WORK-046
+  - WORK-047
+  - WORK-048
+authority_inputs:
+  - "WORK-048 provider sharing runtime (sharing/ public contract: prepare/authorize/activate/account_traffic/pause/resume/withdraw_consent/emergency_stop/notify_path_lost/change_path/close; consent/quota/session surfaces) — the provider-mode control plane the client drives; the client is a client/controller for it, never a reimplementation of its containment, isolation, quota, or provider-traffic enforcement"
+  - "ACR-012 containment authority contract (DEC-0072; containment/ public contract) — the frozen capability vocabulary unsupported/unknown/supported/restricted reused as the client capability dimension, the NO PROVEN CONTAINMENT => NO BUYER TRAFFIC invariant, and the boundary lifecycle; the client must never bypass or soften this boundary"
+  - "WORK-047 marketplace discovery/proximity/path-selection (marketplace/ public contract: discover/propose/coordinate_reservation/handoff_to_networkpath) — the only source of offers/candidates the client may present; candidate proposals are never self-validated by the client"
+  - "WORK-046 developer API boundary (developerapi/ public contract) — the application/developer surface the client may sit behind or delegate into without duplicating W046 commercial semantics"
+  - "WORK-041 NetworkPath machinery (networkpath/) — the validation/activation authority for the production path; the client requests/hands off and consumes state, never validates/activates/retires a path itself"
+  - "W051 CommercialCore lease truth (commercial/) — the commercial lifecycle authority; read-only projection of price/lease/quota/duration/authorization/revocation/expiration; never invented, mutated, or shadowed locally"
+  - "W042 UsageLedger (usage/) — the canonical usage journal; the client surfaces usage and emits client-side observations/events only where the public contract requires it; never an alternate canonical usage ledger"
+  - "/identity NodeID and credential references (held/referenced/displayed; never minted; no second user/device identity authority; no credential-validity or revocation authority)"
+  - "/sessions logical session identity (referenced and projection-displayed; never a parallel session abstraction whose lifecycle can diverge from canonical session state)"
+  - "/routing path computation/selection (referenced, never duplicated; no client routing algorithm, no route cache that becomes authoritative, no packet-forwarding logic)"
+  - "/transport secure transport mappings (invoked through public contracts; no bespoke tunnel protocol, no duplicate tunnel/session authority)"
+  - "/adapters platform isolation/OS primitives and platform-specific mechanisms (isolated behind the W049 platform-adapter boundary; the platform-neutral client core never imports an OS/SDK-specific implementation directly)"
+  - "/policy and /telemetry authorities (composed; policy evaluation and observations remain theirs)"
+  - "WORK-045 eligibility/provider-trust/jurisdiction policy where applicable"
+  - "WORK-050 platform capability/isolation matrix (advisory input, NOT a hard gate)"
+authority_outputs:
+  - "Provider & Buyer Connectivity Client Runtime: a platform-neutral client/runtime boundary that makes end-user participation possible — provider-mode and buyer-mode client lifecycle projections, consent UX plumbed through the canonical provider-sharing machinery, capability discovery with fail-closed semantics, status/event projections of canonical state, offline/reconnect projection behavior, emergency-stop control, privacy-bounded presentation, and the platform-adapter boundary — a consumer/orchestrator/projection boundary only"
+  - "Client-local lifecycle state machines (provider: UNAVAILABLE -> CAPABILITY_CHECKED -> READY -> CONSENT_REQUIRED -> CONSENTED -> HANDOFF_REQUESTED -> ACTIVE -> PAUSED -> REVOKED/EXPIRED/STOPPED -> CLOSED; buyer: IDLE -> DISCOVERING -> OFFER_SELECTED -> AUTHORIZATION_PENDING -> LEASE_CONFIRMED -> PATH_HANDOFF_PENDING -> ATTACHING -> ACTIVE -> DEGRADED/RECONNECTING -> EXPIRED/REVOKED/FAILED -> CLOSED) — client projection/UX/control/handoff states only, never canonical lease/session/path/containment states, never proof that connectivity exists"
+scope:
+  - "client/"
+  - "tools/client_selftest.py"
+  - "docs/WORK-049-evidence.md"
+  - "docs/WORK-049-handoff.md"
+  - ".github/workflows/spec-check.yml"
+acceptance_criteria:
+  - "Provider-mode and buyer-mode client lifecycles present local policy (quota, time, price, sharing scope, privacy, emergency stop) with explicit, revocable provider consent."
+  - "Device capability discovery yields explicit support/unsupported states; the client hands off securely to the provider sharing runtime (WORK-048), discovery/path selection (WORK-047), and developer API (WORK-046) where application-mediated."
+  - "Client-side status/events for lease, connectivity, metering, and failures are projections of canonical state, never a new source of truth; offline/reconnect behavior never invents commercial truth."
+  - "Privacy-preserving display of nearby offer/provider information; a platform adapter boundary covers Android/desktop/router-class environments."
+  - "The client runtime is not identity, session, NetworkPath, routing, transport, commercial, usage, or payment authority."
+evidence_classes:
+  - criterion: "Client lifecycle, consent presentation, capability fail-closed, handoff boundary, status/event projection, offline/reconnect projection, privacy-bounded presentation, platform-adapter boundary, determinism, replay, recovery, and authority/import boundary proofs"
+    class: SOFTWARE
+    allowed_statuses:
+      - PASS
+      - PARTIAL
+      - NOT-TESTABLE
+      - OPEN
+  - criterion: "Real platform behavior on physical Android/desktop/router-class devices (real capability reporting, real secure handoff, real attach/detach, real notifications, real secure storage)"
+    class: PHYSICAL
+    allowed_statuses:
+      - OPEN
+      - PARTIAL
+      - NOT-TESTABLE
+      - PASS
+out_of_scope:
+  - "server-side commercial, usage, or payment authority (W051/W042/W044 territory)"
+  - "path validation or activation (the W041 NetworkPath machinery owns it)"
+  - "metering enforcement (WORK-048/W052 own it)"
+  - "containment/isolation/quota/provider-traffic enforcement (W048/ACR-012 own it; the client cannot weaken or bypass NO PROVEN CONTAINMENT => NO BUYER TRAFFIC)"
+  - "marketplace ranking/discovery implementation (WORK-047)"
+  - "developer API implementation (WORK-046)"
+  - "identity, session, routing, or transport implementation"
+  - "WORK-050's capability matrix (advisory capability input consumed for device support states, not a hard gate)"
+  - "custody of payment credentials; raw payment-credential handling or storage"
+  - "any second identity, session, NetworkPath, routing, transport, commercial, usage, payment-custody, or connectivity authority (no ClientLocalPath/ClientRoute/ClientPreferredRoute/ClientActivatedPath networking authority; no local billing ledger; no shadow lease; no payment-succeeded-therefore-connected semantics; no soft revoke; no UI-only stop that leaves W048 active)"
+  - "modifying spec/architect/ from the implementation PR (self-authorization is prohibited)"
+  - "frozen architecture/protocol/schema changes"
+  - "WORK-040 physical evidence (EVID-007/EVID-008 remain W040-owned and open; W049 SOFTWARE evidence is never upgraded to a PHYSICAL PASS)"
+  - "WORK-050 implementation or activation"
+acceptance_gate:
+  status: "Architect review required after implementation"
+  required_evidence:
+    - "deterministic provider-mode client lifecycle battery: capability supported -> explicit consent required -> consent grant -> canonical handoff to W048 -> active projection -> consent withdrawal -> emergency stop -> canonical revocation -> expiry -> closed state"
+    - "deterministic buyer-mode client lifecycle battery: discovery -> offer presentation -> selection -> canonical authorization/lease confirmation -> NetworkPath handoff -> attachment -> active projection -> path loss -> reconnect -> expiry -> revocation -> closed state"
+    - "authority-preservation proofs: the client never mints sessions, never computes routes, never activates NetworkPath directly, never mutates commercial truth, never creates a usage ledger, and never bypasses W048 containment"
+    - "offline/reconnect proofs: no fabricated canonical state; stale cache distinguishable from current truth; reconnect reconciles against canonical state; revoked/expired state cannot be resurrected locally; no automatic resumption of production connectivity merely because previous local state said ACTIVE"
+    - "capability fail-closed proofs: unsupported => fail closed; unknown => fail closed; restricted => constrained behavior only; supported => proceeds only after canonical checks (no implicit platform assumptions)"
+    - "privacy proofs: no unnecessary exact provider/buyer location; no raw payment credentials; no unnecessary KYC persistence; no sensitive data leakage in logs"
+    - "determinism: deterministic state-machine execution, deterministic event ordering semantics, deterministic golden outputs, repeated byte-identical test output where the repository test methodology supports it, and independence from hash iteration ordering / PYTHONHASHSEED where applicable"
+    - "import/AST/source boundary audit proving no authority inversion: no direct mutation of or private import into identity/session/routing/transport/commercial/usage authority internals, no direct database/table writes into another subsystem, no copying of another subsystem's source of truth into an independently writable local store, platform-specific mechanism isolated behind the adapter boundary"
+    - "exact reviewed delivery SHA, evidence manifest, CI/provenance condition, and the SOFTWARE/PHYSICAL evidence-class honesty disclosure (all sandbox/client simulations are SOFTWARE; physical platform proof remains separately governed and W040-owned)"
+handoff: docs/WORK-049-handoff.md
+handoff_required: true

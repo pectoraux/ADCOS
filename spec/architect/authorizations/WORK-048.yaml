@@ -1,14 +1,20 @@
-# ADCOS Work Item authorization record — WORK-048 active implementation.
+# ADCOS Work Item authorization record — WORK-048 provenance.
 # Issued by DEC-0073 after W047 acceptance (DEC-0070) and the frozen
 # buyer-traffic containment authority (DEC-0072 / ACR-012).
-# The authorization is the ONLY durable authority to implement WORK-048.
+# The authorization was the ONLY durable authority to implement WORK-048.
 # Baseline: advanced to the exact post-PR-#137 governance mainline by the
 # DEC-0074 baseline-advancement-only reconciliation (the
 # DEC-0063/DEC-0066/DEC-0068 convention; original DEC-0073 issuance
 # baseline 7bc31f2, the W047 merge mainline).
+# Superseded by DEC-0075 after Architect acceptance of PR #139 (exact reviewed
+# head e2af4bd20e403c1d4ee9717f7eea8809c16a53cd, merge
+# ce1ccaea328743a05cf8d6fa87a114e69d9e253c): the delivered and accepted W048
+# implementation releases the single active execution slot.
 work_item: WORK-048
-status: active
-authorized: true
+status: superseded
+authorized: false
+superseded_by: "WORK-049-CORE-001"
+supersession_decision: DEC-0075
 type: implementation
 authorization_id: "WORK-048-CORE-001"
 authorization_decision: DEC-0073

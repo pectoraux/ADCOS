@@ -35,6 +35,8 @@ The acceptance records are DEC-0001..DEC-0039 for WORK-001..WORK-039, plus DEC-0
 | DEC-0072 | governance | null | ACCEPTED | ACCEPTED | ACR-012 acceptance — first-class Buyer-Traffic Containment Boundary authority |
 | DEC-0073 | governance | WORK-048 | ACCEPTED | ACCEPTED | W048 activation: WORK-048-CORE-001 issued with exact baseline 7bc31f2 |
 | DEC-0074 | governance | WORK-048 | ACCEPTED | ACCEPTED | W048 baseline reconciliation to the post-PR-#137 governance mainline |
+| DEC-0075 | acceptance | WORK-048 | ACCEPTED | ACCEPTED | W048 sharing/containment acceptance; WORK-048-CORE-001 superseded; slot released |
+| DEC-0076 | governance | WORK-049 | ACCEPTED | ACCEPTED | W049 activation: WORK-049-CORE-001 issued with exact baseline ce1ccae (client-runtime boundary, no new ACR) |
 
 ## Rules
 
