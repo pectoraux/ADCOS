@@ -232,3 +232,38 @@ jobs:
 
       - name: Run provider sharing runtime/containment tests
         run: python3 tools/sharing_selftest.py
+
+  # WORK-049 exact-head evidence (independent job, the W048
+  # precedent): the specification job above carries the KNOWN,
+  # INHERITED governance failures (ARCH-02 historical ledger/schema
+  # defects, visible and unmasked here exactly as on main).  This
+  # job runs the W049 client battery regardless of the
+  # specification job's outcome and never edits, retries, or masks
+  # it.  P1-5 (PR #142 review): the battery's frozen-surface and
+  # authorized-scope audits are pinned to the IMMUTABLE authorized
+  # baseline SHA declared by the frozen WORK-049-CORE-001
+  # authorization record — never to the mutable origin/main ref —
+  # so this job checks out the EXACT delivery head with full
+  # history (the baseline is an ancestor of the head and is
+  # therefore present locally) and fetches the baseline commit as
+  # belt-and-braces.  origin/main is deliberately NOT fetched for
+  # this job: it is not an audit authority for this battery.
+  client-runtime:
+    name: Client runtime battery (W049 exact-head)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the exact delivery head (full history)
+        uses: actions/checkout@v4
+        with:
+          # the exact PR head (push events: the pushed head) so the
+          # baseline-pinned audits see exactly the delivered tree
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+
+      - name: Fetch the immutable authorized baseline commit
+        run: |
+          git fetch --no-tags origin da56adcef48cd8449c383457949f709f8b5bc9cd || \
+            echo "baseline fetch unavailable (the baseline is already an ancestor of the head)"
+
+      - name: Run provider/buyer client runtime tests
+        run: python3 tools/client_selftest.py
