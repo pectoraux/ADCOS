@@ -10,7 +10,7 @@ reviewed_sha: c2e1b3cdcb5146055e754c4effdf1f3adf53e966
 decision: ACCEPTED
 status: ACCEPTED
 reviewer: "Architect (pectoraux)"
-timestamp: 2026-09-03T00:00:00Z
+timestamp: 2026-09-03T02:47:15Z
 findings:
   - "ARCH-08 correctly evaluates authorization coverage by matching changed implementation paths against literal scope prefixes."
   - "WORK-047-CORE-001 was validly issued by DEC-0067 and reconciled by DEC-0068, but its first scope entry was expressed as prose (marketplace discovery, proximity, and path-selection implementation defined by issue #91) rather than the literal implementation prefix marketplace/."
