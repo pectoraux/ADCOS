@@ -1,0 +1,47 @@
+# ADCOS Architect decision record.
+# schema: spec/architect/decision-record-template.md; verified by tools/spec_check.py (ARCH-04).
+# Baseline-advancement-only reconciliation (the DEC-0063/DEC-0066/DEC-0068
+# convention) for the WORK-048 activation issued by DEC-0073.
+decision_id: DEC-0074
+type: governance
+work_item: WORK-048
+acr: null
+pr: 137
+reviewed_sha: bd544dbce0aec345521d340f45ad4562567927cf
+decision: ACCEPTED
+status: ACCEPTED
+reviewer: "Architect (pectoraux)"
+timestamp: 2026-09-03T03:49:46Z
+findings:
+  - "The DEC-0072/DEC-0073 governance transition itself was merged as PR #137 (head 704e68ef709ed19ec9d25bb2a2f3d3506c60cfa2, base 7bc31f2899307c56639887416d602b41b4c16f43, merge commit bd544dbce0aec345521d340f45ad4562567927cf, merged 2026-09-03T03:49:46Z under the single-Architect merge authority of review-protocol §7), so the repository's actual mainline became bd544db while the persistent state referenced the LEDGER-RECON-017 snapshot baseline 7bc31f2."
+  - "DEC-0073 issued WORK-048-CORE-001 with issuance baseline 7bc31f2899307c56639887416d602b41b4c16f43 (the exact W047 merge mainline the governance transition was cut from, recorded while the transition PR was still open); this reconciliation advances the WORK-048 implementation baseline to the exact current main SHA bd544dbce0aec345521d340f45ad4562567927cf without changing the W048 contract, authorization scope, dependency satisfaction (WORK-041, WORK-042, and WORK-051 stay accepted-merged), or prior acceptance facts."
+  - "The PR #137 delta is verified governance-only: 13 files, +839/-48, exactly the spec/architect and spec/acr transition surface plus the W048 handoff document (DEC-0070, DEC-0071, DEC-0072, DEC-0073, the WORK-047.yaml supersession, the new WORK-048.yaml authorization, the execution-ledger and execution-state reconciliation with LEDGER-RECON-016/LEDGER-RECON-017, current-state.md, the decisions README, ACR-012 and its registry entry, and docs/WORK-048-handoff.md); no implementation file, frozen architecture document, protocol schema, registry file, or W040 obligation was touched."
+  - "WORK-048-CORE-001 remains exactly the single active implementation authorization (issued by DEC-0073; its authorization id, dependencies, literal scope, acceptance criteria, evidence classes, and out-of-scope boundaries are unchanged); this reconciliation issues no new authorization, activates nothing, and supersedes nothing."
+  - "No W048 implementation has begun and no delivery is recorded: the sharing/ and containment/ packages, tools/sharing_selftest.py, and docs/WORK-048-evidence.md do not exist, and the W048 implementation branch has not been cut; implementation may begin only from the reconciled authorized baseline under the already-issued WORK-048-CORE-001."
+  - "DEC-0070, DEC-0071, DEC-0072, DEC-0073, ACR-012, the WORK-047 accepted-merged entry, and every other historical record are preserved exactly; W040 remains independent, in-review, and unaccepted with EVID-007/EVID-008 open and W040-owned; WORK-049 and WORK-050 remain unauthorized ready-candidates."
+  - "No specification-consistency run exists on the exact PR #137 head or merge commit that is green: the recorded condition stops at the already-known inherited mainline state (ARCH-02 schema drift in pre-existing historical records; ARCH-06 open-obligation visibility; the selftest mutation-anchor drift), which is inherited governance state, not a defect of this reconciliation, and is not represented as a green CI result."
+blockers: []
+required_corrections: []
+evidence:
+  merge_sha: bd544dbce0aec345521d340f45ad4562567927cf
+  ci_run: null
+  artifacts:
+    - "spec/architect/authorizations/WORK-048.yaml"
+    - "spec/architect/execution-state.yaml"
+    - "spec/architect/execution-ledger.yaml"
+accepted_scope:
+  - "The baseline-advancement-only reconciliation of the WORK-048-CORE-001 implementation baseline and the persistent snapshot to the exact post-transition governance mainline bd544dbce0aec345521d340f45ad4562567927cf (the PR #137 governance merge that carries DEC-0070/DEC-0071/DEC-0072/DEC-0073 / LEDGER-RECON-016/LEDGER-RECON-017)."
+  - "The synchronized execution-ledger.yaml, execution-state.yaml, WORK-048.yaml, current-state.md, and decisions README updates that record this advancement."
+rejected_scope:
+  - "Any WORK-048 implementation, sharing/ or containment/ code, or scope change (the WORK-048-CORE-001 contract is unchanged from its DEC-0073 issuance)."
+  - "Any new authorization, any W049/W050 activation, or any change to the single-active-authorization slot."
+  - "Any modification of frozen architecture or protocol semantics, registry files, architecture locks, or implementation artifacts."
+  - "Any rewriting of DEC-0070, DEC-0071, DEC-0072, DEC-0073, ACR-012, or any other historical record."
+  - "Any acceptance or closure of W040 physical evidence obligations EVID-007/EVID-008."
+downstream_effect:
+  - "The WORK-048-CORE-001 authorization baseline and the execution snapshot advance 7bc31f2 -> bd544db (LEDGER-RECON-018) in lockstep, so ARCH-03 and ARCH-05 hold at the reconciled state; the W048 implementation branch is to be cut from the exact reconciled authorized baseline bd544db (the mainline that carries the DEC-0073 activation record)."
+  - "The WORK-048 registered-only ledger entry note records the DEC-0074 baseline advancement while the original DEC-0073 issuance baseline 7bc31f2 remains recorded there; no delivery field becomes claimable and no W048 delivery exists."
+  - "DEC-0073 remains the authoritative WORK-048-CORE-001 issuance evidence; no prior work-item history is rewritten and no W047/W046/W045/W044/W053/W052/W051/W042/W041 fact changes."
+  - "W040 remains independent, in-review, and unaccepted; its physical evidence obligations remain OPEN and W040-owned."
+  - "Per the DEC-0063/DEC-0066/DEC-0068 convention, a further baseline-advancement-only reconciliation is required only if additional governance merges land on main before the W048 implementation branch is cut; this reconciliation's own merge is covered by that same convention (the W044-established governance-only branch-point offset applies in the interim)."
+resolved_by: null
