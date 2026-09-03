@@ -188,6 +188,9 @@ jobs:
       - name: Run marketplace discovery/proximity/path-selection tests
         run: python3 tools/marketplace_selftest.py
 
+      - name: Run provider sharing runtime/containment tests
+        run: python3 tools/sharing_selftest.py
+
       # Persistent Architect package: authorization provenance for pull
       # requests. Runs LAST on purpose: the frozen-surface batteries above
       # detect the origin/main ref to choose their strict context, and this
@@ -205,3 +208,27 @@ jobs:
         run: |
           git fetch --no-tags origin main
           python3 tools/spec_check.py --provenance
+
+  # WORK-048 exact-head evidence (independent job): the specification
+  # job above carries the KNOWN, INHERITED governance failures
+  # (ARCH-02 historical ledger/schema defects, visible and unmasked
+  # here exactly as on main).  That failure stops the specification
+  # job BEFORE its later steps, so the W048 battery needs its own
+  # job to produce terminal exact-head CI evidence for the sharing
+  # runtime/containment family — this job runs regardless of the
+  # specification job's outcome and never edits, retries, or masks
+  # it.  origin/main is fetched so the battery's frozen-surface and
+  # authorized-scope audits (cases 35/36) run in their strict PR
+  # context here too.
+  provider-sharing-runtime:
+    name: Provider sharing runtime/containment battery (W048 exact-head)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Fetch origin/main for the frozen-surface audits
+        run: git fetch --no-tags origin main
+
+      - name: Run provider sharing runtime/containment tests
+        run: python3 tools/sharing_selftest.py
