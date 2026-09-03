@@ -1,0 +1,97 @@
+# ADCOS Work Item authorization record — WORK-048 active implementation.
+# Issued by DEC-0073 after W047 acceptance (DEC-0070) and the frozen
+# buyer-traffic containment authority (DEC-0072 / ACR-012).
+# The authorization is the ONLY durable authority to implement WORK-048.
+# Baseline: the exact W047 merge mainline (this governance transition's base).
+work_item: WORK-048
+status: active
+authorized: true
+type: implementation
+authorization_id: "WORK-048-CORE-001"
+authorization_decision: DEC-0073
+baseline_sha: 7bc31f2899307c56639887416d602b41b4c16f43
+containment_authority_decision: DEC-0072
+containment_authority_acr: ACR-012
+review_basis: "DEC-0070 accepts WORK-047 on PR #135 exact reviewed head 348154d063c0e0a12d5635cb2093c67a507a4064, merged at 7bc31f2899307c56639887416d602b41b4c16f43, releasing the single active execution slot. DEC-0072 accepts ACR-012 (the first-class Buyer-Traffic Containment Boundary authority), resolving the DEC-0071 W048-CONTAINMENT-AUTHORITY gate. DEC-0073 issues WORK-048-CORE-001 with baseline 7bc31f2899307c56639887416d602b41b4c16f43, the exact current main. WORK-048 issue #92 is the next canonical commercial Work Item; its hard dependencies WORK-041, WORK-042, and WORK-051 (exactly the frozen spec/work-items.md declaration) are accepted-merged in the execution ledger. Per the DEC-0063/DEC-0066/DEC-0068 convention, a follow-up baseline-advancement-only reconciliation may align this baseline to the exact post-transition governance mainline once the governance PR carrying this authorization merges; the implementation branch must be cut from the mainline that carries this authorization record, with the W044-established governance-only branch-point offset convention applying in the interim."
+dependencies:
+  - WORK-041
+  - WORK-042
+  - WORK-051
+authority_inputs:
+  - "WORK-051 CommercialCore lease truth (Lease state/expiry/quota/buyer; read-only; the commercial lifecycle authority)"
+  - "WORK-041 NetworkPath path lifecycle (discover/validate/bind/activate/retire; activation authority for the leased path)"
+  - "WORK-042 UsageLedger canonical usage journal and idempotency/reconciliation (usage evidence correlation target)"
+  - "/identity NodeID and credential references (never minted)"
+  - "/session logical session identity (referenced, never created)"
+  - "/routing path computation/selection (referenced, never duplicated)"
+  - "/transport secure transport mappings (tunnel configured to the leased egress, never reimplemented)"
+  - "/adapters platform isolation primitives (netns/nftables, VRF, VpnService, Network Extension; configured, never reimplemented)"
+  - "/services local-service exposure policy (deny-by-default; never duplicated)"
+  - "/policy and /telemetry authorities (composed; policy evaluation and observations)"
+  - "WORK-045 eligibility/provider-trust/jurisdiction policy where applicable"
+  - "WORK-047 marketplace selection where the marketplace-selected provider flow is used"
+  - "WORK-046 developer API boundary where composed"
+  - "WORK-050 platform capability/isolation matrix (advisory input, NOT a hard gate)"
+  - "ACR-012 containment authority contract (DEC-0072; the frozen buyer-traffic containment boundary vocabulary, invariants, and proof requirements)"
+authority_outputs:
+  - "Provider connectivity sharing runtime: provider sharing session lifecycle (prepare -> authorized -> active -> paused -> expired/revoked -> closed), explicit provider consent records, local lease/quota/capacity enforcement, usage evidence correlation into W042, and NetworkPath composition — a local enforcement mechanism only"
+  - "ContainmentBoundary implementation per the ACR-012 frozen contract: capability dimension unsupported/unknown/supported/restricted, boundary lifecycle prepared -> verified -> active -> degraded/failed/revoked/closed, admission of buyer traffic, fail-closed establishment/verification/teardown, and containment-proof evidence — the enforcement dual of NetworkPath selection"
+scope:
+  - "sharing/"
+  - "containment/"
+  - "tools/sharing_selftest.py"
+  - "docs/WORK-048-evidence.md"
+  - "docs/WORK-048-handoff.md"
+  - ".github/workflows/spec-check.yml"
+acceptance_criteria:
+  - "The provider sharing session lifecycle (prepare → authorized → active → paused → expired/revoked → closed) enforces explicit provider consent before exposure and binds each sharing session to a canonical commercial lease and the production NetworkPath/path-validation machinery."
+  - "Byte/time/quota enforcement is deterministic with accounting hooks into the UsageLedger; concurrent buyer limits and capacity reservations cannot oversubscribe the declared provider envelope."
+  - "Lease expiry and emergency stop controls halt new buyer traffic promptly without rewriting historical usage."
+  - "Isolation between provider control traffic and buyer traffic uses an OS/network mechanism appropriate to the platform; isolation failures fail closed."
+  - "Usage events correlate to the canonical lease/session and remain compatible with UsageLedger idempotency/reconciliation; network path loss/change composes with the NetworkPath validation/activation flow rather than bypassing it; no forbidden imports or writes into identity/session/routing/transport authorities."
+evidence_classes:
+  - criterion: "Sharing lifecycle, consent, quota, lease expiry, emergency stop, usage correlation, determinism, replay, recovery, concurrency, and authority/import boundary proofs"
+    class: SOFTWARE
+    allowed_statuses:
+      - PASS
+      - PARTIAL
+      - NOT-TESTABLE
+      - OPEN
+  - criterion: "Containment-boundary establishment/verification/teardown proofs at the OS/network primitive level (ACR-012 boundary lifecycle and capability vocabulary)"
+    class: SOFTWARE
+    allowed_statuses:
+      - PASS
+      - PARTIAL
+      - NOT-TESTABLE
+      - OPEN
+  - criterion: "Physical containment on real devices/networks (buyer traffic cannot reach a real provider control-plane/local resources)"
+    class: PHYSICAL
+    allowed_statuses:
+      - OPEN
+      - PARTIAL
+      - NOT-TESTABLE
+      - PASS
+out_of_scope:
+  - "payment processing or payout logic (WORK-044)"
+  - "marketplace ranking/discovery implementation (WORK-047)"
+  - "developer API implementation (WORK-046)"
+  - "new core networking protocol semantics"
+  - "arbitrary packet interception or plaintext inspection unless separately authorized"
+  - "custody of payment credentials"
+  - "assumption that every OS can safely share connectivity (platform capability must be explicit — WORK-050's matrix is advisory capability input, not a hard gate)"
+  - "any second identity, session, NetworkPath, routing, transport, commercial, usage, or payment-custody authority"
+  - "modifying spec/architect/ from the implementation PR"
+  - "frozen architecture/protocol/schema changes"
+  - "WORK-040 physical evidence; WORK-049/W050 implementation"
+acceptance_gate:
+  status: "Architect review required after implementation"
+  required_evidence:
+    - "deterministic provider-sharing lifecycle battery with positive and fail-closed cases (consent, lease validation, path validation, quota enforcement, concurrency reservation, lease expiry, consent withdrawal, emergency stop)"
+    - "isolation establishment proof and isolation-failure fail-closed proofs at the OS/network primitive level per ACR-012 (no proven containment => no buyer traffic; no new buyer traffic on lease inactive/consent absent/revoked, NetworkPath not valid/active, quota exhausted, isolation unavailable, or containment proof invalid)"
+    - "platform capability fail-closed behavior (unsupported/unknown refuse exposure)"
+    - "path-loss behavior composed with W041 and W042 usage correlation"
+    - "replay/idempotency, recovery/process-death, concurrency, and determinism proofs"
+    - "import/authority AST audit: no forbidden imports or writes into identity/session/routing/transport authorities; no plaintext inspection; no second authority"
+    - "exact reviewed delivery SHA, evidence manifest, CI/provenance condition, and the SOFTWARE/PHYSICAL evidence-class honesty disclosure"
+handoff: docs/WORK-048-handoff.md
+handoff_required: true

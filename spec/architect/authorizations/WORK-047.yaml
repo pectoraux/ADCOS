@@ -1,10 +1,15 @@
-# ADCOS Work Item authorization record — WORK-047 active implementation.
+# ADCOS Work Item authorization record — WORK-047 provenance.
 # Issued by DEC-0067 after Architect acceptance of WORK-046; baseline reconciled by DEC-0068.
-# DEC-0069 corrects only the machine-readable authorization scope so ARCH-08
-# can mechanically bind the authorized W047 implementation package.
+# DEC-0069 corrected only the machine-readable authorization scope so ARCH-08
+# could mechanically bind the authorized W047 implementation package.
+# Superseded by DEC-0070 after Architect acceptance of PR #135 (exact reviewed
+# head 348154d063c0e0a12d5635cb2093c67a507a4064, merge
+# 7bc31f2899307c56639887416d602b41b4c16f43).
 work_item: WORK-047
-status: active
-authorized: true
+status: superseded
+authorized: false
+superseded_by: "WORK-048-CORE-001"
+supersession_decision: DEC-0070
 type: implementation
 authorization_id: "WORK-047-CORE-001"
 authorization_decision: DEC-0067

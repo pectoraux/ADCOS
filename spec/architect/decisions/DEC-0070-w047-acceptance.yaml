@@ -1,0 +1,43 @@
+# ADCOS Architect decision record.
+# schema: spec/architect/decision-record-template.md; verified by tools/spec_check.py (ARCH-04).
+# Formal acceptance of the merged WORK-047 implementation delivery.
+decision_id: DEC-0070
+type: acceptance
+work_item: WORK-047
+acr: null
+pr: 135
+reviewed_sha: 348154d063c0e0a12d5635cb2093c67a507a4064
+decision: ACCEPTED
+status: ACCEPTED
+reviewer: "Architect (pectoraux)"
+timestamp: 2026-09-03T02:51:10Z
+findings:
+  - "The exact reviewed implementation head 348154d063c0e0a12d5635cb2093c67a507a4064 is the accepted W047 delivery head."
+  - "The dedicated W047 verification battery is documented as PASS 46/46, with byte-identical repeat output and PYTHONHASHSEED 0/1/7919/unset determinism; the correction rounds resolved the implementation blockers identified during Architect review."
+  - "W047 remains confined to marketplace discovery, privacy-bounded proximity, deterministic ranking/selection, reservation/lease coordination, and NetworkPath handoff; it does not become a second routing, session, transport, identity, commercial, usage, or physical-evidence authority."
+  - "The delivery evidence is SOFTWARE-only. WORK-040 physical obligations EVID-007 and EVID-008 remain independent and open."
+  - "The recorded CI/spec-check failure is an inherited ARCH-02/ARCH-06 mainline condition (with the prior ARCH-08 authorization-scope condition subsequently resolved by DEC-0069); it is not evidence of a W047 implementation regression and is not represented as a successful CI run."
+blockers: []
+required_corrections: []
+evidence:
+  merge_sha: 7bc31f2899307c56639887416d602b41b4c16f43
+  ci_run: null
+  artifacts:
+    - "docs/WORK-047-evidence.md"
+    - "tools/marketplace_selftest.py"
+    - "PR #135 exact reviewed head 348154d063c0e0a12d5635cb2093c67a507a4064"
+    - "PR #135 merge commit 7bc31f2899307c56639887416d602b41b4c16f43"
+accepted_scope:
+  - "Acceptance of the WORK-047 implementation delivered on PR #135 at exact reviewed head 348154d063c0e0a12d5635cb2093c67a507a4064 and merged at 7bc31f2899307c56639887416d602b41b4c16f43."
+  - "Marketplace discovery, proximity, eligibility composition, deterministic ranking/selection, NetworkPath handoff, and reservation/lease coordination within the previously issued WORK-047-CORE-001 scope."
+  - "46-case deterministic implementation evidence and correction history as documented in docs/WORK-047-evidence.md."
+rejected_scope:
+  - "Any frozen architecture or protocol semantic change."
+  - "Any new identity, session, routing, NetworkPath, transport, commercial, usage, payment-custody, or physical-evidence authority."
+  - "Any closure or acceptance of W040 physical obligations."
+  - "Any implicit activation of WORK-048 or WORK-049."
+downstream_effect:
+  - "WORK-047 is accepted-merged and is now a satisfied dependency for downstream governance evaluation."
+  - "The single active execution slot is released from WORK-047; WORK-048 remains unauthorized until its own architecture and authorization gates are satisfied."
+  - "W040 remains in-review/unaccepted with EVID-007 and EVID-008 open."
+resolved_by: null

@@ -1,0 +1,49 @@
+# ADCOS Architect decision record.
+# schema: spec/architect/decision-record-template.md; verified by tools/spec_check.py (ARCH-04).
+# Architecture gate for W048 before implementation authorization.
+# The gate's blocker W048-CONTAINMENT-AUTHORITY is resolved by DEC-0072
+# (ACR-012 acceptance) recorded later in this same governance transition.
+decision_id: DEC-0071
+type: governance
+work_item: WORK-048
+acr: null
+pr: null
+reviewed_sha: 7bc31f2899307c56639887416d602b41b4c16f43
+decision: ACCEPTED
+status: ACCEPTED
+reviewer: "Architect (pectoraux)"
+timestamp: 2026-09-03T03:00:00Z
+findings:
+  - "WORK-047 is now the immediately preceding accepted-merged commercial Work Item at mainline 7bc31f2; W048 is therefore eligible for architectural review but not automatically authorized for implementation."
+  - "W048 is correctly defined as a local enforcement mechanism that must compose W041 NetworkPath, W042 UsageLedger, W051 CommercialCore lease truth, the existing identity/session/routing/transport authorities, and a platform-specific isolation primitive without duplicating their authorities."
+  - "The highest-risk W048 invariant is buyer-traffic containment: isolation failure must fail closed and cannot be satisfied by application-level declarations alone when the deployment platform requires OS/network isolation."
+  - "The existing W048 design explicitly leaves the containment boundary unresolved between composition-only reuse and a first-class auditable containment contract. That unresolved choice is architectural, not an implementation detail, because it defines a safety boundary and authority contract."
+  - "The historical ACR-010 identity has already been used/superseded in prior governance. W048 must not silently reuse that identifier. A new uniquely allocated ACR identifier is required if a first-class containment contract is introduced."
+  - "W048 must remain unauthorized until the containment authority decision is frozen and the repository has a repository-local WORK-048 authorization record with an exact baseline, literal scope, dependencies, evidence classes, and acceptance obligations."
+blockers:
+  - "W048-CONTAINMENT-AUTHORITY"
+required_corrections:
+  - "Freeze the platform-independent containment contract and its authority boundary as a new uniquely numbered ACR, or formally prove that an existing accepted authority already covers the required isolation semantics without semantic expansion."
+  - "Define the fail-closed behavior, capability vocabulary, isolation evidence contract, control-plane/buyer-plane separation, lease/path binding, and observability boundary before implementation authorization."
+evidence:
+  merge_sha: null
+  ci_run: null
+  artifacts:
+    - "docs/WORK-048-provider-sharing-runtime-design.md"
+    - "issue #92 — W048 Provider Connectivity Sharing Runtime, Isolation & Quota Enforcement"
+    - "spec/architecture-lock.md"
+    - "docs/roadmap/commercial-dependency-model.md"
+accepted_scope:
+  - "Architecture-gate finding that W048 requires a frozen containment authority decision before implementation."
+  - "Preservation of W048 hard boundaries: no second identity/session/routing/NetworkPath/transport/commercial/usage authority; no payment custody; no arbitrary plaintext inspection."
+  - "Preservation of the dependency chain W041 + W042 + W051, with W047 composed only where marketplace-selected-provider flow requires it and W050 advisory."
+rejected_scope:
+  - "Any W048 implementation authorization."
+  - "Any creation of a second routing/session/transport/usage/commercial authority inside W048."
+  - "Reuse of the superseded historical ACR-010 identifier without an explicit new governance decision."
+  - "Any W040 physical-evidence acceptance or promotion of software evidence to physical PASS."
+downstream_effect:
+  - "WORK-048 remains READY-CANDIDATE / UNAUTHORIZED."
+  - "No implementation PR for W048 is authorized by this decision."
+  - "The next governance action is the containment-authority decision; only after that decision may a WORK-048 active authorization be issued."
+resolved_by: DEC-0072
