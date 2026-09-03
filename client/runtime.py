@@ -141,10 +141,36 @@ class ClientRuntime:
         return self._requests.get(request_id)
 
     def record_request(self, record: RequestRecord) -> None:
+        """Record one mutating-request outcome in the ledger.
+
+        The claimed ``request_id`` is RE-DERIVED from the record's
+        own (mode, action, subject) plus THIS context's binding
+        digest and must match exactly: an unverifiable record —
+        a forged id, a record minted under another context, or a
+        restored entry whose fields no longer derive its id — is
+        rejected fail-closed (INVALID_INPUT), never silently
+        loaded.  (P1-3 correction: a request-ledger entry is
+        proof of origin only when its id is the deterministic
+        content-derived id; persisted local state may never
+        manufacture performed requests.)"""
         if not isinstance(record, RequestRecord):
             raise ClientError(
                 ClientReasonCode.INVALID_INPUT,
                 "the request ledger records RequestRecord entries only",
+            )
+        derived = _derive_request_id(
+            record.mode, record.action, record.subject,
+            self._context.binding_digest(),
+        )
+        if record.request_id != derived:
+            raise ClientError(
+                ClientReasonCode.INVALID_INPUT,
+                "request record %r is unverifiable: its id is not the "
+                "deterministic id derived from (mode=%r, action=%r, "
+                "subject=%r, this context's binding) — forged or "
+                "cross-context records are rejected (fail closed)"
+                % (record.request_id, record.mode, record.action,
+                   record.subject),
             )
         if record.request_id in self._requests:
             return
@@ -233,18 +259,34 @@ class ClientRuntime:
         """Verify one gateway read is bound to THIS context.
 
         ``expect`` maps binding names to the values this context
-        requires (e.g. provider_ref == context.user_ref).  A
-        mismatch fails closed (BINDING_MISMATCH): authenticated
-        responses must be tied to the correct
-        user/device/application context — a response naming
-        another principal is never acted on."""
+        REQUIRES (e.g. provider_ref == context.user_ref).  Every
+        required binding must be PRESENT and EXACTLY EQUAL: a
+        missing/empty binding on an authenticated canonical
+        response is just as fatal as a mismatched one — an
+        unbound response is never provably for this principal, so
+        it fails closed (BINDING_MISMATCH; resolution DENY — the
+        response is never acted on).  An empty expectation value
+        is a malformed caller input (INVALID_INPUT, fail closed):
+        it can never be satisfied by a present-and-equal binding.
+        (P0-1 correction: the previous presence-tolerant form let
+        missing principal bindings pass verification.)"""
         for name, required in sorted(expect.items()):
+            if not required:
+                raise ClientError(
+                    ClientReasonCode.INVALID_INPUT,
+                    "the %s binding expectation for the canonical %s read "
+                    "is empty: a required binding must name the principal "
+                    "this context requires (fail closed)"
+                    % (name, read.authority),
+                )
             actual = read.binding(name)
-            if required and actual and actual != required:
+            if actual != required:
                 raise ClientError(
                     ClientReasonCode.BINDING_MISMATCH,
-                    "canonical %s read for %r is bound to %s=%r, not this "
-                    "context's %r (fail closed)"
+                    "canonical %s read for %r is not bound to this context: "
+                    "%s is %r, required %r (a missing, empty, or differing "
+                    "required binding fails closed — the response is never "
+                    "acted on)"
                     % (read.authority, read.subject, name, actual, required),
                 )
         return read
@@ -297,26 +339,74 @@ class ClientRuntime:
     def restore(self, data: object) -> None:
         """Restore local state from a snapshot (the restart path).
 
-        The restored cache keeps its recorded freshness classes
-        (anything recorded as current is DEMOTED to STALE_CACHE:
-        restart alone never preserves current-truth status), and
-        every restored request-ledger entry stays recorded (exact
-        replays remain no-ops).  Canonical truth is only
+        The restore is ATOMIC against forgery: every request-ledger
+        entry is RE-DERIVED and validated against this context
+        BEFORE any local state is loaded (a forged snapshot cannot
+        manufacture performed requests, and one unverifiable entry
+        aborts the whole restore — no partial load; P1-3
+        correction).  The restored cache keeps its recorded
+        freshness classes (anything recorded as current is
+        DEMOTED to STALE_CACHE: restart alone never preserves
+        current-truth status).  Canonical truth is only
         re-established by reconciliation."""
         if not isinstance(data, dict):
             raise ClientError(
                 ClientReasonCode.INVALID_INPUT,
                 "runtime snapshot must be a map",
             )
+        # P1-3: the request ledger is validated FIRST (nothing is
+        # loaded from a snapshot whose ledger does not fully
+        # re-derive)
+        requests = data.get("requests", [])
+        if not isinstance(requests, list):
+            raise ClientError(
+                ClientReasonCode.INVALID_INPUT, "snapshot requests must be a list"
+            )
+        restored_records: list = []
+        for entry in requests:
+            if not isinstance(entry, dict):
+                raise ClientError(
+                    ClientReasonCode.INVALID_INPUT,
+                    "snapshot request entry must be a map",
+                )
+            record = RequestRecord(
+                request_id=str(entry.get("request_id", "")),
+                mode=str(entry.get("mode", "")),
+                action=str(entry.get("action", "")),
+                subject=str(entry.get("subject", "")),
+                outcome=str(entry.get("outcome", "")),
+                resolution=str(entry.get("resolution", "")),
+                reason=str(entry.get("reason", "")),
+                issued_at=str(entry.get("issued_at", "")),
+                outcome_at=str(entry.get("outcome_at", "")),
+            )
+            derived = _derive_request_id(
+                record.mode, record.action, record.subject,
+                self._context.binding_digest(),
+            )
+            if record.request_id != derived:
+                raise ClientError(
+                    ClientReasonCode.INVALID_INPUT,
+                    "restored request record %r is unverifiable: its id is "
+                    "not the deterministic id derived from (mode=%r, "
+                    "action=%r, subject=%r, this context's binding) — the "
+                    "forged request-ledger entry is rejected and the "
+                    "restore aborts (fail closed)"
+                    % (record.request_id, record.mode, record.action,
+                       record.subject),
+                )
+            restored_records.append(record)
         events = data.get("events", [])
         if not isinstance(events, list):
             raise ClientError(
                 ClientReasonCode.INVALID_INPUT, "snapshot events must be a list"
             )
-        for entry in events:
-            self._journal.append(_event_from_dict(entry))
+        restored_events = [_event_from_dict(entry) for entry in events]
         cache_data = data.get("cache", {})
         restored = ProjectionCache.restore(cache_data)
+        # -- only after full validation does any state load --
+        for event in restored_events:
+            self._journal.append(event)
         for subject in restored.subjects():
             snapshot = restored.get(subject)
             freshness = snapshot.freshness
@@ -331,30 +421,9 @@ class ClientRuntime:
                     canonical_source=snapshot.canonical_source,
                 )
             )
-        requests = data.get("requests", [])
-        if not isinstance(requests, list):
-            raise ClientError(
-                ClientReasonCode.INVALID_INPUT, "snapshot requests must be a list"
-            )
-        for entry in requests:
-            if not isinstance(entry, dict):
-                raise ClientError(
-                    ClientReasonCode.INVALID_INPUT,
-                    "snapshot request entry must be a map",
-                )
-            self.record_request(
-                RequestRecord(
-                    request_id=str(entry.get("request_id", "")),
-                    mode=str(entry.get("mode", "")),
-                    action=str(entry.get("action", "")),
-                    subject=str(entry.get("subject", "")),
-                    outcome=str(entry.get("outcome", "")),
-                    resolution=str(entry.get("resolution", "")),
-                    reason=str(entry.get("reason", "")),
-                    issued_at=str(entry.get("issued_at", "")),
-                    outcome_at=str(entry.get("outcome_at", "")),
-                )
-            )
+        for record in restored_records:
+            if record.request_id not in self._requests:
+                self._requests[record.request_id] = record
         self._offline_observed = bool(data.get("offline_observed", False))
 
 

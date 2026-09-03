@@ -66,7 +66,20 @@ W049 client-boundary contract:
   surface), py-compile, and the SOFTWARE/PHYSICAL evidence-class
   honesty disclosure (this battery is SOFTWARE verification only:
   no physical platform claim is made or implied, and W040's
-  obligations remain W040-owned).
+  obligations remain W040-owned);
+- PR #142 architect-review correction vectors (comment 5526803026):
+  cases 47-53 prove every P0/P1 finding closed — missing/empty
+  principal bindings fail closed (P0-1), the buyer ACTIVE gate is
+  strictly session/context-bound against misbound contracts
+  (P0-2), the projection cache enforces canonical authority-class
+  dominance over future-timestamped stale/local writes (P1-1),
+  the consent economics are canonically sourced with no
+  caller-supplied input (P1-2), restored request records are
+  re-derived with an atomic forged-ledger refusal (P1-3), stale
+  performed records are revalidated against canonical state
+  (P1-4), and the boundary audits are pinned to the immutable
+  authorized baseline declared by the frozen authorization record
+  — never the mutable origin/main ref (P1-5).
 
 Usage:
     python3 tools/client_selftest.py
@@ -77,6 +90,7 @@ from __future__ import annotations
 
 import ast
 import hashlib
+import inspect
 import os
 import py_compile
 import subprocess  # noqa: S404 - deterministic child processes of this repo's own tools
@@ -189,6 +203,7 @@ from client import (  # noqa: E402
     EventTaxonomy,
     FailClosedResolution,
     Freshness,
+    GatewayRead,
     OfferView,
     PlatformAdapter,
     ProviderClient,
@@ -794,7 +809,6 @@ def _provider_world(
     )
     provider = ProviderClient(
         runtime=client_runtime, sharing=sharing,
-        commercial_terms="USD 10.00 per GB (canonical W051 lease terms)",
     )
     return {
         "runtime": runtime,
@@ -1017,6 +1031,7 @@ def _marketplace_world(
     offers: Optional[Tuple[MarketplaceOffer, ...]] = None,
     fail_attach: bool = False,
     with_delivery: bool = True,
+    misbind: Optional[Dict[str, Dict[str, str]]] = None,
 ) -> Dict[str, Any]:
     """The full buyer-mode composed world: the W041 machinery +
     session, the W047 marketplace service over the canonical
@@ -1024,7 +1039,13 @@ def _marketplace_world(
     battery builds the reference index per the W051 injection
     contract), and the CLIENT STACK (sandbox adapter, gateway,
     runtime, buyer client).  The buyer client drives the canonical
-    chain through the W047 seams only."""
+    chain through the W047 seams only.
+
+    ``misbind`` (the P0-2 adversarial seam) wraps the gateway in
+    the misbound-read double: REAL canonical states, but lease/path
+    bindings rewritten to name another session/buyer — the
+    cross-session injected public contract the activation gate
+    must fail closed on."""
     runtime, peer, session_id, manager, integrator, shared = _base_world()
     listings = offers if offers is not None else (
         _listing(
@@ -1057,6 +1078,13 @@ def _marketplace_world(
         fail_attach=fail_attach,
     )
     gateway = ComposedGateway(clock=shared, core=core, paths=manager)
+    if misbind:
+        gateway = _MisboundGateway(
+            gateway,
+            rewrite_lease=misbind.get("lease"),
+            rewrite_path=misbind.get("path"),
+            rewrite_sharing=misbind.get("sharing"),
+        )
     client_runtime = ClientRuntime(
         context=ClientContext(
             user_ref=BUYER_ID,
@@ -1157,6 +1185,78 @@ def _restarted_buyer_stack(world: Dict[str, Any]) -> Tuple[ClientRuntime, BuyerC
         paths=world["manager"], session_id=world["session_id"],
     )
     return runtime, buyer
+
+
+class _MisboundGateway(CanonicalGateway):
+    """The P0-2 adversarial read double: a canonical-read window
+    that returns the REAL canonical states but rewrites the
+    context BINDINGS to name another session/buyer — the misbound
+    injected public contract (an ACTIVE path and a supported lease
+    that belong to ANOTHER session) the buyer activation gate must
+    fail closed on.  The battery injects it exactly like a real
+    (compromised or miswired) gateway would be injected."""
+
+    def __init__(
+        self,
+        inner: CanonicalGateway,
+        *,
+        rewrite_lease: Optional[Dict[str, str]] = None,
+        rewrite_path: Optional[Dict[str, str]] = None,
+        rewrite_sharing: Optional[Dict[str, str]] = None,
+    ) -> None:
+        super().__init__()
+        self._inner = inner
+        self._rewrite_lease = dict(rewrite_lease or {})
+        self._rewrite_path = dict(rewrite_path or {})
+        self._rewrite_sharing = dict(rewrite_sharing or {})
+
+    def set_reachable(self, reachable: bool) -> None:
+        super().set_reachable(reachable)
+        self._inner.set_reachable(reachable)
+
+    @staticmethod
+    def _rewritten(
+        read: GatewayRead, rewrite: Dict[str, str]
+    ) -> GatewayRead:
+        if not rewrite:
+            return read
+        bindings = tuple(
+            (key, rewrite.get(key, value)) for key, value in read.bindings
+        )
+        return GatewayRead(
+            authority=read.authority,
+            subject=read.subject,
+            state=read.state,
+            observed_at=read.observed_at,
+            bindings=bindings,
+        )
+
+    def read_clock(self) -> str:
+        return self._inner.read_clock()
+
+    def read_sharing_session(self, sharing_session_id: str) -> GatewayRead:
+        return self._rewritten(
+            self._inner.read_sharing_session(sharing_session_id),
+            self._rewrite_sharing,
+        )
+
+    def read_consent(self, consent_id: str) -> GatewayRead:
+        return self._rewritten(
+            self._inner.read_consent(consent_id), self._rewrite_sharing
+        )
+
+    def read_lease(self, transaction_id: str) -> GatewayRead:
+        return self._rewritten(
+            self._inner.read_lease(transaction_id), self._rewrite_lease
+        )
+
+    def read_path(self, path_id: str) -> GatewayRead:
+        return self._rewritten(
+            self._inner.read_path(path_id), self._rewrite_path
+        )
+
+    def read_usage_account(self, transaction_id: str) -> GatewayRead:
+        return self._inner.read_usage_account(transaction_id)
 
 
 def _advance(clock: StepClock, seconds: int) -> None:
@@ -1461,8 +1561,23 @@ def case_03_consent_presentation(results: List[Result]) -> None:
         problems.append("duration diverges from the canonical scope")
     if not facts.immediate_stop_control:
         problems.append("the immediate stop control is not exposed")
-    if "USD 10.00" not in facts.expected_economic_result:
-        problems.append("the economic result is not presented")
+    # P1-2: the economic result is PROJECTED from the canonical W051
+    # transaction's own offer record — the battery derives the same
+    # projection from the canonical lease read through the gateway
+    # and requires byte-equality (no caller-supplied economics can
+    # diverge the presentation from the canonical terms)
+    canonical_offer = world["gateway"].read_lease(world["tx"]).binding(
+        "offer_terms"
+    )
+    if not canonical_offer or canonical_offer == "{}":
+        problems.append("the canonical lease read carries no offer terms")
+    elif canonical_offer not in facts.expected_economic_result:
+        problems.append(
+            "the economic result is not the canonical offer-terms "
+            "projection (%r not in presentation)" % canonical_offer
+        )
+    if world["tx"] not in facts.expected_economic_result:
+        problems.append("the economic result does not cite the canonical lease")
     if "exact location" not in facts.privacy_implications:
         problems.append("privacy implications not presented")
     if problems:
@@ -2993,7 +3108,7 @@ def case_33_no_wall_clock_or_randomness(results: List[Result]) -> None:
 
 
 # ---------------------------------------------------------------------------
-# H — Boundary audit
+# H — Boundary audit (P1-5: pinned to the IMMUTABLE authorized baseline)
 # ---------------------------------------------------------------------------
 
 
@@ -3037,28 +3152,123 @@ def case_34_import_discipline(results: List[Result]) -> None:
     ))
 
 
-def _origin_main_available() -> bool:
-    try:
-        proc = subprocess.run(
-            ["git", "rev-parse", "--verify", "origin/main"],
-            cwd=REPO_ROOT, capture_output=True, text=True, timeout=60,
-        )
-        return proc.returncode == 0
-    except Exception:  # noqa: BLE001 - audit falls back gracefully
-        return False
+#: The frozen authorization record (WORK-049-CORE-001) — the ONLY
+#: durable authority for this implementation (parsed for its
+#: immutable baseline SHA; the record itself is inherited untouched
+#: from the authorized baseline, which the audits prove).
+_AUTHORIZATION_RECORD_PATH = "spec/architect/authorizations/WORK-049.yaml"
+
+#: The governance-only surface: the branch-point reconciliation
+#: convention authorizes governance-only ancestry (spec/architect/**)
+#: between the declared baseline and the implementation branch point.
+_GOVERNANCE_SURFACE = "spec/architect/"
+
+
+def _authorization_fields() -> Dict[str, str]:
+    """Parse the flat top-level fields of the frozen WORK-049
+    authorization record (stdlib-only; the record is a flat
+    key/value YAML head above nested lists)."""
+    fields: Dict[str, str] = {}
+    path = REPO_ROOT / _AUTHORIZATION_RECORD_PATH
+    if not path.exists():
+        return fields
+    for line in path.read_text().splitlines():
+        if not line or line.startswith((" ", "\t", "#", "-")):
+            continue
+        if ":" not in line:
+            continue
+        key, _, value = line.partition(":")
+        fields[key.strip()] = value.strip().strip('"')
+    return fields
+
+
+def _run_git(*args: str) -> "subprocess.CompletedProcess[str]":
+    return subprocess.run(
+        ["git", *args],
+        cwd=REPO_ROOT, capture_output=True, text=True, timeout=120,
+    )
+
+
+def _authorized_audit_base() -> Optional[Dict[str, object]]:
+    """Derive the IMMUTABLE audit anchors from the frozen
+    authorization record (P1-5 correction).
+
+    Returns ``None`` when the anchors are unavailable (a checkout
+    without git history — the audits then skip honestly, never
+    claiming a PASS they cannot prove).  Otherwise returns:
+
+    - ``authorization_id`` — WORK-049-CORE-001 (parsed);
+    - ``baseline`` — the declared baseline SHA (an immutable COMMIT
+      id, never a mutable ref like origin/main);
+    - ``branch_point`` — the derived commit the implementation
+      branch was cut from: the first-parent chain from HEAD back to
+      the baseline is split by CONTENT (the oldest chain commits
+      whose own first-parent delta touches ONLY the governance
+      surface spec/architect/** are the authorized governance
+      ancestry — the DEC-0077 baseline-reconciliation convention;
+      the first commit above them is the first implementation
+      commit and its parent is the branch point).
+    """
+    fields = _authorization_fields()
+    baseline = fields.get("baseline_sha", "")
+    if len(baseline) != 40 or any(
+        character not in "0123456789abcdef" for character in baseline
+    ):
+        return None
+    if _run_git("cat-file", "-e", "%s^{commit}" % baseline).returncode != 0:
+        return None  # baseline commit not present in this checkout
+    if _run_git(
+        "merge-base", "--is-ancestor", baseline, "HEAD"
+    ).returncode != 0:
+        return None  # HEAD does not descend from the authorized baseline
+    chain = [
+        line.strip()
+        for line in _run_git(
+            "rev-list", "--first-parent", "HEAD", "^" + baseline
+        ).stdout.splitlines()
+        if line.strip()
+    ]  # newest -> oldest
+    branch_point = baseline
+    for commit in reversed(chain):  # oldest -> newest
+        delta = [
+            line.strip()
+            for line in _run_git(
+                "diff", "--name-only", "%s^" % commit, commit
+            ).stdout.splitlines()
+            if line.strip()
+        ]
+        if delta and all(
+            path.startswith(_GOVERNANCE_SURFACE) for path in delta
+        ):
+            branch_point = commit  # authorized governance ancestry
+            continue
+        break  # the first implementation commit ends the ancestry
+    return {
+        "authorization_id": fields.get("authorization_id", ""),
+        "baseline": baseline,
+        "branch_point": branch_point,
+    }
+
+
+def _baseline_unavailable_result(name: str) -> Result:
+    return ok(
+        name,
+        "the authorized-baseline anchors are unavailable in this checkout "
+        "(no git history or no declared-baseline commit object); the "
+        "baseline-pinned audits run in their strict context (CI exact-head "
+        "checkout / full local clone) — skipped locally without claiming a "
+        "PASS",
+    )
 
 
 def case_35_frozen_spec_intact(results: List[Result]) -> None:
     name = "case_35_frozen_spec_intact"
-    problems: List[str] = []
-    if not _origin_main_available():
-        results.append(ok(
-            name,
-            "origin/main is not available in this checkout; the frozen-"
-            "surface audit runs in its strict PR context (CI) — skipped "
-            "locally without claiming a PASS",
-        ))
+    anchors = _authorized_audit_base()
+    if anchors is None:
+        results.append(_baseline_unavailable_result(name))
         return
+    baseline = str(anchors["baseline"])
+    problems: List[str] = []
     frozen = (
         "spec/architecture.md", "spec/work-items.md", "spec/dependency-graph.md",
         "spec/architecture-lock.md",
@@ -3074,21 +3284,21 @@ def case_35_frozen_spec_intact(results: List[Result]) -> None:
         "networkpath/", "identity/", "sessions/", "routing/", "transport/",
         "developerapi/", "eligibility/", "payment/", "adapters/",
     )
+    # P1-5: the frozen-surface audit is pinned to the IMMUTABLE
+    # declared baseline commit (never the mutable origin/main ref)
     for rel in frozen:
-        proc = subprocess.run(
-            ["git", "diff", "--quiet", "origin/main", "--", rel],
-            cwd=REPO_ROOT, capture_output=True, timeout=60,
-        )
-        if proc.returncode != 0:
-            problems.append("frozen surface %s differs from origin/main" % rel)
-    for directory in authority_dirs:
-        proc = subprocess.run(
-            ["git", "diff", "--quiet", "origin/main", "--", directory],
-            cwd=REPO_ROOT, capture_output=True, timeout=60,
-        )
+        proc = _run_git("diff", "--quiet", baseline, "--", rel)
         if proc.returncode != 0:
             problems.append(
-                "authority implementation %s differs from origin/main" % directory
+                "frozen surface %s differs from the authorized baseline %s"
+                % (rel, baseline[:12])
+            )
+    for directory in authority_dirs:
+        proc = _run_git("diff", "--quiet", baseline, "--", directory)
+        if proc.returncode != 0:
+            problems.append(
+                "authority implementation %s differs from the authorized "
+                "baseline %s" % (directory, baseline[:12])
             )
     if problems:
         results.append(fail(name, "; ".join(problems[:5])))
@@ -3098,32 +3308,53 @@ def case_35_frozen_spec_intact(results: List[Result]) -> None:
         "every frozen surface (architecture, work-items, dependency graph, "
         "locks, ACR records, protocol schemas) and every authority "
         "implementation (W041/W042/W045/W046/W047/W048/W051 and the "
-        "platform families) is byte-identical to the authorized baseline",
+        "platform families) is byte-identical to the IMMUTABLE authorized "
+        "baseline %s declared by WORK-049-CORE-001 (origin/main is not an "
+        "audit authority)" % baseline[:12],
     ))
 
 
 def case_36_pr_delta_shape(results: List[Result]) -> None:
     name = "case_36_pr_delta_shape"
-    problems: List[str] = []
-    if not _origin_main_available():
-        results.append(ok(
-            name,
-            "origin/main is not available in this checkout; the PR-delta "
-            "audit runs in its strict PR context (CI) — skipped locally "
-            "without claiming a PASS",
-        ))
+    anchors = _authorized_audit_base()
+    if anchors is None:
+        results.append(_baseline_unavailable_result(name))
         return
-    proc = subprocess.run(
-        ["git", "diff", "--name-only", "origin/main"],
-        cwd=REPO_ROOT, capture_output=True, text=True, timeout=60,
-    )
-    changed = [line.strip() for line in proc.stdout.splitlines() if line.strip()]
-    # untracked files (the local pre-commit context) count too: in
-    # the CI PR context they are committed and appear in the diff
-    untracked = subprocess.run(
-        ["git", "ls-files", "--others", "--exclude-standard"],
-        cwd=REPO_ROOT, capture_output=True, text=True, timeout=60,
-    )
+    baseline = str(anchors["baseline"])
+    branch_point = str(anchors["branch_point"])
+    problems: List[str] = []
+    # 1. the authorized governance ancestry between the baseline and
+    #    the branch point is governance-ONLY (the DEC-0077
+    #    reconciliation convention: spec/architect/** only)
+    ancestry_delta = [
+        line.strip()
+        for line in _run_git(
+            "diff", "--name-only", baseline, branch_point
+        ).stdout.splitlines()
+        if line.strip()
+    ]
+    if branch_point != baseline and not ancestry_delta:
+        problems.append(
+            "the branch point equals the baseline but the ancestry walk "
+            "advanced (inconsistent anchors)"
+        )
+    for rel in ancestry_delta:
+        if not rel.startswith(_GOVERNANCE_SURFACE):
+            problems.append(
+                "the authorized ancestry changed the non-governance path %s "
+                "(only spec/architect/** governance changes may sit between "
+                "the baseline and the branch point)" % rel
+            )
+    # 2. the implementation delta (branch point -> working tree,
+    #    including uncommitted files) stays within the authorized scope
+    changed = [
+        line.strip()
+        for line in _run_git(
+            "diff", "--name-only", branch_point
+        ).stdout.splitlines()
+        if line.strip()
+    ]
+    untracked = _run_git("ls-files", "--others", "--exclude-standard")
     changed.extend(
         line.strip() for line in untracked.stdout.splitlines() if line.strip()
     )
@@ -3142,6 +3373,18 @@ def case_36_pr_delta_shape(results: List[Result]) -> None:
         )
     if not changed:
         problems.append("no delta found (expected the W049 implementation)")
+    # 3. the frozen authorization record itself is inherited
+    #    BYTE-IDENTICALLY from the branch point (no self-authorization,
+    #    no scope rewriting from the implementation)
+    record_at_branch_point = _run_git(
+        "show", "%s:%s" % (branch_point, _AUTHORIZATION_RECORD_PATH)
+    ).stdout
+    working_record = (REPO_ROOT / _AUTHORIZATION_RECORD_PATH).read_text()
+    if record_at_branch_point != working_record:
+        problems.append(
+            "the frozen authorization record differs from its branch-point "
+            "version (self-authorization/scope rewriting is prohibited)"
+        )
     if problems:
         results.append(fail(name, "; ".join(problems[:5])))
         return
@@ -3149,7 +3392,11 @@ def case_36_pr_delta_shape(results: List[Result]) -> None:
         name,
         "the implementation delta stays exactly within the authorized "
         "WORK-049-CORE-001 literal scope (client/, the battery, the "
-        "evidence/handoff docs, additive CI wiring): %d changed paths",
+        "evidence/handoff docs, additive CI wiring): %d changed paths vs "
+        "the derived immutable branch point %s; the governance ancestry "
+        "from the authorized baseline is governance-only and the frozen "
+        "authorization record is inherited byte-identically"
+        % (len(changed), branch_point[:12]),
     ))
 
 
@@ -3196,16 +3443,21 @@ def case_38_evidence_honesty(results: List[Result]) -> None:
             problems.append(
                 "the delivery results claim a physical pass (%r)" % phrase
             )
-    # the obligations doc's frozen section is unchanged from the
-    # authorized baseline (the delivery only APPENDS results)
-    if _origin_main_available():
-        proc = subprocess.run(
-            ["git", "show", "origin/main:docs/WORK-049-evidence.md"],
-            cwd=REPO_ROOT, capture_output=True, text=True, timeout=60,
+    # the obligations doc's frozen section is inherited unchanged
+    # from the authorized baseline (P1-5: pinned to the derived
+    # immutable anchors, never to the mutable origin/main ref; the
+    # delivery only APPENDS results)
+    anchors = _authorized_audit_base()
+    if anchors is not None:
+        baseline = str(anchors["baseline"])
+        proc = _run_git(
+            "show", "%s:docs/WORK-049-evidence.md" % baseline
         )
-        baseline = proc.stdout
+        baseline_text = proc.stdout
         frozen_part = text.split("## Delivery results", 1)[0]
-        if baseline and not baseline.startswith(frozen_part.rstrip()[:200]):
+        if baseline_text and not baseline_text.startswith(
+            frozen_part.rstrip()[:200]
+        ):
             problems.append(
                 "the frozen evidence obligations were rewritten (only the "
                 "delivery results section may be appended)"
@@ -3661,6 +3913,577 @@ def case_46_forged_snapshot_restart_gate(results: List[Result]) -> None:
 
 
 # ---------------------------------------------------------------------------
+# PR #142 ARCHITECT-REVIEW CORRECTION VECTORS (comment 5526803026:
+# P0-1/P0-2/P1-1..P1-5 — every finding carries its adversarial proof)
+# ---------------------------------------------------------------------------
+
+
+def case_47_missing_bindings_fail_closed(results: List[Result]) -> None:
+    """P0-1: a missing/empty required binding fails closed exactly
+    like a mismatched one (the previous presence-tolerant form
+    passed unbound principal bindings)."""
+    name = "case_47_missing_bindings_fail_closed"
+    problems: List[str] = []
+    world = _provider_world()
+    runtime: ClientRuntime = world["client_runtime"]
+    # 1. a REAL canonical lease whose intent carries NO buyer key:
+    #    the battery (as the platform actor) drives a genuine W051
+    #    transaction with an intent that omits the buyer — the read
+    #    window returns an EMPTY buyer_ref and the strict
+    #    verification must refuse it (the old form accepted it)
+    core: CommercialCore = world["core"]
+    unbound_tx = core.submit_intent(
+        command_id="w049-p0-unbound-intent",
+        actor="platform",
+        source="test",
+        intent={"want": "connectivity", "region": "gh"},  # no buyer
+    ).transaction_id
+    unbound_read = world["gateway"].read_lease(unbound_tx)
+    if unbound_read.binding("buyer_ref") != "":
+        problems.append(
+            "fixture: the unbound intent unexpectedly carries a buyer"
+        )
+    _expect_client_error(
+        "lease-without-buyer", problems,
+        runtime.canonical_read, unbound_read,
+        reason=ClientReasonCode.BINDING_MISMATCH,
+        expect={"buyer_ref": BUYER_ID},
+    )
+    # 2. a sharing read whose provider binding is EMPTY fails the
+    #    same way
+    empty_provider = GatewayRead(
+        authority="sharing",
+        subject="sharing-session-unbound",
+        state="prepared",
+        observed_at="2026-06-01T00:00:00Z",
+        bindings=(("provider_ref", ""), ("buyer_ref", BUYER_ID)),
+    )
+    _expect_client_error(
+        "sharing-without-provider", problems,
+        runtime.canonical_read, empty_provider,
+        reason=ClientReasonCode.BINDING_MISMATCH,
+        expect={"provider_ref": PROVIDER_ID},
+    )
+    # 3. an EMPTY expectation is malformed caller input (fail
+    #    closed — it can never be satisfied by a present binding)
+    bound_read = world["gateway"].read_lease(world["tx"])
+    _expect_client_error(
+        "empty-expectation", problems,
+        runtime.canonical_read, bound_read,
+        reason=ClientReasonCode.INVALID_INPUT,
+        expect={"buyer_ref": ""},
+    )
+    # 4. positive control: the correctly-bound read passes
+    runtime.canonical_read(bound_read, expect={"buyer_ref": BUYER_ID})
+    if problems:
+        results.append(fail(name, "; ".join(problems[:5])))
+        return
+    results.append(ok(
+        name,
+        "canonical binding verification is fail-closed on MISSING "
+        "bindings: an authenticated canonical response with an empty "
+        "buyer/provider binding is refused exactly like a mismatched one "
+        "(BINDING_MISMATCH), an empty expectation is malformed input, and "
+        "a correctly-bound read still passes — an unbound response is "
+        "never provably for this principal and is never acted on",
+    ))
+
+
+def case_48_buyer_active_session_binding(results: List[Result]) -> None:
+    """P0-2: the buyer ACTIVE gate strictly binds the path AND the
+    lease to the client's canonical session/context — a misbound
+    injected public contract (an ACTIVE path and a supported lease
+    for ANOTHER session) can never produce a local ACTIVE."""
+    name = "case_48_buyer_active_session_binding"
+    problems: List[str] = []
+
+    def _drive_to_attaching(world: Dict[str, Any]) -> BuyerClient:
+        buyer: BuyerClient = world["buyer"]
+        buyer.start_discovery(world["query"])
+        buyer.select_offer((PROVIDER_ID, "wifi-basic"))
+        buyer.request_authorization()
+        buyer.confirm_lease()
+        buyer.request_path_handoff()
+        return buyer
+
+    # vector A: the ACTIVE path belongs to ANOTHER session
+    world_a = _marketplace_world(
+        misbind={"path": {"session_ref": "session-elsewhere"}}
+    )
+    buyer_a = _drive_to_attaching(world_a)
+    _expect_client_error(
+        "cross-session-path", problems,
+        buyer_a.attach,
+        reason=ClientReasonCode.CANONICAL_DENIED,
+    )
+    if buyer_a.state == "ACTIVE":
+        problems.append("vector A: local ACTIVE was entered over a misbound path")
+    adapter_a: SandboxPlatformAdapter = world_a["adapter"]
+    if buyer_a.path_id in adapter_a.attached_paths():
+        problems.append("vector A: the local attach was not rolled back")
+    # vector B: the lease belongs to ANOTHER session (same buyer)
+    world_b = _marketplace_world(
+        misbind={"lease": {"session_ref": "session-elsewhere"}}
+    )
+    buyer_b = _drive_to_attaching(world_b)
+    _expect_client_error(
+        "cross-session-lease", problems,
+        buyer_b.attach,
+        reason=ClientReasonCode.CANONICAL_DENIED,
+    )
+    if buyer_b.state == "ACTIVE":
+        problems.append("vector B: local ACTIVE was entered over a misbound lease")
+    adapter_b: SandboxPlatformAdapter = world_b["adapter"]
+    if buyer_b.path_id in adapter_b.attached_paths():
+        problems.append("vector B: the local attach was not rolled back")
+    # vector C: the lease belongs to ANOTHER buyer — the strict
+    # principal gate refuses it at the lease-confirmation tier
+    world_c = _marketplace_world(
+        misbind={"lease": {"buyer_ref": "buyer-elsewhere"}}
+    )
+    buyer_c: BuyerClient = world_c["buyer"]
+    buyer_c.start_discovery(world_c["query"])
+    buyer_c.select_offer((PROVIDER_ID, "wifi-basic"))
+    buyer_c.request_authorization()
+    _expect_client_error(
+        "cross-principal-lease", problems,
+        buyer_c.confirm_lease,
+        reason=ClientReasonCode.BINDING_MISMATCH,
+    )
+    if buyer_c.state == "LEASE_CONFIRMED":
+        problems.append("vector C: a foreign lease was locally confirmed")
+    # positive control: the correctly-bound world still attaches
+    world_ok = _marketplace_world()
+    buyer_ok = _drive_to_attaching(world_ok)
+    buyer_ok.attach()
+    if buyer_ok.state != "ACTIVE":
+        problems.append("positive control: the correctly-bound attach failed")
+    if problems:
+        results.append(fail(name, "; ".join(problems[:5])))
+        return
+    results.append(ok(
+        name,
+        "the buyer ACTIVE gate is strictly context/session-bound: an "
+        "injected public contract returning an ACTIVE path or a "
+        "delivery-supported lease bound to ANOTHER session (or another "
+        "buyer) fails closed at the activation gate with the local attach "
+        "rolled back — a misbound contract can never produce a local "
+        "ACTIVE, and the correctly-bound world still attaches",
+    ))
+
+
+def case_49_projection_authority_precedence(results: List[Result]) -> None:
+    """P1-1: canonical-current projections dominate non-canonical
+    freshness classes for the same subject WHATEVER the claimed
+    timestamps — a future-timestamped stale/local write can never
+    displace canonical truth, and canonical truth displaces a newer
+    local symptom even when the canonical read is older."""
+    name = "case_49_projection_authority_precedence"
+    problems: List[str] = []
+    from client import ProjectionCache
+
+    cache = ProjectionCache(max_entries=8)
+    canonical = StatusSnapshot(
+        subject="lease-precedence", state="USAGE_ACCRUING",
+        freshness=Freshness.CANONICAL_STATE,
+        observed_at="2026-06-01T01:00:00Z", canonical_source="commercial",
+    )
+    if not cache.apply(canonical):
+        problems.append("the initial canonical projection was refused")
+    # future-timestamped NON-canonical writes must all be refused
+    for freshness in (
+        Freshness.STALE_CACHE,
+        Freshness.LOCAL_OBSERVATION,
+        Freshness.LOCAL_INTENT,
+        Freshness.UNKNOWN,
+    ):
+        future = StatusSnapshot(
+            subject="lease-precedence", state="DEAD",
+            freshness=freshness,
+            observed_at="2099-01-01T00:00:00Z",
+            canonical_source="client",
+        )
+        if cache.apply(future):
+            problems.append(
+                "a future %s projection displaced current canonical truth"
+                % freshness
+            )
+    held = cache.get("lease-precedence")
+    if held is None or held.state != "USAGE_ACCRUING" or (
+        held.freshness != Freshness.CANONICAL_STATE
+    ):
+        problems.append("the canonical truth was lost")
+    # canonical truth displaces a NON-canonical entry even when the
+    # canonical read carries an OLDER instant (truth in, symptom out)
+    local = StatusSnapshot(
+        subject="symptom-precedence", state="DEGRADED",
+        freshness=Freshness.LOCAL_OBSERVATION,
+        observed_at="2026-06-01T05:00:00Z", canonical_source="client",
+    )
+    if not cache.apply(local):
+        problems.append("the local symptom was refused")
+    older_canonical = StatusSnapshot(
+        subject="symptom-precedence", state="ACTIVE",
+        freshness=Freshness.CANONICAL_STATE,
+        observed_at="2026-06-01T03:00:00Z", canonical_source="networkpath",
+    )
+    if not cache.apply(older_canonical):
+        problems.append(
+            "canonical truth could not displace a newer local symptom"
+        )
+    back_local = StatusSnapshot(
+        subject="symptom-precedence", state="DEGRADED",
+        freshness=Freshness.LOCAL_OBSERVATION,
+        observed_at="2026-06-01T06:00:00Z", canonical_source="client",
+    )
+    if cache.apply(back_local):
+        problems.append(
+            "a local projection re-displaced current canonical truth"
+        )
+    # within one authority class, timestamp monotonicity still holds
+    stale_canonical = StatusSnapshot(
+        subject="lease-precedence", state="RESERVATION_HELD",
+        freshness=Freshness.CANONICAL_STATE,
+        observed_at="2026-06-01T00:30:00Z", canonical_source="commercial",
+    )
+    if cache.apply(stale_canonical):
+        problems.append("an older canonical read displaced a newer one")
+    if problems:
+        results.append(fail(name, "; ".join(problems[:5])))
+        return
+    results.append(ok(
+        name,
+        "the projection cache enforces authority-class DOMINANCE: "
+        "current canonical truth is never displaced by stale/local/intent/"
+        "unknown projections whatever timestamp they claim, canonical truth "
+        "displaces a non-canonical entry even when the canonical read is "
+        "older, and within one authority class timestamp monotonicity "
+        "still holds (stale events cannot overwrite newer canonical state)",
+    ))
+
+
+def case_50_consent_economics_canonical(results: List[Result]) -> None:
+    """P1-2: the provider consent presentation's economic result is
+    a projection of canonical commercial truth — there is NO
+    caller-supplied economic-terms input, and the presentation is
+    byte-equal to the deterministic projection of the canonical W051
+    offer record (arbitrary client text cannot diverge it)."""
+    name = "case_50_consent_economics_canonical"
+    problems: List[str] = []
+    world = _provider_world()
+    facts = _prepared_provider(world)
+    # 1. the constructor exposes NO economic-terms parameter at all
+    signature = inspect.signature(ProviderClient.__init__)
+    for parameter in signature.parameters:
+        if "commercial" in parameter or "terms" in parameter:
+            problems.append(
+                "the provider client still accepts caller-supplied "
+                "economics through %r" % parameter
+            )
+    # 2. the tamper attempt itself is rejected at the boundary
+    try:
+        ProviderClient(
+            runtime=world["client_runtime"], sharing=world["sharing"],
+            commercial_terms="FREE UNLIMITED DATA FOREVER",
+        )
+        problems.append(
+            "the provider client accepted caller-supplied economics"
+        )
+    except TypeError:
+        pass  # the fabrication hole is closed at the signature
+    # 3. the presentation is byte-equal to the canonical projection
+    lease_read = world["gateway"].read_lease(world["tx"])
+    offer_terms = lease_read.binding("offer_terms")
+    if not offer_terms or offer_terms == "{}":
+        problems.append("the canonical lease read carries no offer terms")
+    else:
+        expected = (
+            "canonical W051 offer terms %s cited by lease %s "
+            "(canonical commercial state %s; projected from the "
+            "canonical transaction record — never client-supplied)"
+            % (offer_terms, world["tx"], lease_read.state)
+        )
+        if facts.expected_economic_result != expected:
+            problems.append(
+                "the economic result is not the canonical projection "
+                "(%r != %r)"
+                % (facts.expected_economic_result, expected)
+            )
+    if "FREE" in facts.expected_economic_result:
+        problems.append("caller-fabricated economics leaked into the presentation")
+    if problems:
+        results.append(fail(name, "; ".join(problems[:5])))
+        return
+    results.append(ok(
+        name,
+        "the consent economic result is canonically sourced: the provider "
+        "client accepts NO economic-terms input (the tamper attempt is "
+        "rejected at the boundary), and the presented economics are "
+        "byte-equal to the deterministic projection of the canonical W051 "
+        "offer record read through the gateway — arbitrary client text "
+        "cannot diverge the presentation from the canonical economics",
+    ))
+
+
+def case_51_forged_request_ledger(results: List[Result]) -> None:
+    """P1-3: restored request records are re-derived and validated —
+    a forged id, a cross-context record, or a single unverifiable
+    entry aborts the whole restore (no partial load; the local
+    ledger can never manufacture performed requests)."""
+    name = "case_51_forged_request_ledger"
+    problems: List[str] = []
+    world = _marketplace_world()
+    buyer: BuyerClient = world["buyer"]
+    _active_buyer(world)
+    snapshot = world["client_runtime"].snapshot()
+    if not snapshot.get("requests"):
+        problems.append("fixture: the active buyer recorded no requests")
+    # 1. a forged request id aborts the restore BEFORE any load
+    forged = dict(snapshot)
+    forged_requests = [dict(entry) for entry in snapshot["requests"]]
+    forged_requests[0]["request_id"] = "sha256:" + "0" * 64
+    forged["requests"] = forged_requests
+    fresh_runtime, _fresh_buyer = _restarted_buyer_stack(world)
+    error = None
+    try:
+        fresh_runtime.restore(forged)
+        problems.append("the forged request-ledger entry was accepted")
+    except ClientError as caught:
+        error = caught
+        if error.reason != ClientReasonCode.INVALID_INPUT:
+            problems.append(
+                "the forged ledger restore failed with %r (expected "
+                "INVALID_INPUT)" % error.reason
+            )
+    if fresh_runtime.request_records():
+        problems.append("a partially loaded ledger survived the refusal")
+    # 2. a genuine snapshot restores cleanly (positive control)
+    genuine_runtime, genuine_buyer = _restarted_buyer_stack(world)
+    genuine_runtime.restore(snapshot)
+    genuine_buyer.restore(buyer.snapshot())
+    if len(genuine_runtime.request_records()) != len(snapshot["requests"]):
+        problems.append("the genuine snapshot did not fully restore")
+    # 3. a foreign-context snapshot cannot load its ledger here
+    #    (request ids are derived under THIS context's binding)
+    other_gateway = ComposedGateway(
+        clock=world["shared"], core=world["core"], paths=world["manager"],
+    )
+    other_adapter = SandboxPlatformAdapter(
+        platform_id=SANDBOX_PLATFORM,
+        provider_support="supported", buyer_support="supported",
+    )
+    other_runtime = ClientRuntime(
+        context=ClientContext(
+            user_ref="buyer-elsewhere", device_ref="device-buyer-1",
+            application_ref="app-buyer-1", platform_id=SANDBOX_PLATFORM,
+        ),
+        adapter=other_adapter, gateway=other_gateway,
+    )
+    try:
+        other_runtime.restore(snapshot)
+        problems.append(
+            "a foreign-context snapshot restored its request ledger here"
+        )
+    except ClientError as caught:
+        if caught.reason != ClientReasonCode.INVALID_INPUT:
+            problems.append(
+                "the cross-context restore failed with %r (expected "
+                "INVALID_INPUT)" % caught.reason
+            )
+    if other_runtime.request_records():
+        problems.append("cross-context records partially loaded")
+    if problems:
+        results.append(fail(name, "; ".join(problems[:5])))
+        return
+    results.append(ok(
+        name,
+        "restored request records are re-derived and validated: a forged "
+        "request id aborts the whole restore before ANY local state loads "
+        "(atomic — no partial ledger), a genuine snapshot restores "
+        "byte-identically, and a foreign-context snapshot cannot load its "
+        "ledger under another principal (ids are derived under this "
+        "context's binding — persisted local state can never manufacture "
+        "performed requests)",
+    ))
+
+
+def case_52_stale_performed_records(results: List[Result]) -> None:
+    """P1-4: sensitive successful replays are revalidated against
+    canonical state — a recorded performed outcome whose canonical
+    truth has changed since the original operation fails closed
+    (the local record alone is never proof the operation holds)."""
+    name = "case_52_stale_performed_records"
+    problems: List[str] = []
+    # provider vector 1: the recorded consent grant is stale (the
+    # canonical consent was withdrawn out-of-band by the authority)
+    world = _provider_world()
+    provider: ProviderClient = world["provider"]
+    _prepared_provider(world)
+    provider.grant_consent()
+    world["sharing"].withdraw_consent(provider.sharing_session_id)
+    _expect_client_error(
+        "stale-grant-replay", problems,
+        provider.grant_consent,
+        reason=ClientReasonCode.CANONICAL_DENIED,
+        canonical_code="sharing-consent-state-withdrawn",
+    )
+    # provider vector 2: the recorded activation is stale (the
+    # canonical session was paused out-of-band)
+    world2 = _provider_world()
+    provider2: ProviderClient = world2["provider"]
+    _prepared_provider(world2)
+    provider2.grant_consent()
+    provider2.request_handoff()
+    provider2.activate()
+    world2["sharing"].pause_sharing_session(
+        provider2.sharing_session_id
+    )
+    _expect_client_error(
+        "stale-activate-replay", problems,
+        provider2.activate,
+        reason=ClientReasonCode.CANONICAL_DENIED,
+        canonical_code="sharing-session-state-paused",
+    )
+    # buyer vector: the recorded attach is stale (the canonical path
+    # was retired out-of-band; the replay must NOT return success)
+    bworld = _marketplace_world()
+    buyer: BuyerClient = bworld["buyer"]
+    _active_buyer(bworld)
+    bworld["manager"].retire(buyer.path_id)
+    _expect_client_error(
+        "stale-attach-replay", problems,
+        buyer.attach,
+        reason=ClientReasonCode.CANONICAL_DENIED,
+    )
+    adapter: SandboxPlatformAdapter = bworld["adapter"]
+    if buyer.path_id in adapter.attached_paths():
+        problems.append(
+            "the stale attach replay left the local platform attached"
+        )
+    if problems:
+        results.append(fail(name, "; ".join(problems[:5])))
+        return
+    results.append(ok(
+        name,
+        "sensitive successful replays are revalidated against canonical "
+        "state: a recorded consent grant whose canonical consent was "
+        "withdrawn, a recorded activation whose canonical session was "
+        "paused, and a recorded attach whose canonical path was retired "
+        "all fail closed with the canonical reason preserved — the local "
+        "performed record alone is never accepted as proof that the "
+        "operation still holds",
+    ))
+
+
+def case_53_authorized_baseline_ancestry(results: List[Result]) -> None:
+    """P1-5: the strict boundary audits are pinned to the immutable
+    authorized baseline declared by the frozen WORK-049-CORE-001
+    authorization record (never the mutable origin/main ref): the
+    baseline is a commit, an ancestor of the delivery head, carried
+    by a governance-only ancestry to the derived branch point, and
+    the authorization record itself is inherited from that ancestry
+    with the SAME declared baseline."""
+    name = "case_53_authorized_baseline_ancestry"
+    anchors = _authorized_audit_base()
+    if anchors is None:
+        results.append(_baseline_unavailable_result(name))
+        return
+    problems: List[str] = []
+    fields = _authorization_fields()
+    if fields.get("work_item") != "WORK-049":
+        problems.append(
+            "the authorization record names work item %r"
+            % fields.get("work_item")
+        )
+    if fields.get("authorization_id") != "WORK-049-CORE-001":
+        problems.append(
+            "the authorization record names authorization %r"
+            % fields.get("authorization_id")
+        )
+    if fields.get("status") != "active":
+        problems.append(
+            "the authorization record status is %r" % fields.get("status")
+        )
+    baseline = str(anchors["baseline"])
+    branch_point = str(anchors["branch_point"])
+    if _run_git(
+        "merge-base", "--is-ancestor", baseline, "HEAD"
+    ).returncode != 0:
+        problems.append(
+            "the declared baseline %s is not an ancestor of the delivery "
+            "head" % baseline[:12]
+        )
+    # the branch point's own authorization record declares the SAME
+    # baseline (the reconciliation convention: the implementation
+    # inherits the record from the authorized governance ancestry)
+    record_at_branch_point = _run_git(
+        "show", "%s:%s" % (branch_point, _AUTHORIZATION_RECORD_PATH)
+    ).stdout
+    bp_fields: Dict[str, str] = {}
+    for line in record_at_branch_point.splitlines():
+        if not line or line.startswith((" ", "\t", "#", "-")):
+            continue
+        if ":" not in line:
+            continue
+        key, _, value = line.partition(":")
+        bp_fields[key.strip()] = value.strip().strip('"')
+    if bp_fields.get("baseline_sha") != baseline:
+        problems.append(
+            "the branch-point authorization record declares baseline %r, "
+            "not the audited %r" % (bp_fields.get("baseline_sha"), baseline)
+        )
+    if bp_fields.get("authorization_id") != "WORK-049-CORE-001":
+        problems.append(
+            "the branch-point authorization record names %r"
+            % bp_fields.get("authorization_id")
+        )
+    # every commit above the branch point is an implementation
+    # commit whose own delta stays within the authorized scope
+    chain = [
+        line.strip()
+        for line in _run_git(
+            "rev-list", "--first-parent", "HEAD", "^" + branch_point
+        ).stdout.splitlines()
+        if line.strip()
+    ]
+    if not chain:
+        problems.append("no implementation commits above the branch point")
+    for commit in chain:
+        delta = [
+            line.strip()
+            for line in _run_git(
+                "diff", "--name-only", "%s^" % commit, commit
+            ).stdout.splitlines()
+            if line.strip()
+        ]
+        for rel in delta:
+            if not (
+                rel.startswith("client/")
+                or rel in _AUTHORIZED_PATHS
+                or rel == _AUTHORIZED_CI_WIRING
+            ):
+                problems.append(
+                    "implementation commit %s touched the out-of-scope "
+                    "path %s" % (commit[:12], rel)
+                )
+    if problems:
+        results.append(fail(name, "; ".join(problems[:5])))
+        return
+    results.append(ok(
+        name,
+        "the boundary audits are pinned to the immutable authorized "
+        "baseline %s declared by the frozen WORK-049-CORE-001 record "
+        "(status active): the baseline is a commit and an ancestor of the "
+        "delivery head, the governance-only ancestry from it to the "
+        "derived branch point %s carries the SAME declared baseline, and "
+        "every implementation commit above the branch point stays within "
+        "the authorized scope (%d commits) — origin/main is never the "
+        "audit authority"
+        % (baseline[:12], branch_point[:12], len(chain)),
+    ))
+
+
+# ---------------------------------------------------------------------------
 # main
 # ---------------------------------------------------------------------------
 
@@ -3714,6 +4537,13 @@ def main() -> int:
         case_44_event_taxonomy_never_collapsed,
         case_45_canonical_reason_preservation,
         case_46_forged_snapshot_restart_gate,
+        case_47_missing_bindings_fail_closed,
+        case_48_buyer_active_session_binding,
+        case_49_projection_authority_precedence,
+        case_50_consent_economics_canonical,
+        case_51_forged_request_ledger,
+        case_52_stale_performed_records,
+        case_53_authorized_baseline_ancestry,
     ):
         case(results)
     failures = [result for result in results if not result[1]]

@@ -77,7 +77,16 @@ def _sharing_reason(error: Exception) -> ReasonRef:
 
 
 class ProviderClient:
-    """The provider-mode client runtime (one sharing session)."""
+    """The provider-mode client runtime (one sharing session).
+
+    The consent presentation's economic result is a PROJECTION of
+    canonical commercial truth (P1-2 correction): it is derived
+    at presentation time from the canonical W051 transaction's
+    own offer record, read through the gateway's bounded lease
+    read — there is NO caller-supplied economic-terms input, so
+    arbitrary client text can never diverge the presentation
+    from the canonical economics.
+    """
 
     MODE = "provider"
 
@@ -86,7 +95,6 @@ class ProviderClient:
         *,
         runtime: ClientRuntime,
         sharing: Any,
-        commercial_terms: str = "",
     ) -> None:
         if not isinstance(runtime, ClientRuntime):
             raise ClientError(
@@ -104,7 +112,6 @@ class ProviderClient:
             )
         self._runtime = runtime
         self._sharing = sharing
-        self._commercial_terms = commercial_terms
         self._state = ProviderClientState.UNAVAILABLE
         self._sharing_session_id = ""
         self._consent_ref = ""
@@ -240,6 +247,46 @@ class ProviderClient:
         )
         return wrapped
 
+    # -- sensitive-replay revalidation (P1-4) ---------------------------
+
+    def _revalidated_session_state(
+        self, action: str, allowed: Tuple[str, ...]
+    ) -> GatewayRead:
+        """Re-read the canonical sharing session and fail closed
+        unless it is provider-bound and in ``allowed``.
+
+        A recorded performed outcome is LOCAL state, not canonical
+        truth: before a sensitive replay (or any activation-critical
+        accept) returns success, the canonical session is re-read
+        through the gateway, verified bound to THIS provider, and
+        required to still hold one of the ``allowed`` states.  A
+        forged or stale performed record whose canonical state has
+        changed fails closed — the record alone can never prove the
+        operation still holds (P1-4 correction; the typed denial
+        preserves the canonical reason verbatim — the frozen event
+        vocabulary is not extended)."""
+        read = self._runtime.canonical_read(
+            self._runtime.gateway.read_sharing_session(
+                self._sharing_session_id
+            ),
+            expect={"provider_ref": self._runtime.context.user_ref},
+        )
+        if read.state not in allowed:
+            raise ClientError(
+                ClientReasonCode.CANONICAL_DENIED,
+                "the recorded %s outcome is stale: the canonical sharing "
+                "session state is %r (allowed: %s) — the local record is "
+                "not canonical truth and the replay fails closed"
+                % (action, read.state, "/".join(allowed)),
+                resolution=FailClosedResolution.DENY,
+                canonical_reason=ReasonRef(
+                    code="sharing-session-state-%s" % read.state,
+                    source="sharing",
+                    severity="error",
+                ),
+            )
+        return read
+
     # ------------------------------------------------------------------
     # UNAVAILABLE -> CAPABILITY_CHECKED -> READY
     # ------------------------------------------------------------------
@@ -333,10 +380,19 @@ class ProviderClient:
                     ClientReasonCode.CANONICAL_DENIED,
                     "prepare was already canonically denied (%s)" % replay.reason,
                 )
-            # the canonical session already exists (exact replay):
-            # re-present the consent facts from the canonical record
-            session = self._sharing.session(replay.subject)
-            return self._consent_facts_for(session)
+            # P1-4: the canonical session already exists (exact
+            # replay) — re-present the consent facts from the
+            # canonical record re-read through the gateway and
+            # verified bound to THIS provider (the local record
+            # alone is never the presentation authority)
+            read = self._runtime.canonical_read(
+                self._runtime.gateway.read_sharing_session(
+                    self._sharing_session_id
+                ),
+                expect={"provider_ref": self._runtime.context.user_ref},
+            )
+            session = self._sharing.session(self._sharing_session_id)
+            return self._consent_facts_for(session, read)
         self._require_legal(ProviderClientState.CONSENT_REQUIRED, "prepare")
         try:
             session = self._sharing.prepare_sharing_session(
@@ -374,24 +430,65 @@ class ProviderClient:
         )
         self._project_canonical("prepared")
         self._transition(ProviderClientState.CONSENT_REQUIRED)
-        return self._consent_facts_for(session)
+        return self._consent_facts_for(
+            session,
+            self._runtime.canonical_read(
+                self._runtime.gateway.read_sharing_session(
+                    self._sharing_session_id
+                ),
+                expect={"provider_ref": self._runtime.context.user_ref},
+            ),
+        )
 
-    def _consent_facts_for(self, session: Any) -> ConsentFacts:
+    def _consent_facts_for(
+        self, session: Any, read: GatewayRead
+    ) -> ConsentFacts:
         """The frozen consent presentation, filled from canonical
-        citations ONLY (scope facts, commercial terms, canonical
-        current state)."""
+        citations ONLY (scope facts, canonically-sourced commercial
+        terms, the canonical current state).
+
+        P1-2 correction: the expected economic result is PROJECTED
+        from the canonical W051 transaction's own offer record —
+        read through the gateway's bounded lease read for the
+        session's lease, buyer-bound to the session's buyer — and
+        is never free-form client input.  When the canonical
+        economics cannot be read (or carry no offer terms), the
+        presentation is REFUSED fail-closed (UNKNOWN): consent is
+        never requested over unknown economics."""
         scope = session.scope
+        lease_read = self._runtime.canonical_read(
+            self._runtime.gateway.read_lease(session.lease_ref),
+            expect={"buyer_ref": session.buyer_ref},
+        )
+        offer_terms = lease_read.binding("offer_terms")
+        if not offer_terms or offer_terms == "{}":
+            raise ClientError(
+                ClientReasonCode.STALE_STATE,
+                "the canonical commercial terms for lease %r are "
+                "unavailable (the W051 record carries no offer terms): "
+                "the economics are UNKNOWN and the consent presentation "
+                "is refused (fail closed — never invented)"
+                % session.lease_ref,
+                resolution=FailClosedResolution.UNKNOWN,
+                canonical_reason=ReasonRef(
+                    code="commercial-offer-terms-missing",
+                    source="commercial",
+                    severity="error",
+                ),
+            )
         return present_consent_facts(
             exposed_egress=scope.exposed_egress,
             time_quota_expiry=scope.time_quota_expiry,
             buyer_ref=session.buyer_ref,
             quota_bytes=scope.byte_quota,
             max_concurrent_buyers=scope.max_concurrent_buyers,
-            commercial_terms=self._commercial_terms or (
-                "the canonical W051 lease %s governs price and duration "
-                "(displayed, never invented)" % session.lease_ref
+            commercial_terms=(
+                "canonical W051 offer terms %s cited by lease %s "
+                "(canonical commercial state %s; projected from the "
+                "canonical transaction record — never client-supplied)"
+                % (offer_terms, session.lease_ref, lease_read.state)
             ),
-            canonical_state=str(session.state),
+            canonical_state=str(read.state),
             canonical_source_refs=(
                 "sharing:%s" % session.sharing_session_id,
                 "commercial:%s" % session.lease_ref,
@@ -420,8 +517,10 @@ class ProviderClient:
                     ClientReasonCode.CANONICAL_DENIED,
                     "consent grant was already canonically denied",
                 )
-            # the idempotent replay: the canonical grant already
-            # happened and the lifecycle already advanced
+            # P1-4: the idempotent replay is accepted only after
+            # the canonical consent record is re-read and still
+            # holds granted (the local record alone is not proof)
+            self._revalidated_consent_state("grant_consent")
             return
         self._require_legal(ProviderClientState.CONSENTED, "grant")
         try:
@@ -469,6 +568,32 @@ class ProviderClient:
         self._project_canonical("consent-granted")
         self._transition(ProviderClientState.CONSENTED)
 
+    def _revalidated_consent_state(self, action: str) -> GatewayRead:
+        """P1-4: re-read the canonical consent record and fail
+        closed unless it is provider-bound and still granted — a
+        recorded grant outcome is local state, never proof that
+        the canonical consent still holds (the typed denial
+        preserves the canonical reason verbatim)."""
+        read = self._runtime.canonical_read(
+            self._runtime.gateway.read_consent(self._consent_ref),
+            expect={"provider_ref": self._runtime.context.user_ref},
+        )
+        if read.state != _CONSENT_GRANTED:
+            raise ClientError(
+                ClientReasonCode.CANONICAL_DENIED,
+                "the recorded %s outcome is stale: the canonical consent "
+                "state is %r, not granted — the local record is not "
+                "canonical truth and the replay fails closed"
+                % (action, read.state),
+                resolution=FailClosedResolution.DENY,
+                canonical_reason=ReasonRef(
+                    code="sharing-consent-state-%s" % read.state,
+                    source="sharing",
+                    severity="error",
+                ),
+            )
+        return read
+
     # ------------------------------------------------------------------
     # CONSENTED -> HANDOFF_REQUESTED -> ACTIVE (canonical handoff)
     # ------------------------------------------------------------------
@@ -491,6 +616,12 @@ class ProviderClient:
                     "authorization was already canonically denied (%s)"
                     % replay.reason,
                 )
+            # P1-4: the recorded authorization is revalidated
+            # against the canonical session state before the
+            # replay is accepted
+            self._revalidated_session_state(
+                "authorize", ("authorized", "active", "paused")
+            )
             return
         self._require_legal(ProviderClientState.HANDOFF_REQUESTED, "authorize")
         try:
@@ -539,6 +670,10 @@ class ProviderClient:
                     "activation was already canonically denied (%s)"
                     % replay.reason,
                 )
+            # P1-4: activation-critical — the recorded activation is
+            # revalidated against the canonical ACTIVE state before
+            # the replay is accepted
+            self._revalidated_session_state("activate", ("active",))
             return
         self._require_legal(ProviderClientState.ACTIVE, "activate")
         try:
@@ -588,6 +723,9 @@ class ProviderClient:
             request_id, "pause"
         )
         if replay is not None:
+            # P1-4: the recorded pause is revalidated against the
+            # canonical paused state before the replay is accepted
+            self._revalidated_session_state("pause", ("paused",))
             return
         self._require_legal(ProviderClientState.PAUSED, "pause")
         try:
@@ -904,6 +1042,12 @@ class ProviderClient:
             request_id, "close"
         )
         if replay is not None:
+            # P1-4: the recorded close is revalidated against the
+            # canonical terminal family before the replay is
+            # accepted
+            self._revalidated_session_state(
+                "close", ("revoked", "expired", "closed")
+            )
             return
         self._require_legal(ProviderClientState.CLOSED, "close")
         try:

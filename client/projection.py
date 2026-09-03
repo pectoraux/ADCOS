@@ -104,7 +104,7 @@ def _epoch(instant: str) -> int:
 class ProjectionCache:
     """The bounded, marked, NON-authoritative projection cache.
 
-    Invariants (frozen security model):
+    Invariants (frozen security model, P1-1 correction):
 
     - bounded: at most ``max_entries`` subjects;
     - marked: every entry carries its freshness class and the
@@ -113,9 +113,21 @@ class ProjectionCache:
       continuity only — it is demoted to STALE_CACHE whenever the
       canonical authority is unreachable and may never be
       presented as current truth;
-    - monotonic: a projection observed at an OLDER instant can
-      never overwrite a NEWER one (stale events cannot overwrite
-      newer canonical state).
+    - authority-class DOMINANCE: a CANONICAL_STATE projection
+      dominates every non-canonical freshness class
+      (STALE_CACHE / LOCAL_OBSERVATION / LOCAL_INTENT / UNKNOWN)
+      for the same subject REGARDLESS of the claimed timestamps —
+      stale/local state can never overwrite current canonical
+      truth (not even with a future timestamp), and canonical
+      truth displaces a non-canonical entry even when the
+      canonical read is older (the canonical read is the truth;
+      a local observation is a symptom, never authority).  The
+      ONLY sanctioned canonical demotion is the explicit
+      :meth:`mark_stale` offline transition;
+    - within one authority class, monotonic: a projection
+      observed at an OLDER instant can never overwrite a NEWER
+      one of the same class (stale events cannot overwrite newer
+      canonical state).
     """
 
     def __init__(self, *, max_entries: int = 32) -> None:
@@ -128,12 +140,25 @@ class ProjectionCache:
         self._entries: Dict[str, StatusSnapshot] = {}
 
     def apply(self, snapshot: StatusSnapshot) -> bool:
-        """Apply one projection (monotonic on observed_at).
+        """Apply one projection (authority-class dominance, then
+        within-class timestamp monotonicity).
 
-        Returns True when the snapshot was accepted (newer or
-        first), False when a NEWER projection for the same subject
-        already exists (the stale write is refused — never an
-        error, the caller keeps the newer state).
+        Returns True when the snapshot was accepted, False when
+        it was refused:
+
+        - a non-canonical projection (stale/local/intent/unknown)
+          is ALWAYS refused while a CANONICAL_STATE entry for the
+          same subject exists — whatever its claimed timestamp
+          (a future-timestamped stale/local write can never
+          displace current canonical truth);
+        - a CANONICAL_STATE projection always displaces a
+          non-canonical entry for the same subject — even when
+          the canonical read carries an older instant (canonical
+          truth in, local symptom out);
+        - within the same authority class, a projection observed
+          at an older instant than the existing entry is refused
+          (stale events cannot overwrite newer state of the same
+          class).
         """
         if not isinstance(snapshot, StatusSnapshot):
             raise ClientError(
@@ -148,14 +173,27 @@ class ProjectionCache:
             )
         existing = self._entries.get(snapshot.subject)
         if existing is not None:
-            if _epoch(existing.observed_at) > _epoch(snapshot.observed_at):
+            existing_canonical = (
+                existing.freshness in Freshness.trustworthy_current()
+            )
+            incoming_canonical = (
+                snapshot.freshness in Freshness.trustworthy_current()
+            )
+            if existing_canonical and not incoming_canonical:
+                # authority-class dominance: current canonical
+                # truth is never displaced by a non-canonical
+                # projection, whatever timestamp it claims
                 return False
-            if _epoch(existing.observed_at) == _epoch(snapshot.observed_at):
-                if existing.freshness in Freshness.trustworthy_current():
-                    if snapshot.freshness not in (
-                        Freshness.trustworthy_current()
-                    ):
-                        return False
+            if not existing_canonical and incoming_canonical:
+                # canonical truth displaces the non-canonical
+                # class even when the canonical read is older
+                # (fall through to acceptance)
+                pass
+            elif _epoch(existing.observed_at) > _epoch(
+                snapshot.observed_at
+            ):
+                # same authority class: monotonic on observed_at
+                return False
         self._entries[snapshot.subject] = snapshot
         self._evict_over_limit()
         return True

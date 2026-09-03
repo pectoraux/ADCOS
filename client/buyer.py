@@ -45,6 +45,7 @@ from .capability import (
 )
 from .errors import ClientError, ClientReasonCode, FailClosedResolution
 from .events import ClientEvent, EventTaxonomy
+from .gateway import GatewayRead
 from .model import OfferView, ReasonRef, RequestRecord
 from .privacy import present_offer
 from .projection import Freshness, StatusSnapshot
@@ -280,6 +281,38 @@ class BuyerClient:
             return "%s/%s" % self._selected_key
         return self._session_id
 
+    # -- activation-critical binding + replay revalidation ----------------
+
+    def _bound_lease_read(
+        self, *, session_bound: bool
+    ) -> GatewayRead:
+        """Read the canonical lease bound to THIS context (P0-2).
+
+        The lease read is verified against the client's buyer
+        principal; when ``session_bound`` (the activation-critical
+        gates — attach/reconnect), the lease must ADDITIONALLY be
+        bound to this client's canonical logical session id: a
+        lease belonging to another session or principal is a
+        misbound contract and fails closed (BINDING_MISMATCH;
+        local ACTIVE is never entered over it)."""
+        expect: Dict[str, str] = {
+            "buyer_ref": self._runtime.context.user_ref
+        }
+        if session_bound:
+            expect["session_ref"] = self._session_id
+        read = self._runtime.gateway.read_lease(self.transaction_id)
+        return self._runtime.canonical_read(read, expect=expect)
+
+    def _bound_path_read(self) -> GatewayRead:
+        """Read the canonical NetworkPath bound to THIS client's
+        canonical logical session (P0-2): an ACTIVE path that
+        belongs to another session is a misbound contract — it
+        can never support this client's local ACTIVE."""
+        read = self._runtime.gateway.read_path(self._path_id)
+        return self._runtime.canonical_read(
+            read, expect={"session_ref": self._session_id}
+        )
+
     # ------------------------------------------------------------------
     # IDLE -> DISCOVERING -> OFFER_SELECTED
     # ------------------------------------------------------------------
@@ -440,13 +473,27 @@ class BuyerClient:
         replay = self._runtime.require_not_recorded_performed(
             request_id, "coordinate"
         )
-        if replay is not None and replay.outcome == "denied":
-            raise ClientError(
-                ClientReasonCode.CANONICAL_DENIED,
-                "coordination was already canonically denied (%s)"
-                % replay.reason,
-            )
         if replay is not None:
+            if replay.outcome == "denied":
+                raise ClientError(
+                    ClientReasonCode.CANONICAL_DENIED,
+                    "coordination was already canonically denied (%s)"
+                    % replay.reason,
+                )
+            # P1-4: the idempotent replay is accepted only after
+            # the canonical coordination is re-read and verified
+            # bound to THIS buyer (the local record alone is not
+            # proof that the canonical transaction exists)
+            try:
+                self._bound_lease_read(session_bound=False)
+            except ClientError as error:
+                raise self._fail(
+                    "coordinate-replay-unverifiable-%s" % error.reason,
+                    "the recorded coordination outcome is stale: the "
+                    "canonical lease read failed closed (%s) — the local "
+                    "record is not canonical truth and the replay fails "
+                    "closed" % error.message,
+                ) from error
             # the idempotent replay: the canonical coordination
             # already happened
             return str(self.transaction_id)
@@ -458,13 +505,7 @@ class BuyerClient:
         # the canonical read is the only gate — Q1 fail closed)
         if self._coordination is not None:
             try:
-                lease_read = self._runtime.gateway.read_lease(
-                    str(self._coordination.transaction_id)
-                )
-                lease_read = self._runtime.canonical_read(
-                    lease_read,
-                    expect={"buyer_ref": self._runtime.context.user_ref},
-                )
+                lease_read = self._bound_lease_read(session_bound=False)
             except ClientError as error:
                 canonical = (
                     error.canonical_reason
@@ -551,10 +592,7 @@ class BuyerClient:
                 "lease confirmation requires an issued coordination",
             )
         transaction_id = str(self._coordination.transaction_id)
-        read = self._runtime.gateway.read_lease(transaction_id)
-        read = self._runtime.canonical_read(
-            read, expect={"buyer_ref": self._runtime.context.user_ref}
-        )
+        read = self._bound_lease_read(session_bound=False)
         self._canonical_lease_state = read.state
         if read.state not in _LEASE_CONFIRMING_STATES:
             raise self._fail(
@@ -616,6 +654,22 @@ class BuyerClient:
                     ClientReasonCode.CANONICAL_DENIED,
                     "the path handoff was already denied (%s)" % replay.reason,
                 )
+            # P1-4: the recorded handoff is revalidated against the
+            # canonical state before the replay is accepted: the
+            # lease must still exist buyer-bound and the accepted
+            # path must still exist and be bound to THIS session
+            try:
+                self._bound_lease_read(session_bound=False)
+                if self._path_id:
+                    self._bound_path_read()
+            except ClientError as error:
+                raise self._fail(
+                    "handoff-replay-unverifiable-%s" % error.reason,
+                    "the recorded handoff outcome is stale: the canonical "
+                    "read failed closed (%s) — the local record is not "
+                    "canonical truth and the replay fails closed"
+                    % error.message,
+                ) from error
             # the idempotent replay: the machinery already accepted
             # the handoff
             return self._path_id
@@ -624,13 +678,7 @@ class BuyerClient:
         # the canonical read is the only gate — Q1 fail closed)
         if self.transaction_id:
             try:
-                lease_read = self._runtime.gateway.read_lease(
-                    self.transaction_id
-                )
-                lease_read = self._runtime.canonical_read(
-                    lease_read,
-                    expect={"buyer_ref": self._runtime.context.user_ref},
-                )
+                lease_read = self._bound_lease_read(session_bound=False)
             except ClientError as error:
                 # the canonical read failed (unknown/unverifiable
                 # transaction): DENY the activation, land FAILED,
@@ -714,6 +762,13 @@ class BuyerClient:
                     ClientReasonCode.CANONICAL_DENIED,
                     "the attach was already denied (%s)" % replay.reason,
                 )
+            # P1-4: ACTIVATION-CRITICAL — a recorded performed
+            # attach is local state, never proof that production
+            # connectivity still holds: the replay is accepted only
+            # after the full canonical gate is re-verified (the
+            # path bound to THIS session and ACTIVE, the lease
+            # bound to THIS buyer+session and delivery-supported)
+            self._require_attach_gate("attach-replay")
             return
         self._require_legal(BuyerClientState.ACTIVE, "attach")
         if self._outcome is None or not self._path_id:
@@ -761,27 +816,14 @@ class BuyerClient:
                 "the local attach was rolled back (fail closed)" % error,
                 canonical=reason,
             ) from error
-        # 3. the canonical verification (path ACTIVE + commercial
-        #    delivery support) — the ONLY gate to local ACTIVE
-        path_read = self._runtime.gateway.read_path(self._path_id)
-        if path_read.state != "ACTIVE":
-            self._runtime.adapter.network_detach(self._path_id)
-            raise self._fail(
-                "path-not-active-%s" % path_read.state,
-                "the canonical NetworkPath state is %r (fail closed: local "
-                "ACTIVE is a projection of canonical connectivity only)"
-                % path_read.state,
-            )
-        lease_read = self._runtime.gateway.read_lease(self.transaction_id)
+        # 3. the canonical verification (path bound to THIS session
+        #    and ACTIVE + lease bound to THIS buyer+session and
+        #    delivery-supported) — the ONLY gate to local ACTIVE
+        #    (P0-2: every activation-critical read is strictly
+        #    context/session-bound)
+        path_read, lease_read = self._require_attach_gate("attach")
         self._canonical_lease_state = lease_read.state
         self._canonical_path_state = path_read.state
-        if lease_read.state not in _DELIVERY_SUPPORTED_STATES:
-            self._runtime.adapter.network_detach(self._path_id)
-            raise self._fail(
-                "delivery-unsupported-%s" % lease_read.state,
-                "the canonical commercial state %r does not support active "
-                "delivery (fail closed)" % lease_read.state,
-            )
         self._emit(
             "buyer.connected",
             EventTaxonomy.OBSERVED_CANONICAL_EVENT,
@@ -806,6 +848,68 @@ class BuyerClient:
             )
         )
         self._transition(BuyerClientState.ACTIVE)
+
+    def _require_attach_gate(
+        self, action: str
+    ) -> Tuple[GatewayRead, GatewayRead]:
+        """The full P0-2 activation-critical gate (fail closed on
+        every unverified or misbound condition): the canonical
+        NetworkPath must be bound to THIS client's canonical
+        logical session AND read ACTIVE, and the canonical
+        commercial lease must be bound to THIS buyer AND session
+        AND support active delivery.  A cross-session or
+        misbound contract can never satisfy this gate; every
+        failure rolls the local attach back (fail-safe detach)
+        before failing closed.  Returns the (path, lease) reads
+        on success."""
+        try:
+            path_read = self._bound_path_read()
+        except ClientError as error:
+            self._runtime.adapter.network_detach(self._path_id)
+            raise self._fail(
+                "path-unbound-%s" % error.reason,
+                "the canonical NetworkPath read for %r failed closed (%s): "
+                "an unbound or cross-session path can never support this "
+                "client's local ACTIVE (fail closed; local attach rolled "
+                "back)" % (self._path_id, error.message),
+                canonical=(
+                    error.canonical_reason
+                    if isinstance(error.canonical_reason, ReasonRef)
+                    else None
+                ),
+            ) from error
+        if path_read.state != "ACTIVE":
+            self._runtime.adapter.network_detach(self._path_id)
+            raise self._fail(
+                "path-not-active-%s" % path_read.state,
+                "the canonical NetworkPath state is %r (fail closed: local "
+                "ACTIVE is a projection of canonical connectivity only)"
+                % path_read.state,
+            )
+        try:
+            lease_read = self._bound_lease_read(session_bound=True)
+        except ClientError as error:
+            self._runtime.adapter.network_detach(self._path_id)
+            raise self._fail(
+                "lease-unbound-%s" % error.reason,
+                "the canonical commercial lease read failed closed (%s): a "
+                "lease that is not bound to this buyer and this client's "
+                "canonical session can never support local ACTIVE (fail "
+                "closed; local attach rolled back)" % error.message,
+                canonical=(
+                    error.canonical_reason
+                    if isinstance(error.canonical_reason, ReasonRef)
+                    else None
+                ),
+            ) from error
+        if lease_read.state not in _DELIVERY_SUPPORTED_STATES:
+            self._runtime.adapter.network_detach(self._path_id)
+            raise self._fail(
+                "delivery-unsupported-%s" % lease_read.state,
+                "the canonical commercial state %r does not support active "
+                "delivery (fail closed)" % lease_read.state,
+            )
+        return path_read, lease_read
 
     # ------------------------------------------------------------------
     # ACTIVE -> DEGRADED / RECONNECTING (offline/reconnect semantics)
@@ -871,8 +975,11 @@ class BuyerClient:
                 "the reconciling buyer lacks the canonical path/lease "
                 "references (fail closed; never fabricated)",
             )
-        path_read = self._runtime.gateway.read_path(self._path_id)
-        lease_read = self._runtime.gateway.read_lease(self.transaction_id)
+        # P0-2: the reconciling reads are strictly bound to THIS
+        # buyer and THIS client's canonical logical session (a
+        # misbound contract can never drive the resume decision)
+        path_read = self._bound_path_read()
+        lease_read = self._bound_lease_read(session_bound=True)
         self._canonical_path_state = path_read.state
         self._canonical_lease_state = lease_read.state
         # terminal canonical truths first (never resurrected)
@@ -978,7 +1085,10 @@ class BuyerClient:
                 ClientReasonCode.INVALID_INPUT,
                 "no canonical transaction is bound to this buyer client",
             )
-        lease_read = self._runtime.gateway.read_lease(self.transaction_id)
+        # P0-2: the status projection is also buyer-bound (a lease
+        # naming another principal is never projected as this
+        # buyer's status)
+        lease_read = self._bound_lease_read(session_bound=False)
         self._canonical_lease_state = lease_read.state
         self._runtime.project(
             StatusSnapshot(
@@ -1009,7 +1119,8 @@ class BuyerClient:
                 )
                 self._transition(BuyerClientState.EXPIRED)
         if self._path_id:
-            path_read = self._runtime.gateway.read_path(self._path_id)
+            # P0-2: the path status projection is session-bound
+            path_read = self._bound_path_read()
             self._canonical_path_state = path_read.state
             self._runtime.project(
                 StatusSnapshot(

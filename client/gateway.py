@@ -25,6 +25,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Tuple
 
+from protocol.canonicalization import canonical_json_bytes
+
 from .errors import ClientError, ClientReasonCode, FailClosedResolution
 from .model import ReasonRef
 
@@ -284,6 +286,32 @@ class ComposedGateway(CanonicalGateway):
         intent = getattr(transaction, "intent", None)
         if isinstance(intent, dict):
             buyer = str(intent.get("buyer", ""))
+        offer = getattr(transaction, "offer", None)
+        # P1-2: the canonical economic terms travel as a binding —
+        # the CANONICAL serialization of the W051 transaction's
+        # own offer record (exactly as the authority journaled it).
+        # This is the ONLY economic-result source the consent
+        # presentation may project; it is never caller-supplied.
+        offer_terms = ""
+        if isinstance(offer, dict):
+            try:
+                offer_terms = canonical_json_bytes(
+                    {key: offer[key] for key in sorted(offer)}
+                ).decode("utf-8")
+            except Exception as error:  # noqa: BLE001 - shape guard
+                raise ClientError(
+                    ClientReasonCode.CANONICAL_DENIED,
+                    "the canonical %s read for %r failed (offer terms are "
+                    "not canonically serializable: %s) — the state is "
+                    "UNKNOWN and the client fails closed (never fabricated)"
+                    % ("commercial", transaction_id, error),
+                    resolution="UNKNOWN",
+                    canonical_reason=ReasonRef(
+                        code="commercial-offer-unreadable",
+                        source="commercial",
+                        severity="error",
+                    ),
+                ) from error
         return GatewayRead(
             authority="commercial",
             subject=transaction_id,
@@ -292,6 +320,7 @@ class ComposedGateway(CanonicalGateway):
             bindings=(
                 ("buyer_ref", buyer),
                 ("session_ref", str(getattr(transaction, "session_ref", "") or "")),
+                ("offer_terms", offer_terms),
             ),
         )
 
