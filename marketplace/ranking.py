@@ -16,12 +16,15 @@ Determinism contract:
 - normalization is over the candidate SET (identical sets ->
   identical components), with the degenerate single-value case
   pinned to the neutral maximum;
-- the order is a TOTAL order: composite score descending, then the
-  frozen tie-break chain (price ascending, latency ascending,
-  throughput descending, availability descending, proximity
-  ascending with ABSENT proximity evidence sorting strictly after
-  every bounded distance, provider id ascending, offer id
-  ascending);
+- the order is a TOTAL order: the proximity-PRESENCE tier is the
+  HIGHEST-PRIORITY ordering dimension (a candidate WITHOUT
+  proximity evidence sorts strictly after EVERY candidate with a
+  bounded distance -- a GLOBAL demotion ahead of the composite, so
+  absence can never purchase rank with other weighted dimensions),
+  then composite score descending, then the frozen tie-break chain
+  (price ascending, latency ascending, throughput descending,
+  availability descending, proximity ascending, provider id
+  ascending, offer id ascending);
 - the ranking READS NO CLOCK and consumes no nondeterminism: the
   evaluation instant is passed in (the discovery service's single
   clock read).
@@ -33,9 +36,10 @@ advertisement into observation, a cell bound into an exact
 distance, or a selected candidate into a connected one.  ABSENT
 proximity evidence is never encoded as a distance: it earns
 exactly ZERO proximity credit, is recorded as an absent bound
-(``None``), and ties-break strictly after every candidate with a
-bounded distance -- absence can never masquerade as the nearest
-candidate.
+(``None``), and sorts strictly after EVERY candidate with a
+bounded distance (the presence tier outranks the composite) --
+absence can never masquerade as the nearest candidate and can
+never purchase rank with other weighted dimensions.
 """
 
 from __future__ import annotations
@@ -145,11 +149,13 @@ class ScoredCandidate:
     ``proximity_bound_m`` is the conservative BOUND maximum used
     for scoring, or ``None`` when proximity evidence is absent
     (absence is recorded as absence -- never as a distance of
-    zero).  The ``proximity_component`` of a candidate without
-    proximity evidence is exactly ``0``: absence earns NO proximity
-    credit and never scores above any evidence-backed candidate;
-    candidates WITH evidence normalize set-relatively over the
-    evidence-backed values only (so the nearest evidence-backed
+    zero; the public annotation is ``Optional[int]`` to match the
+    runtime contract).  The ``proximity_component`` of a candidate
+    without proximity evidence is exactly ``0``: absence earns NO
+    proximity credit, and the proximity-PRESENCE tier demotes it
+    strictly after EVERY evidence-backed candidate in the total
+    order; candidates WITH evidence normalize set-relatively over
+    the evidence-backed values only (so the nearest evidence-backed
     candidate always earns the full scale).
     """
 
@@ -162,7 +168,7 @@ class ScoredCandidate:
     proximity_component: int
     quality_basis: str
     capacity_basis: str
-    proximity_bound_m: int
+    proximity_bound_m: Optional[int]
 
     @property
     def offer_key(self) -> Tuple[str, str]:
@@ -170,12 +176,19 @@ class ScoredCandidate:
 
     @property
     def sort_key(self) -> Tuple[Any, ...]:
-        """The frozen total-order key (composite DESC then the
-        frozen tie-break chain).  The proximity tier places a
-        candidate WITHOUT proximity evidence strictly AFTER every
-        candidate with a bounded distance (absence is never
-        nearest)."""
+        """The frozen total-order key.
+
+        The proximity-PRESENCE tier is the FIRST key element: a
+        candidate WITHOUT proximity evidence sorts strictly AFTER
+        every candidate with a bounded distance -- a GLOBAL
+        demotion ahead of the composite, so absence is never
+        nearest and can never purchase rank with other weighted
+        dimensions.  Within each tier the order is composite DESC,
+        then the frozen tie-break chain (price, latency,
+        throughput, availability, proximity bound, provider id,
+        offer id)."""
         return (
+            1 if self.proximity_bound_m is None else 0,
             -self.composite_score,
             self.candidate.offer.price_minor,
             self.candidate.quality.expected_latency_ms,

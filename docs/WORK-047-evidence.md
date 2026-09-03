@@ -22,8 +22,9 @@ A cohesive `marketplace/` package (the W047 surface defined by issue
 verification battery, evidence documentation, and additive CI wiring.
 The delivery now includes the CORRECTION ROUNDS for the Architect
 review of head `fdd7691` (REQUEST CHANGES, PR #135 comment
-`5518682595` — §14) and the re-audit of head `ed6fae89`
-(REQUEST CHANGES, PR #135 comment `5518914690` — §15):
+`5518682595` — §14), the re-audit of head `ed6fae89`
+(REQUEST CHANGES, PR #135 comment `5518914690` — §15), and the
+final re-audit of head `7d9b999` (REQUEST CHANGES — §16):
 
 ```text
 marketplace/                     (new package, 11 modules, 65 frozen exports)
@@ -60,7 +61,7 @@ marketplace/                     (new package, 11 modules, 65 frozen exports)
                                  integer instant arithmetic
     lifecycle.py                 MarketplaceService + DiscoveryResult (the
                                  public production surface)
-tools/marketplace_selftest.py    the W047 battery (44 cases)
+tools/marketplace_selftest.py    the W047 battery (46 cases)
 docs/WORK-047-evidence.md        this document
 .github/workflows/spec-check.yml additive battery step (CI wiring)
 ```
@@ -123,13 +124,14 @@ reservation_tx=sha256:8ad7fbccd08d1de305d8528db8bb0e88663af30fd61806648bb3b47106
 ```
 
 (The discovery, journal, and proposal digests are UNCHANGED from the
-first-round reviewed head `fdd7691` through BOTH correction rounds —
-the corrections add no new digested inputs to those records for the
-evidence-backed golden world; the stream gained exactly one key in
-round one, the handoff-advanced proposal status.  Every ranked
+first-round reviewed head `fdd7691` through ALL THREE correction
+rounds — the corrections add no new digested inputs to those records
+for the evidence-backed golden world; the stream gained exactly one
+key in round one, the handoff-advanced proposal status.  Every ranked
 golden-world candidate carries genuine coverage proximity evidence,
-so the round-two honest missing-evidence policy does not touch the
-golden digests; see §15.)
+so the round-two honest missing-evidence policy and the round-three
+promoted presence tier (uniform over the all-evidence-backed golden
+set) do not touch the golden digests; see §15–§16.)
 
 ## 3. Frozen vocabularies (case 01-02)
 
@@ -200,11 +202,16 @@ dimension is simply unconstrained by the buyer.
   (the component is 0, never the normalized maximum), is recorded
   as an ABSENT bound (`null` — absence is never encoded as a
   distance of 0, which fabricated the best possible proximity from
-  absence), and tie-breaks strictly AFTER every candidate with a
-  bounded distance.  Evidence-backed candidates normalize
-  set-relatively over the evidence-backed values ONLY, so absence
-  can never masquerade as the nearest candidate; in an all-unknown
-  set the dimension differentiates nothing.
+  absence), and sorts strictly AFTER every candidate with a
+  bounded distance: the proximity-PRESENCE tier is the
+  HIGHEST-PRIORITY ordering dimension (a GLOBAL demotion ahead of
+  the composite), so absence can never masquerade as the nearest
+  candidate and can never purchase rank with other weighted
+  dimensions — even a no-evidence candidate that is strictly
+  better in every other weighted dimension ranks strictly after
+  every bounded-distance candidate.  Evidence-backed candidates
+  normalize set-relatively over the evidence-backed values ONLY;
+  in an all-unknown set the dimension differentiates nothing.
 
 ## 5. Stale telemetry / evidence discipline (cases 07-09)
 
@@ -275,17 +282,25 @@ dimension is simply unconstrained by the buyer.
   components normalized over the candidate SET (identical sets →
   identical components; degenerate single-value sets pin to the
   neutral maximum), a composite weighted mean, and the frozen total
-  order (composite descending, then price/latency ascending,
-  throughput/availability descending, proximity ascending with
-  ABSENT proximity evidence sorting strictly after every bounded
-  distance, then `(provider_id, offer_id)` ascending — the final
-  tie-break makes the order total).  A candidate without proximity
-  evidence earns exactly ZERO proximity credit and records an
-  absent bound (case 46: the evidence-backed twin outranks the
-  no-evidence twin — the pre-fix inversion, where absence scored as
-  distance 0, is impossible).  The golden ordering over the
-  five-listing world is pinned byte-identically; three fresh runs
-  produce identical digests.
+  order: the proximity-PRESENCE tier FIRST (a candidate without
+  proximity evidence sorts strictly after EVERY bounded-distance
+  candidate — a global demotion ahead of the composite), then
+  composite descending, then price/latency ascending,
+  throughput/availability descending, proximity bound ascending,
+  then `(provider_id, offer_id)` ascending — the final tie-break
+  makes the order total.  A candidate without proximity evidence
+  earns exactly ZERO proximity credit and records an absent bound
+  (case 46: the evidence-backed twin outranks the no-evidence twin
+  — the pre-fix inversion, where absence scored as distance 0, is
+  impossible — AND the dominant-composite world: a no-evidence
+  candidate strictly better in price, quality, latency, AND
+  capacity still ranks strictly after the evidence-backed twin,
+  proving the presence tier actually outranks the composite).  The
+  golden ordering over the five-listing world is pinned
+  byte-identically (every ranked golden-world candidate is
+  evidence-backed, so the promoted tier is uniform there and the
+  golden digests are preserved); three fresh runs produce identical
+  digests.
 - **Hash-seed independence** (case 19): PYTHONHASHSEED 0/1/7919/unset
   subprocesses all reproduce the byte-identical full-chain golden
   scenario stream (discovery, proposal, reservation, handoff,
@@ -467,10 +482,14 @@ no-delta ARCH-08, plus this finding).
   SHA is recorded in the PR and in the PR body — this document
   cannot embed its own commit hash).  The reviewed heads were
   `fdd7691f90581e9fd7fdd2940966d3ba47dafa15` (PR #135, Architect
-  review comment `5518682595`: REQUEST CHANGES) and then
+  review comment `5518682595`: REQUEST CHANGES), then
   `ed6fae89aabbaaaaca6c9c771674e9f544d4e59b` (PR #135, Architect
   re-audit comment `5518914690`: REQUEST CHANGES — the six
-  first-round blockers confirmed corrected; §15).
+  first-round blockers confirmed corrected; §15), and then
+  `7d9b9991d11a5064471f6d2ff62e6fa2d234a8aa` (PR #135, final
+  Architect re-audit: REQUEST CHANGES — blockers 8–9 confirmed
+  corrected, two further implementation-level findings plus the
+  evidence-manifest inconsistency; §16).
 - Base: main `c2e1b3c` (authorization inherited byte-identically
   from the reconciled baseline `825f48f`; the baseline→main delta
   is governance-only).
@@ -526,7 +545,8 @@ exactly as before:
 | — | PR metadata still contains the removed population-count claim text | the PR #135 body no longer contains the population-count privacy claim language (the claim phrase removed in round one and its by-construction variant); the body now states the honest bounded-spatial-resolution property, the current battery count, the correction-round history, and the exact current delivery SHA (uniformly honest across code, evidence manifest, worklog/report, and PR metadata) | PR #135 body (edited with the round-2 delivery); case 44 continues to enforce the absence of the claim text in the family and this document |
 | — | ARCH-08 authorization-scope governance remains unresolved | NOT fixed here — governance-lane, exactly as the re-audit directs ("resolve ARCH-08 separately in governance"); the implementation PR must not modify `spec/architect/`; the finding and its resolution path remain §10.1 | §10.1 + battery cases 37/38 (spec intact, delta confined) |
 
-Public-surface impact of this round: `ScoredCandidate.proximity_bound_m`
+Public-surface impact of this round (as documented at the time):
+`ScoredCandidate.proximity_bound_m`
 is now `Optional[int]` — `None` (canonical `null`) for a candidate
 without proximity evidence, the unchanged conservative bound maximum
 otherwise; the recorded content of an evidence-backed candidate is
@@ -536,3 +556,34 @@ digests are preserved.  The `marketplace` package `__all__` remains the
 same 65 frozen exports; the typed reason vocabulary is unchanged (16
 codes — the round reuses the frozen `constraint-distance` exclusion
 reason and the existing `SELECTION_EMPTY` selection reason).
+(Where this round's statements were found not-yet-true-in-code by the
+final re-audit — the ordering claim's priority and the annotation
+itself — round three completes them; see §16.)
+
+## 16. Correction round 3 — final re-audit of `7d9b999` (PR #135)
+
+The Architect's final re-audit of head
+`7d9b9991d11a5064471f6d2ff62e6fa2d234a8aa` confirmed blockers 8
+and 9 corrected (the fail-closed unanchored explicit distance limit;
+the `None`/zero-credit missing-proximity policy) and identified two
+further implementation-level findings plus a static-contract mismatch.
+All three are corrected on the new head; ARCH-08 remains a separate
+governance-lane action exactly as before:
+
+| # | Finding (final re-audit wording, abridged) | Correction | Proof |
+| --- | --- | --- | --- |
+| 10 | The proximity-ordering claim is stronger than the implementation: the sort key placed composite score first, so a no-evidence candidate could still rank above an evidence-backed candidate via other weighted dimensions | the proximity-PRESENCE tier is now the HIGHEST-PRIORITY ordering dimension: the FIRST sort-key element demotes every candidate without proximity evidence strictly after EVERY bounded-distance candidate (a GLOBAL demotion ahead of the composite — absence can never purchase rank with other weighted dimensions); within each tier the order is composite descending then the frozen tie-break chain, unchanged; the documented contract now states exactly what the code guarantees | case 46's dominant-composite world: a no-evidence candidate strictly better in price, quality, latency, AND capacity (composite 800,000 vs 200,000) still ranks strictly after the evidence-backed twin — the pre-promotion order inverted exactly this world; the fixture-dominance assertion proves the demotion is the presence tier's, not the composite's; deterministic on repeat |
+| 11 | The evidence manifest states the battery has 44 cases while the same document reports 46/46 | the manifest line now states the actual battery — 46 cases — synchronized with the §2 results table (the document is internally consistent) | §1 manifest + §2 results |
+| 12 | `ScoredCandidate.proximity_bound_m` is annotated `int` although the runtime deliberately stores `None` | the public annotation is now `Optional[int]`, matching the runtime contract (round two documented the intent; round three APPLIES it in code — the annotation, the class docstring, and the recorded canonical `null` now agree) | `marketplace/ranking.py` (annotation + docstring); case 46 (absent bound `None`, canonical `null`) |
+| — | ARCH-08 authorization-scope governance remains unresolved | NOT fixed here — governance-lane, exactly as the re-audit directs ("separately resolve ARCH-08"); the implementation PR must not modify `spec/architect/`; the finding and its resolution path remain §10.1 | §10.1 + battery cases 37/38 (spec intact, delta confined) |
+
+Public-surface impact of this round: the sort order over MIXED
+evidence-presence sets changes (evidence-backed candidates now always
+rank ahead of no-evidence candidates, whatever the composite); every
+evidence-presence-UNIFORM set — including the entire golden world —
+is ordered byte-identically to the previous rounds, so all §2 golden
+digests are preserved.  The `marketplace` package `__all__` remains
+the same 65 frozen exports; the typed reason vocabulary is unchanged
+(16 codes); the recorded content of every `ScoredCandidate` is
+unchanged (the annotation fix touches typing only, not values — the
+runtime already stored `None` since round two).

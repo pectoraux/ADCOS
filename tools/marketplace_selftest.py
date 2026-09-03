@@ -3441,8 +3441,11 @@ def case_46_missing_proximity_is_not_best_case(results: List[Result]) -> None:
     # ranking -- the BEST possible proximity, fabricated from
     # absence.  The frozen missing-evidence policy is now explicit:
     # absence earns exactly ZERO proximity credit, is recorded as an
-    # absent bound (None), and tie-breaks strictly after every
-    # bounded distance
+    # absent bound (None), and the proximity-PRESENCE tier -- the
+    # HIGHEST-PRIORITY ordering dimension (final re-audit of head
+    # 7d9b999) -- sorts it strictly after every bounded distance
+    # (a GLOBAL demotion ahead of the composite: absence can never
+    # purchase rank with other weighted dimensions)
     known = _listing(
         offer_id="twin", provider_id="provider-a",
         interface_name=WIFI_IF, link_kind="wireless",
@@ -3535,6 +3538,72 @@ def case_46_missing_proximity_is_not_best_case(results: List[Result]) -> None:
             problems.append(
                 "all-unknown world recorded a distance (%s)" % scored.offer_key[0]
             )
+    # the DOMINANT-composite world (the promoted presence tier,
+    # final re-audit of head 7d9b999): the no-evidence candidate is
+    # strictly BETTER in every OTHER weighted dimension (price,
+    # quality, latency, capacity) -- under the pre-promotion order
+    # (composite first) its composite purchased rank ABOVE the
+    # evidence-backed twin; the presence tier must demote it
+    # strictly after EVERY bounded-distance candidate regardless
+    dominant_unknown = _listing(
+        offer_id="dominant", provider_id="provider-b",
+        interface_name=WIFI_IF, link_kind="wireless",
+        price_minor=10,
+        advertised=_advertised(1, 1_000_000, "adv-dominant"),
+        declared_capacity_kbps=10_000_000,
+        coverage=(),
+    )
+    dominant_view = EligibilityView(
+        providers=(_trust("provider-a"), _trust("provider-b")),
+        offers=(
+            _offer_facts("twin", "provider-a"),
+            _offer_facts("dominant", "provider-b"),
+        ),
+        policies=(_policy(),),
+        capabilities=(_caps("provider-a"), _caps("provider-b")),
+    )
+    dominant_world = MarketplaceService(
+        index=MarketplaceIndex((dominant_unknown, known)),
+        clock=StepClock(_EVAL_NOW, 60), policy=RankingPolicy(),
+        eligibility=dominant_view,
+        payment_capabilities=(_paycaps("provider-a"), _paycaps("provider-b")),
+    )
+    dominant = dominant_world.discover(query=query)
+    if len(dominant.ranked) != 2:
+        problems.append(
+            "expected both candidates ranked in the dominant world: %s"
+            % ["%s/%s" % scored.offer_key for scored in dominant.ranked]
+        )
+    else:
+        d_first, d_second = dominant.ranked
+        # the evidence-backed twin outranks the DOMINANT no-evidence
+        # candidate: the presence tier outranks the composite
+        if d_first.candidate.offer.provider_id != "provider-a":
+            problems.append(
+                "dominant no-evidence candidate outranks the "
+                "evidence-backed twin: %s"
+                % [
+                    scored.candidate.offer.provider_id
+                    for scored in dominant.ranked
+                ]
+            )
+        # the fixture must genuinely dominate: the demotion is the
+        # presence tier's, not the composite's
+        if d_second.composite_score <= d_first.composite_score:
+            problems.append(
+                "dominant-composite fixture does not dominate: %d vs %d"
+                % (d_second.composite_score, d_first.composite_score)
+            )
+        if d_second.proximity_component != 0:
+            problems.append(
+                "dominant absent candidate earned proximity credit: %d"
+                % d_second.proximity_component
+            )
+        if d_second.proximity_bound_m is not None:
+            problems.append(
+                "dominant absent candidate recorded a distance: %r"
+                % d_second.proximity_bound_m
+            )
     # determinism: fresh service + fresh clock, byte-identical result
     fresh = MarketplaceService(
         index=MarketplaceIndex((unknown, known)),
@@ -3544,6 +3613,14 @@ def case_46_missing_proximity_is_not_best_case(results: List[Result]) -> None:
     )
     if fresh.discover(query=query).digest() != result.digest():
         problems.append("missing-evidence ranking is not deterministic")
+    dominant_fresh = MarketplaceService(
+        index=MarketplaceIndex((dominant_unknown, known)),
+        clock=StepClock(_EVAL_NOW, 60), policy=RankingPolicy(),
+        eligibility=dominant_view,
+        payment_capabilities=(_paycaps("provider-a"), _paycaps("provider-b")),
+    )
+    if dominant_fresh.discover(query=query).digest() != dominant.digest():
+        problems.append("dominant-world ranking is not deterministic")
     if problems:
         results.append(fail(name, "; ".join(problems[:5])))
         return
@@ -3551,8 +3628,10 @@ def case_46_missing_proximity_is_not_best_case(results: List[Result]) -> None:
         name,
         "absent proximity evidence earns ZERO proximity credit and is "
         "recorded as an absent bound (null) -- never a distance of 0; "
-        "the evidence-backed twin outranks the no-evidence twin (the "
-        "pre-fix inversion is impossible); all-unknown sets "
+        "the proximity-PRESENCE tier (the highest-priority ordering "
+        "dimension) sorts the no-evidence candidate strictly after "
+        "every bounded-distance candidate EVEN when its other "
+        "weighted dimensions dominate the composite; all-unknown sets "
         "differentiate nothing; deterministic",
     ))
 
