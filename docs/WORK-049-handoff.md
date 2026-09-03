@@ -285,3 +285,18 @@ The Architect exact-SHA review of the first delivery head `72b830b519ff16aad7108
 - **P1-5 baseline-pinned audits**: the boundary audits (cases 35/36/38/53) parse the immutable baseline SHA from the frozen WORK-049-CORE-001 authorization record, prove ancestry, derive the branch point by content (governance-only `spec/architect/**` ancestry — the DEC-0077 reconciliation convention), audit frozen surfaces against the baseline commit and the implementation delta against the derived branch point, prove the authorization record is inherited byte-identically, and verify every implementation commit's own delta stays in scope; the CI job checks out the exact delivery head (full history) and fetches the baseline commit — `origin/main` is never the audit authority.
 
 The corrected battery is 53/53 (46 original + 7 correction vectors); all results remain SOFTWARE-only. No merge is performed: the corrected head awaits the Architect's fresh exact-SHA re-audit on this same PR before any acceptance decision.
+
+## PR #142 architect-review correction record (round 2)
+
+The Architect exact-SHA re-audit of the round-1 corrected head `a92c42f4ac8feca6d24664991f3f18de4491610c` **accepted all seven round-1 corrections** (P0-1/P0-2/P1-1..P1-5 closed, CI condition verified) and found **one additional acceptance blocker**:
+
+- **P1 — restored client-event integrity is not cryptographically revalidated**: `ClientEvent.__post_init__()` derived `event_id` only when the supplied value was empty, so a restored event could carry arbitrary content plus an attacker-supplied nonempty `event_id`, and `ClientEventJournal.append()` did not recompute or verify the id — the journal being deterministic append-only evidence whose `event_id` is serialized into its digest, a forged restored event could alter the evidentiary record while passing the taxonomy/schema checks.
+
+Correction (same PR, same authorized literal scope; only `client/events.py`, `client/runtime.py`, and the battery change):
+
+- `ClientEvent.__post_init__()` now enforces `event_id == SHA256(canonical event content)` unconditionally — an empty id is derived, a SUPPLIED nonempty id must equal the derived digest or the event is rejected fail-closed (`INVALID_INPUT`) at construction.
+- `ClientEventJournal.append()` independently re-derives and verifies the digest on every append (defense in depth: a record that bypassed the constructor — e.g. a deserialization bypass — can never enter the evidentiary record with an attacker-chosen id).
+- `ClientRuntime.restore()` validates every restored event id (through the constructor enforcement) BEFORE the journal loads: a tampered id, or tampered content wearing a preserved id, aborts the restore atomically with no partial load — the P1-3 atomic-restore discipline extended to the evidentiary record.
+- Adversarial proof: case 54 (attacker-supplied id; tampered content with a preserved id; direct constructor refusal; journal-level refusal of a bypass-constructed mismatched record; genuine-snapshot positive control restoring with the journal digest byte-identical). Battery 53 → 54 cases, 54/54 PASS; no new event kinds or reason families (the typed failure reuses `INVALID_INPUT`); internal emitters already derived ids, so the golden digests are unchanged.
+
+All results remain SOFTWARE-only. No merge is performed: the round-2 corrected head again awaits the Architect's fresh exact-SHA re-audit on this same PR before any acceptance decision.

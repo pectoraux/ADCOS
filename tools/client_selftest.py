@@ -79,7 +79,17 @@ W049 client-boundary contract:
   performed records are revalidated against canonical state
   (P1-4), and the boundary audits are pinned to the immutable
   authorized baseline declared by the frozen authorization record
-  — never the mutable origin/main ref (P1-5).
+  — never the mutable origin/main ref (P1-5);
+- PR #142 round-2 correction vector (the exact-SHA re-audit of
+  a92c42f): case 54 proves restored client-event integrity is
+  cryptographically revalidated — an event id must equal the
+  SHA-256 digest of the canonical event content (a supplied
+  nonempty id that does not digest its content is rejected at
+  construction AND at journal append), a restored event carrying
+  an attacker-supplied id, or tampered content wearing a
+  preserved id, aborts the restore atomically before the journal
+  loads, and a genuine snapshot restores with the journal digest
+  preserved byte-identically.
 
 Usage:
     python3 tools/client_selftest.py
@@ -196,6 +206,7 @@ from client import (  # noqa: E402
     ClientContext,
     ClientError,
     ClientEvent,
+    ClientEventJournal,
     ClientReasonCode,
     ClientRuntime,
     ComposedGateway,
@@ -4483,6 +4494,162 @@ def case_53_authorized_baseline_ancestry(results: List[Result]) -> None:
     ))
 
 
+def case_54_restored_event_integrity(results: List[Result]) -> None:
+    """PR #142 round-2 P1 (exact-SHA re-audit of a92c42f): restored
+    client-event integrity is cryptographically revalidated — the
+    event journal is deterministic append-only evidence, so an event
+    id must equal the SHA-256 digest of the canonical event content:
+    a supplied nonempty id that does not digest its content is
+    rejected at construction AND at journal append, and a restored
+    event carrying an attacker-supplied id, or tampered content
+    wearing a preserved id, aborts the restore atomically BEFORE
+    the journal loads."""
+    name = "case_54_restored_event_integrity"
+    problems: List[str] = []
+    world = _marketplace_world()
+    buyer: BuyerClient = world["buyer"]
+    _active_buyer(world)
+    runtime: ClientRuntime = world["client_runtime"]
+    snapshot = runtime.snapshot()
+    events = snapshot.get("events", [])
+    if not events:
+        problems.append("fixture: the active buyer journaled no events")
+    original_digest = runtime.events_digest()
+    original_count = runtime.journal.count()
+    # 1. an attacker-supplied event id (nonempty, arbitrary) aborts
+    #    the restore BEFORE any local state loads (atomic)
+    tampered_id = dict(snapshot)
+    tampered_id_events = [dict(entry) for entry in events]
+    tampered_id_events[0]["event_id"] = "sha256:" + "0" * 64
+    tampered_id["events"] = tampered_id_events
+    fresh_runtime, _fresh_buyer = _restarted_buyer_stack(world)
+    try:
+        fresh_runtime.restore(tampered_id)
+        problems.append("a restored event with an attacker id was accepted")
+    except ClientError as caught:
+        if caught.reason != ClientReasonCode.INVALID_INPUT:
+            problems.append(
+                "the tampered-id restore failed with %r (expected "
+                "INVALID_INPUT)" % caught.reason
+            )
+    if (
+        fresh_runtime.journal.count() != 0
+        or fresh_runtime.request_records()
+        or list(fresh_runtime.cache.subjects())
+    ):
+        problems.append(
+            "a partial load survived the tampered-id restore refusal"
+        )
+    # 2. tampered CONTENT wearing the preserved genuine id is
+    #    equally unverifiable (the id no longer digests the content)
+    tampered_content = dict(snapshot)
+    tampered_content_events = [dict(entry) for entry in events]
+    tampered_content_events[0]["detail"] = [
+        ["note", "tampered-evidence-payload"]
+    ]
+    tampered_content["events"] = tampered_content_events
+    fresh_runtime_2, _fresh_buyer_2 = _restarted_buyer_stack(world)
+    try:
+        fresh_runtime_2.restore(tampered_content)
+        problems.append(
+            "tampered event content wearing a preserved id was accepted"
+        )
+    except ClientError as caught:
+        if caught.reason != ClientReasonCode.INVALID_INPUT:
+            problems.append(
+                "the tampered-content restore failed with %r (expected "
+                "INVALID_INPUT)" % caught.reason
+            )
+    if fresh_runtime_2.journal.count() != 0:
+        problems.append(
+            "a partial load survived the tampered-content restore refusal"
+        )
+    # 3. the constructor itself refuses a supplied id that does not
+    #    digest the content (the enforcement is at the model, not
+    #    only at the restore seam)
+    try:
+        ClientEvent(
+            kind="buyer.discovery_started",
+            taxonomy=EventTaxonomy.LOCAL_UI_EVENT,
+            subject="session-1",
+            observed_at="2026-06-01T00:00:00Z",
+            event_id="sha256:" + "1" * 64,
+        )
+        problems.append(
+            "ClientEvent accepted a supplied id that does not digest its "
+            "content"
+        )
+    except ClientError as caught:
+        if caught.reason != ClientReasonCode.INVALID_INPUT:
+            problems.append(
+                "ClientEvent rejected the mismatched id with %r (expected "
+                "INVALID_INPUT)" % caught.reason
+            )
+    # 4. the journal independently refuses a record whose id does
+    #    not digest its content (defense in depth: a record that
+    #    bypassed the constructor — e.g. a deserialization bypass —
+    #    can never enter the evidentiary record)
+    genuine_event = ClientEvent(
+        kind="buyer.discovery_started",
+        taxonomy=EventTaxonomy.LOCAL_UI_EVENT,
+        subject="session-1",
+        observed_at="2026-06-01T00:00:00Z",
+    )
+    bypassed = object.__new__(ClientEvent)
+    for field_name in (
+        "kind", "taxonomy", "subject", "observed_at", "detail",
+        "canonical_source", "canonical_reason", "event_id",
+    ):
+        object.__setattr__(
+            bypassed, field_name, getattr(genuine_event, field_name)
+        )
+    object.__setattr__(bypassed, "event_id", "sha256:" + "2" * 64)
+    journal = ClientEventJournal()
+    try:
+        journal.append(bypassed)
+        problems.append(
+            "the journal accepted a record whose id does not digest its "
+            "content"
+        )
+    except ClientError as caught:
+        if caught.reason != ClientReasonCode.INVALID_INPUT:
+            problems.append(
+                "the journal refused the mismatched record with %r "
+                "(expected INVALID_INPUT)" % caught.reason
+            )
+    # 5. positive control: a genuine snapshot restores cleanly with
+    #    the journal digest preserved byte-identically
+    genuine_runtime, genuine_buyer = _restarted_buyer_stack(world)
+    genuine_runtime.restore(snapshot)
+    genuine_buyer.restore(buyer.snapshot())
+    if genuine_runtime.journal.count() != original_count:
+        problems.append(
+            "the genuine snapshot did not fully restore the journal "
+            "(%d of %d events)"
+            % (genuine_runtime.journal.count(), original_count)
+        )
+    if genuine_runtime.events_digest() != original_digest:
+        problems.append(
+            "the restored journal digest diverged from the pre-restart "
+            "journal digest"
+        )
+    if problems:
+        results.append(fail(name, "; ".join(problems[:5])))
+        return
+    results.append(ok(
+        name,
+        "restored client-event integrity is cryptographically "
+        "revalidated: an event id must equal the SHA-256 digest of the "
+        "canonical event content — a supplied attacker id (or tampered "
+        "content wearing a preserved id) aborts the restore atomically "
+        "before the journal loads, the model constructor and the journal "
+        "append both refuse mismatched ids independently, and a genuine "
+        "snapshot restores with the journal digest preserved "
+        "byte-identically (the evidentiary record cannot be forged "
+        "through the restart path)",
+    ))
+
+
 # ---------------------------------------------------------------------------
 # main
 # ---------------------------------------------------------------------------
@@ -4544,6 +4711,7 @@ def main() -> int:
         case_51_forged_request_ledger,
         case_52_stale_performed_records,
         case_53_authorized_baseline_ancestry,
+        case_54_restored_event_integrity,
     ):
         case(results)
     failures = [result for result in results if not result[1]]

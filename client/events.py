@@ -108,6 +108,12 @@ class ClientEvent:
     event_id: str = ""
 
     def __post_init__(self) -> None:
+        # (PR #142 round-2 P1) the id is ALWAYS content-derived:
+        # an empty id is derived from the canonical event content;
+        # a SUPPLIED id must equal that same SHA-256 digest — an
+        # attacker-chosen nonempty id can never vouch for arbitrary
+        # content (a forged restored event fails closed here, at
+        # construction, before the journal can accept it)
         if self.kind not in EVENT_KINDS:
             raise ClientError(
                 ClientReasonCode.INVALID_INPUT,
@@ -162,8 +168,20 @@ class ClientEvent:
                     "an OBSERVED_CANONICAL_EVENT must cite its canonical "
                     "source authority",
                 )
+        derived_event_id = _derive_event_id(self)
         if self.event_id == "":
-            object.__setattr__(self, "event_id", _derive_event_id(self))
+            object.__setattr__(self, "event_id", derived_event_id)
+        elif self.event_id != derived_event_id:
+            raise ClientError(
+                ClientReasonCode.INVALID_INPUT,
+                "event %r is unverifiable: its id %r is not the "
+                "deterministic content-derived id %r — the id does "
+                "not digest the content it labels, so the record is "
+                "forged or tampered and is rejected (fail closed; the "
+                "journal is append-only evidence and never accepts "
+                "attacker-chosen ids)"
+                % (self.kind, self.event_id, derived_event_id),
+            )
 
     def content(self) -> Dict[str, Any]:
         return {
@@ -212,6 +230,22 @@ class ClientEventJournal:
             raise ClientError(
                 ClientReasonCode.INVALID_INPUT,
                 "the journal appends ClientEvent records only",
+            )
+        # (PR #142 round-2 P1) defense in depth: the journal itself
+        # RE-DERIVES the content digest and refuses any event whose
+        # id does not match — even a record that bypassed the
+        # constructor's enforcement (a deserialization bypass, a
+        # future construction path) can never enter the evidentiary
+        # record with an attacker-chosen id
+        derived_event_id = _derive_event_id(event)
+        if event.event_id != derived_event_id:
+            raise ClientError(
+                ClientReasonCode.INVALID_INPUT,
+                "the journal refuses event %r: its id %r is not the "
+                "deterministic content-derived id %r (fail closed — "
+                "the evidentiary record cannot carry a record whose "
+                "id does not digest its content)"
+                % (event.kind, event.event_id, derived_event_id),
             )
         self._events = self._events + (event,)
         return event

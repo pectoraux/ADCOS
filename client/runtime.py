@@ -340,12 +340,16 @@ class ClientRuntime:
         """Restore local state from a snapshot (the restart path).
 
         The restore is ATOMIC against forgery: every request-ledger
-        entry is RE-DERIVED and validated against this context
-        BEFORE any local state is loaded (a forged snapshot cannot
-        manufacture performed requests, and one unverifiable entry
-        aborts the whole restore — no partial load; P1-3
-        correction).  The restored cache keeps its recorded
-        freshness classes (anything recorded as current is
+        entry is RE-DERIVED and validated against this context, and
+        every restored event's id is verified against its own
+        content digest (PR #142 round-2 P1) — BOTH BEFORE any local
+        state is loaded (a forged snapshot can neither manufacture
+        performed requests nor alter the evidentiary event record,
+        and a single unverifiable entry of either kind aborts the
+        whole restore — no partial load; the P1-3 correction
+        extended by the round-2 event-integrity correction).  The
+        restored cache keeps its recorded freshness classes
+        (anything recorded as current is
         DEMOTED to STALE_CACHE: restart alone never preserves
         current-truth status).  Canonical truth is only
         re-established by reconciliation."""
@@ -401,6 +405,12 @@ class ClientRuntime:
             raise ClientError(
                 ClientReasonCode.INVALID_INPUT, "snapshot events must be a list"
             )
+        # round-2 P1: every restored event's id is re-derived from
+        # its own content and verified HERE (inside _event_from_dict
+        # -> ClientEvent.__post_init__) — a tampered id, or tampered
+        # content wearing a preserved id, raises before ANY local
+        # state loads; the journal never accepts a record whose id
+        # does not digest its content
         restored_events = [_event_from_dict(entry) for entry in events]
         cache_data = data.get("cache", {})
         restored = ProjectionCache.restore(cache_data)
