@@ -1,8 +1,10 @@
 # ADCOS Architect decision record.
 # schema: spec/architect/decision-record-template.md; verified by tools/spec_check.py (ARCH-04).
 # Architecture gate for W048 before implementation authorization.
+# The gate's blocker W048-CONTAINMENT-AUTHORITY is resolved by DEC-0072
+# (ACR-012 acceptance) recorded later in this same governance transition.
 decision_id: DEC-0071
-type: architecture
+type: governance
 work_item: WORK-048
 acr: null
 pr: null
@@ -44,4 +46,4 @@ downstream_effect:
   - "WORK-048 remains READY-CANDIDATE / UNAUTHORIZED."
   - "No implementation PR for W048 is authorized by this decision."
   - "The next governance action is the containment-authority decision; only after that decision may a WORK-048 active authorization be issued."
-resolved_by: null
+resolved_by: DEC-0072
