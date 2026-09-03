@@ -1,0 +1,47 @@
+# ADCOS Architect decision record.
+# schema: spec/architect/decision-record-template.md; verified by tools/spec_check.py (ARCH-04).
+# Baseline-advancement-only reconciliation (the DEC-0063/DEC-0066/DEC-0068
+# convention) for the WORK-049 activation issued by DEC-0076.
+decision_id: DEC-0077
+type: governance
+work_item: WORK-049
+acr: null
+pr: 140
+reviewed_sha: da56adcef48cd8449c383457949f709f8b5bc9cd
+decision: ACCEPTED
+status: ACCEPTED
+reviewer: "Architect (pectoraux)"
+timestamp: 2026-09-03T11:46:21Z
+findings:
+  - "The DEC-0075/DEC-0076 governance transition itself was merged as PR #140 (head dda16204406c7592d107233771ca74cf3749ba7a, base ce1ccaea328743a05cf8d6fa87a114e69d9e253c, merge commit da56adcef48cd8449c383457949f709f8b5bc9cd, merged 2026-09-03T11:46:21Z under the single-Architect merge authority of review-protocol §7), so the repository's actual mainline became da56adc while the persistent state referenced the LEDGER-RECON-020 snapshot baseline ce1ccae."
+  - "DEC-0076 issued WORK-049-CORE-001 with issuance baseline ce1ccaea328743a05cf8d6fa87a114e69d9e253c (the exact W048 acceptance merge mainline the governance transition was cut from, recorded while the transition PR was still open); this reconciliation advances the WORK-049 implementation baseline to the exact current main SHA da56adcef48cd8449c383457949f709f8b5bc9cd without changing the W049 contract, authorization scope, dependency satisfaction (WORK-046, WORK-047, and WORK-048 stay accepted-merged), or prior acceptance facts."
+  - "The PR #140 delta is verified governance-only: 10 files, all spec/architect and governance-authored docs (DEC-0075, DEC-0076, the WORK-048.yaml supersession, the new WORK-049.yaml authorization, the execution-ledger and execution-state reconciliation with LEDGER-RECON-019/LEDGER-RECON-020, current-state.md, the decisions README, and docs/WORK-049-handoff.md + docs/WORK-049-evidence.md); no implementation file, frozen architecture document, protocol schema, registry file, architecture lock, or W040 obligation was touched."
+  - "WORK-049-CORE-001 remains exactly the single active implementation authorization (issued by DEC-0076; its authorization id, dependencies, literal scope, acceptance criteria, evidence classes, and out-of-scope boundaries are unchanged); this reconciliation issues no new authorization, activates nothing, and supersedes nothing."
+  - "No W049 implementation has begun and no delivery is recorded: the client/ package, tools/client_selftest.py, and the implementation delivery evidence do not exist, and the W049 implementation branch has not been cut; implementation may begin only from the reconciled authorized baseline under the already-issued WORK-049-CORE-001."
+  - "DEC-0075, DEC-0076, the WORK-048 accepted-merged entry, and every other historical record are preserved exactly; W040 remains independent, in-review, and unaccepted with EVID-007/EVID-008 open and W040-owned; WORK-050 remains an unauthorized ready-candidate."
+  - "No specification-consistency run exists on the exact PR #140 head or merge commit that is green: the recorded condition stops at the already-known inherited mainline state (ARCH-02 schema drift in pre-existing historical records; ARCH-06 open-obligation visibility; the selftest mutation-anchor drift), which is inherited governance state, not a defect of this reconciliation, and is not represented as a green CI result."
+blockers: []
+required_corrections: []
+evidence:
+  merge_sha: da56adcef48cd8449c383457949f709f8b5bc9cd
+  ci_run: null
+  artifacts:
+    - "spec/architect/authorizations/WORK-049.yaml"
+    - "spec/architect/execution-state.yaml"
+    - "spec/architect/execution-ledger.yaml"
+accepted_scope:
+  - "The baseline-advancement-only reconciliation of the WORK-049-CORE-001 implementation baseline and the persistent snapshot to the exact post-transition governance mainline da56adcef48cd8449c383457949f709f8b5bc9cd (the PR #140 governance merge that carries DEC-0075/DEC-0076 / LEDGER-RECON-019/LEDGER-RECON-020)."
+  - "The synchronized execution-ledger.yaml, execution-state.yaml, WORK-049.yaml, current-state.md, and decisions README updates that record this advancement."
+rejected_scope:
+  - "Any WORK-049 implementation, client/ code, or scope change (the WORK-049-CORE-001 contract is unchanged from its DEC-0076 issuance)."
+  - "Any new authorization, any W050 activation, or any change to the single-active-authorization slot."
+  - "Any modification of frozen architecture or protocol semantics, registry files, architecture locks, or implementation artifacts."
+  - "Any rewriting of DEC-0075, DEC-0076, or any other historical record."
+  - "Any acceptance or closure of W040 physical evidence obligations EVID-007/EVID-008."
+downstream_effect:
+  - "The WORK-049-CORE-001 authorization baseline and the execution snapshot advance ce1ccae -> da56adc (LEDGER-RECON-021) in lockstep, so ARCH-03 and ARCH-05 hold at the reconciled state; the W049 implementation branch is to be cut from the exact reconciled authorized baseline da56adc (the mainline that carries the DEC-0076 activation record)."
+  - "The WORK-049 registered-only ledger entry note records the DEC-0077 baseline advancement while the original DEC-0076 issuance baseline ce1ccae remains recorded there; no delivery field becomes claimable and no W049 delivery exists."
+  - "DEC-0076 remains the authoritative WORK-049-CORE-001 issuance evidence; no prior work-item history is rewritten and no W048/W047/W046/W045/W044/W053/W052/W051/W042/W041 fact changes."
+  - "W040 remains independent, in-review, and unaccepted; its physical evidence obligations remain OPEN and W040-owned."
+  - "Per the DEC-0063/DEC-0066/DEC-0068/DEC-0074 convention, a further baseline-advancement-only reconciliation is required only if additional governance merges land on main before the W049 implementation branch is cut; this reconciliation's own merge is the branch-point the W049 implementation is cut from."
+resolved_by: null

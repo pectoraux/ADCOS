@@ -2,6 +2,11 @@
 # Issued by DEC-0076 after W048 acceptance (DEC-0075) on the W048 acceptance
 # merge mainline. The authorization is the ONLY durable authority to
 # implement WORK-049.
+# Baseline: advanced to the exact post-PR-#140 governance mainline by the
+# DEC-0077 baseline-advancement-only reconciliation (the
+# DEC-0063/DEC-0066/DEC-0068/DEC-0074 convention; original DEC-0076 issuance
+# baseline ce1ccaea328743a05cf8d6fa87a114e69d9e253c, the W048 acceptance
+# merge mainline).
 # W049 is a CLIENT/CONSUMER/PROJECTION BOUNDARY, not a new authority: every
 # canonical truth and enforcement stays with its existing owner (identity,
 # sessions, W041 NetworkPath, routing, transport, W051 CommercialCore, W042
@@ -13,8 +18,9 @@ authorized: true
 type: implementation
 authorization_id: "WORK-049-CORE-001"
 authorization_decision: DEC-0076
-baseline_sha: ce1ccaea328743a05cf8d6fa87a114e69d9e253c
-review_basis: "DEC-0076 activation on the exact current main ce1ccaea328743a05cf8d6fa87a114e69d9e253c (the PR #139 W048 acceptance merge mainline this governance transition is cut from; per the DEC-0063/DEC-0066/DEC-0068/DEC-0074 baseline-reconciliation convention, a follow-up baseline-advancement-only reconciliation may advance the recorded mainline and this WORK-049-CORE-001 baseline to the exact post-transition governance mainline once the governance PR carrying the activation merges — the implementation branch is then cut from the mainline that carries the authorization record, exactly one implementation PR, no self-authorization, no self-merge). DEC-0075 accepts WORK-048 on PR #139 exact reviewed head e2af4bd20e403c1d4ee9717f7eea8809c16a53cd (three Architect review rounds over correction heads ba63371 -> fc856bb -> e2af4bd; canonical acceptance comment 5524305998; 46/46 deterministic battery; SOFTWARE-only), merged at ce1ccaea328743a05cf8d6fa87a114e69d9e253c (2026-09-03T10:30:47Z), superseding WORK-048-CORE-001 and releasing the single active execution slot. WORK-049 issue #98 is the next canonical commercial Work Item; its hard dependencies WORK-046, WORK-047, and WORK-048 (exactly the frozen spec/work-items.md declaration) are accepted-merged in the execution ledger (DEC-0067, DEC-0070, DEC-0075). WORK-050 is deliberately NOT a hard dependency (advisory capability input, not a gate; the ACR-011-sanctioned advisory DAG edge yields a sanctioned ADV-01 advisory) and WORK-040 remains advisory-only experience input (DEC-0051). No W049 implementation delivery exists."
+baseline_sha: da56adcef48cd8449c383457949f709f8b5bc9cd
+baseline_reconciliation_decision: DEC-0077
+review_basis: "DEC-0076 activation (issuance baseline ce1ccaea328743a05cf8d6fa87a114e69d9e253c, the W048 acceptance merge mainline the governance transition was cut from) with the DEC-0077 / LEDGER-RECON-021 baseline reconciliation to the exact post-transition governance mainline da56adcef48cd8449c383457949f709f8b5bc9cd (the PR #140 governance merge that carries DEC-0075/DEC-0076); the W049 implementation branch is cut from the exact reconciled authorized baseline da56adc (the mainline that carries the authorization record; exactly one implementation PR, no self-authorization, no self-merge). DEC-0075 accepts WORK-048 on PR #139 exact reviewed head e2af4bd20e403c1d4ee9717f7eea8809c16a53cd (three Architect review rounds over correction heads ba63371 -> fc856bb -> e2af4bd; canonical acceptance comment 5524305998; 46/46 deterministic battery; SOFTWARE-only), merged at ce1ccaea328743a05cf8d6fa87a114e69d9e253c (2026-09-03T10:30:47Z), superseding WORK-048-CORE-001 and releasing the single active execution slot. WORK-049 issue #98 is the next canonical commercial Work Item; its hard dependencies WORK-046, WORK-047, and WORK-048 (exactly the frozen spec/work-items.md declaration) are accepted-merged in the execution ledger (DEC-0067, DEC-0070, DEC-0075). WORK-050 is deliberately NOT a hard dependency (advisory capability input, not a gate; the ACR-011-sanctioned advisory DAG edge yields a sanctioned ADV-01 advisory) and WORK-040 remains advisory-only experience input (DEC-0051). No W049 implementation delivery exists."
 dependencies:
   - WORK-046
   - WORK-047

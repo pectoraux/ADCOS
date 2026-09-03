@@ -4,8 +4,8 @@ package: "persistent-architect"
 last_updated: "2026-09-03"
 repository:
   canonical: "github.com/pectoraux/ADCOS"
-  main_sha: ce1ccaea328743a05cf8d6fa87a114e69d9e253c
-  main_sha_semantics: "Exact W048 implementation acceptance merge mainline: PR #139 delivered the authorized WORK-048 implementation at exact reviewed correction-round head e2af4bd20e403c1d4ee9717f7eea8809c16a53cd (three Architect review rounds over correction heads ba63371 -> fc856bb -> e2af4bd; canonical acceptance comment 5524305998) and merged by the Architect at ce1ccaea328743a05cf8d6fa87a114e69d9e253c (2026-09-03T10:30:47Z), which DEC-0075 / LEDGER-RECON-019 record as the accepted-merged W048 delivery and to which DEC-0076 / LEDGER-RECON-020 reconcile this snapshot while issuing WORK-049-CORE-001 with this exact mainline as the issuance baseline; per the DEC-0063/DEC-0066/DEC-0068/DEC-0074 convention, a follow-up baseline-advancement-only reconciliation moves this recorded mainline and the WORK-049-CORE-001 authorization baseline to the exact post-transition governance mainline once the governance PR carrying this transition merges, and the W049 implementation branch is cut from the mainline that carries the authorization record."
+  main_sha: da56adcef48cd8449c383457949f709f8b5bc9cd
+  main_sha_semantics: "Exact post-transition governance mainline: the DEC-0075/DEC-0076 governance transition (W048 acceptance + W049 activation, head dda16204406c7592d107233771ca74cf3749ba7a) was merged by the Architect as PR #140 at da56adcef48cd8449c383457949f709f8b5bc9cd (2026-09-03T11:46:21Z); DEC-0077 / LEDGER-RECON-021 are the baseline-advancement-only reconciliation (the DEC-0063/DEC-0066/DEC-0068/DEC-0074 convention) that advances this recorded mainline and the WORK-049-CORE-001 authorization baseline from the issuance baseline ce1ccaea328743a05cf8d6fa87a114e69d9e253c (the W048 acceptance merge mainline, DEC-0075 / LEDGER-RECON-019 / DEC-0076 / LEDGER-RECON-020) to this exact governance mainline, and the W049 implementation branch is cut from this mainline that carries the authorization record."
 versions:
   architecture_version_reference: "1.0"
   architecture_version_authority: "spec/architecture.md ## Status (single declaration site)"
@@ -15,7 +15,7 @@ execution:
   mode: "implementing"
   active_work_item: WORK-049
   active_authorization: "WORK-049-CORE-001"
-  halted_reason: "W049 is active-authorized from the exact W048 acceptance merge mainline ce1ccae (issuance baseline of WORK-049-CORE-001, issued by DEC-0076 after DEC-0075 accepted W048 on PR #139) with the frozen client-runtime boundary contract recorded in spec/architect/authorizations/WORK-049.yaml, docs/WORK-049-handoff.md, and docs/WORK-049-evidence.md; Z.ai may implement from the exact mainline that carries the authorization record once this governance transition merges."
+  halted_reason: "W049 is active-authorized from the exact reconciled authorized baseline da56adc (issuance baseline ce1ccae of WORK-049-CORE-001, issued by DEC-0076 after DEC-0075 accepted W048 on PR #139; advanced to the post-transition governance mainline by DEC-0077 / LEDGER-RECON-021 after the PR #140 merge) with the frozen client-runtime boundary contract recorded in spec/architect/authorizations/WORK-049.yaml, docs/WORK-049-handoff.md, and docs/WORK-049-evidence.md; Z.ai may implement from the exact mainline that carries the authorization record."
   next_required_decisions:
     - "Review the next authorized Work Item delivery against its exact W049 acceptance gate (the frozen client-lifecycle/authority-preservation/offline-reconnect/capability/privacy/determinism/boundary-audit battery) and persist the Architect verdict before downstream work."
 in_review:
