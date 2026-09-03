@@ -3,7 +3,7 @@
 # Architecture gate for W048 before implementation authorization.
 decision_id: DEC-0071
 type: architecture
-twork_item: WORK-048
+work_item: WORK-048
 acr: null
 pr: null
 reviewed_sha: 7bc31f2899307c56639887416d602b41b4c16f43
