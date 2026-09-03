@@ -72,6 +72,12 @@ class SharingReasonCode:
     USAGE_EMISSION_REJECTED = "sharing-usage-emission-rejected"
     #: recovery could not reconstruct durable state fail closed
     RECOVERY_FAILED = "sharing-recovery-failed"
+    #: restored durable state is non-admitting until the mandatory
+    #: recovery revalidation completes (lease/consent/path/quota
+    #: re-read + FRESH containment re-proof); an admission
+    #: CONDITION, not a lifecycle state (the frozen sharing-session
+    #: vocabulary is unchanged; fail closed)
+    RECOVERY_REQUIRED = "sharing-recovery-required"
     #: an unmodeled exception on a security-critical admission
     #: operation became a typed fail-closed denial (never a crash,
     #: never an accidental admission)

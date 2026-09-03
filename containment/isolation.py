@@ -55,6 +55,37 @@ from .errors import ContainmentError, ContainmentReasonCode
 from .state import ISOLATION_MECHANISMS
 
 
+#: The frozen deny-by-default floor: destination classes that a
+#: buyer-traffic boundary may NEVER expose (control-plane/admin/
+#: private surfaces — the control-plane/buyer-plane separation
+#: ACR-012 owns).  Every verification proof MUST demonstrate them
+#: DENIED by the mechanism, and no scope declaration may place
+#: them in the allow-list or the exposed local services.  These
+#: are technology-neutral destination CLASS tokens (opaque data
+#: to the core), not addresses and not platform types.
+MANDATORY_DENIED_PROBE_DESTINATIONS: Tuple[str, ...] = (
+    "provider-control-plane",
+    "provider-admin-services",
+    "provider-private-lan",
+    "unrelated-local-service",
+)
+
+
+def _envelope_floor_violations(
+    allowed_egress: Tuple[str, ...],
+    exposed_local_services: Tuple[str, ...],
+) -> Tuple[str, ...]:
+    """The declared-envelope destinations that fall on the frozen
+    deny floor (sorted, deterministic).  A boundary may never
+    expose the control plane, admin services, the private LAN, or
+    unrelated local services to buyer traffic."""
+    floor = set(MANDATORY_DENIED_PROBE_DESTINATIONS)
+    violations = (
+        set(allowed_egress) | set(exposed_local_services)
+    ) & floor
+    return tuple(sorted(violations))
+
+
 def _require_text(value: object, label: str) -> str:
     if not isinstance(value, str) or not value:
         raise ContainmentError(
@@ -123,6 +154,20 @@ class ScopeSpec:
                 "allowed egress and exposed local services must be "
                 "disjoint (a token is either egress or a local service: %s)"
                 % sorted(overlap)[:3],
+            )
+        floor = _envelope_floor_violations(
+            self.allowed_egress, self.exposed_local_services,
+        )
+        if floor:
+            # deny-by-default floor: a buyer boundary may NEVER
+            # expose the control plane / admin / private surfaces
+            # (fail closed at declaration, before any scope exists)
+            raise ContainmentError(
+                ContainmentReasonCode.INVALID_INPUT,
+                "the declared envelope exposes deny-by-default floor "
+                "destinations a buyer boundary may never reach (%s); the "
+                "scope specification is rejected fail closed"
+                % list(floor),
             )
         object.__setattr__(
             self, "allowed_egress", tuple(sorted(set(self.allowed_egress)))
@@ -271,15 +316,62 @@ class VerificationProof:
             canonical_json_bytes(self.content())
         ).hexdigest()
 
-    def proves_boundary(self) -> bool:
-        """A proof proves the boundary ONLY when the primitive
-        observed the scope to exist AND its allow-list active AND
-        every deny probe decided by the platform scope matches
-        (allowed-set allowed, everything else denied)."""
+    def proves_boundary(self, spec: "ScopeSpec") -> bool:
+        """A proof proves the boundary ONLY when it semantically
+        matches the EXACT declared scope specification (the
+        boundary envelope binding — a structurally shaped proof of
+        some other envelope, or a lying probe matrix, proves
+        nothing):
+
+        - the primitive OBSERVED the scope to exist AND its
+          egress allow-list enforcing;
+        - the proof's mechanism IS the specification's mechanism;
+        - every probe is decided by the platform scope, no
+          destination is probed twice, and every decision MATCHES
+          the declared semantics: a destination in the declared
+          envelope MUST be probed ``allowed``; a destination
+          outside it MUST be probed ``denied``;
+        - the probe matrix COVERS the declared envelope: every
+          allowed-egress and exposed-local-service destination is
+          probed (an unprobed allowed destination proves nothing);
+        - deny-by-default is DEMONSTRATED: every frozen
+          mandatory-denied floor destination (never inside a legal
+          envelope) is probed ``denied``.
+
+        Anything else is a structurally valid but semantically
+        false or incomplete observation: it does NOT prove the
+        boundary (fail closed)."""
+        if not isinstance(spec, ScopeSpec):
+            return False
         if not (self.scope_exists and self.allowlist_active):
             return False
+        if self.mechanism != spec.mechanism:
+            return False
+        envelope = set(spec.allowed_egress) | set(
+            spec.exposed_local_services
+        )
+        seen: set = set()
         for probe in self.deny_probes:
             if probe.decided_by != "platform-scope":
+                return False
+            if probe.destination in seen:
+                return False  # a duplicated probe is malformed evidence
+            seen.add(probe.destination)
+            if probe.destination in envelope:
+                if probe.decision != "allowed":
+                    return False
+            else:
+                if probe.decision != "denied":
+                    return False
+        # coverage: every declared-allowed destination is proved allowed
+        if not envelope <= seen:
+            return False
+        # the deny floor: every mandatory denied destination is
+        # proved denied (deny-by-default demonstrated, not declared)
+        for destination in MANDATORY_DENIED_PROBE_DESTINATIONS:
+            if destination in envelope:
+                return False  # illegal envelope (defensive; spec rejects)
+            if destination not in seen:
                 return False
         return True
 
@@ -407,4 +499,5 @@ __all__ = [
     "TeardownResult",
     "PrimitiveFailure",
     "IsolationPrimitive",
+    "MANDATORY_DENIED_PROBE_DESTINATIONS",
 ]

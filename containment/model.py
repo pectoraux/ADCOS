@@ -46,7 +46,11 @@ from typing import Any, Dict, List, Mapping, Tuple
 from protocol.canonicalization import canonical_json_bytes
 
 from .errors import ContainmentError, ContainmentReasonCode
-from .isolation import ScopeSpec
+from .isolation import (
+    MANDATORY_DENIED_PROBE_DESTINATIONS,
+    ScopeSpec,
+    _envelope_floor_violations,
+)
 from .state import (
     ACTION_REQUIRED_STATE,
     BOUNDARY_TRANSITIONS,
@@ -218,6 +222,20 @@ class ContainmentBoundary:
                 ContainmentReasonCode.INVALID_INPUT,
                 "admitted_bytes must be an integer",
             )
+        # the deny-by-default floor: a boundary may NEVER declare
+        # the control-plane/admin/private destinations reachable
+        # (fail closed at record construction — a tampered or
+        # deserialized envelope can never widen the floor)
+        floor = _envelope_floor_violations(
+            self.allowed_egress, self.exposed_local_services,
+        )
+        if floor:
+            raise ContainmentError(
+                ContainmentReasonCode.INVALID_INPUT,
+                "the boundary envelope exposes deny-by-default floor "
+                "destinations buyer traffic may never reach (%s); the "
+                "boundary record is rejected fail closed" % list(floor),
+            )
         # Tamper-evident content binding: an EMPTY id at construction
         # means "derive it"; a non-empty id MUST equal the fingerprint
         # recomputed from the content.
@@ -267,9 +285,15 @@ class ContainmentBoundary:
     # ------------------------------------------------------------------
 
     def proof_is_valid(self) -> bool:
-        """The recorded verification proof exists and is content-
-        bound to THIS boundary's scope."""
+        """The recorded verification proof exists, is content-bound
+        to THIS boundary's scope, and carries a live proof epoch
+        (epoch 0 = never proven).  Full SEMANTIC validation of the
+        recorded proof material against this boundary's declared
+        envelope is :meth:`ContainmentProof.proves_boundary` — the
+        structural check here is only the first gate."""
         if self.proof_id == "" or self.proof_digest == "" or self.verified_at == "":
+            return False
+        if self.proof_epoch < 1:
             return False
         return True
 
@@ -483,16 +507,78 @@ class ContainmentProof:
                 % (self.proof_id[:80],),
             )
 
-    def proves_boundary(self) -> bool:
-        """The proof proves the boundary ONLY when the primitive
-        observed the scope to exist, the allow-list enforcing, and
-    every deny probe decided by the platform scope."""
+    def proves_boundary(self, boundary: "ContainmentBoundary") -> bool:
+        """The proof proves THIS boundary ONLY when it is fully
+        bound to the boundary's exact declaration and the probe
+        matrix semantically matches the declared envelope:
+
+        - identity binding: the proof's ``boundary_id``, ``scope_ref``
+          and ``mechanism`` ARE the boundary's (a proof of another
+          boundary, another scope, or another mechanism proves
+          nothing here), and the proof epoch is live;
+        - the primitive OBSERVED the scope to exist and its egress
+          allow-list enforcing;
+        - every probe is decided by the platform scope, no
+          destination is probed twice, and every decision MATCHES
+          the declared semantics: a destination in the boundary's
+          declared envelope (allowed egress + exposed local
+          services) MUST be ``allowed``; every other probed
+          destination MUST be ``denied``;
+        - the probe matrix COVERS the declared envelope (an
+          unprobed allowed destination proves nothing);
+        - deny-by-default is DEMONSTRATED: every frozen
+          mandatory-denied floor destination is probed ``denied``.
+
+        A structurally valid proof (well-formed fields, valid
+        content-derived id) with a lying, incomplete, or misbound
+        probe matrix does NOT prove the boundary."""
+        if not isinstance(boundary, ContainmentBoundary):
+            return False
+        # identity binding: THIS boundary, THIS scope, THIS mechanism
+        if self.boundary_id != boundary.boundary_id:
+            return False
+        if boundary.scope_ref == "" or self.scope_ref != boundary.scope_ref:
+            return False
+        if self.mechanism != boundary.mechanism:
+            return False
+        if self.proof_epoch < 1:
+            return False
         if not (self.scope_exists and self.allowlist_active):
             return False
+        envelope = (
+            set(boundary.allowed_egress)
+            | set(boundary.exposed_local_services)
+        )
+        seen: set = set()
         for probe in self.deny_probes:
-            if probe.get("decided_by") != "platform-scope":
+            if not isinstance(probe, Mapping):
                 return False
-            if probe.get("decision") not in ("denied", "allowed"):
+            decided_by = probe.get("decided_by")
+            decision = probe.get("decision")
+            destination = probe.get("destination")
+            if decided_by != "platform-scope":
+                return False
+            if decision not in ("denied", "allowed"):
+                return False
+            if not isinstance(destination, str) or not destination:
+                return False
+            if destination in seen:
+                return False  # a duplicated probe is malformed evidence
+            seen.add(destination)
+            if destination in envelope:
+                if decision != "allowed":
+                    return False
+            else:
+                if decision != "denied":
+                    return False
+        # coverage: every declared-allowed destination is proved allowed
+        if not envelope <= seen:
+            return False
+        # the deny floor: deny-by-default demonstrated by the mechanism
+        for destination in MANDATORY_DENIED_PROBE_DESTINATIONS:
+            if destination in envelope:
+                return False  # an illegal envelope never proves (defensive)
+            if destination not in seen:
                 return False
         return True
 

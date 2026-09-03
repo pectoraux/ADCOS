@@ -157,6 +157,12 @@ class SharingRuntime:
         self._event_ids: set = set()
         self._consents = ConsentRegistry()
         self._quota = QuotaLedger(envelopes)
+        # Post-restore recovery condition (an admission CONDITION,
+        # not a lifecycle state): a RESTORED runtime is non-admitting
+        # until :meth:`recover` completes the mandatory revalidation
+        # (lease/consent/path/quota re-read + FRESH containment
+        # re-proof).  A freshly constructed runtime is never pending.
+        self._recovery_pending: bool = False
 
     # ------------------------------------------------------------------
     # Public reads (deterministic, no clock consumption)
@@ -207,7 +213,15 @@ class SharingRuntime:
     ) -> "SharingRuntime":
         """Journal-first reconstruction of the durable enforcement
         state (byte-identical by construction; authorities are
-        re-injected fresh and revalidated by :meth:`recover`)."""
+        re-injected fresh and revalidated by :meth:`recover`).
+
+        The restored runtime is NON-ADMITTING until :meth:`recover`
+        completes: every traffic-admitting path (authorize, activate,
+        account, resume, path change) fails closed with the typed
+        ``RECOVERY_REQUIRED`` condition.  Restored ``active`` state
+        can therefore NEVER reach admission before the mandatory
+        fresh recovery re-proof — even though the restored proof
+        material may be structurally valid."""
         runtime = cls(
             core=core, paths=paths, containment=containment, clock=clock,
         )
@@ -222,7 +236,30 @@ class SharingRuntime:
         runtime._consents = ConsentRegistry.restore(
             snapshot.get("consents", {})
         )
+        runtime._recovery_pending = True
         return runtime
+
+    @property
+    def recovery_pending(self) -> bool:
+        """True while restored durable state has NOT completed the
+        mandatory recovery revalidation (all traffic-admitting paths
+        fail closed with ``RECOVERY_REQUIRED``; not a lifecycle
+        state)."""
+        return self._recovery_pending
+
+    def _require_not_recovering(self, operation: str) -> None:
+        """The post-restore admission gate: restored durable state
+        is non-admitting until :meth:`recover` completes (fail
+        closed, typed; the recovery re-proof is mandatory — a
+        structurally valid restored proof is not a substitute)."""
+        if self._recovery_pending:
+            raise SharingError(
+                SharingReasonCode.RECOVERY_REQUIRED,
+                "restored durable state requires recovery before %r "
+                "(lease/consent/path/quota revalidation + FRESH "
+                "containment re-proof; fail closed: NO buyer traffic "
+                "until recovery completes)" % operation,
+            )
 
     # ------------------------------------------------------------------
     # Prepare (lease truth + envelope + capability; fail closed)
@@ -344,6 +381,9 @@ class SharingRuntime:
             requested_bytes=scope.byte_quota,
         )
         # 4. deterministic concurrent-buyer admission
+        buyer_previously_admitted = (
+            buyer_ref in self._quota.admitted_buyers(provider_ref)
+        )
         try:
             self._quota.admit_buyer(
                 provider_ref=provider_ref,
@@ -374,15 +414,18 @@ class SharingRuntime:
                 exposed_local_services=scope.exposed_local_services,
             )
         except ContainmentError as error:
-            # capability/containment failure: release the local
-            # reservation and fail closed (no session record)
+            # capability/containment failure: release THIS attempt's
+            # local reservation and fail closed atomically (no
+            # session record; a buyer already admitted under ANOTHER
+            # session is never evicted by a failed prepare)
             self._quota.release_reservation(
                 provider_ref=provider_ref,
                 sharing_session_id=session.sharing_session_id,
             )
-            self._quota.release_buyer(
-                provider_ref=provider_ref, buyer_ref=buyer_ref,
-            )
+            if not buyer_previously_admitted:
+                self._quota.release_buyer(
+                    provider_ref=provider_ref, buyer_ref=buyer_ref,
+                )
             raise SharingError(
                 SharingReasonCode.CONTAINMENT_DENIED,
                 "the containment authority refused to prepare the boundary "
@@ -464,7 +507,11 @@ class SharingRuntime:
         2. provider consent is explicitly granted (scope-bound to
            this lease/buyer);
         3. the lease is still active (W051 truth re-read);
-        4. the NetworkPath is validated/bound (W041 truth)."""
+        4. the NetworkPath is validated/bound (W041 truth).
+
+        Restored durable state must complete :meth:`recover` first
+        (the typed ``RECOVERY_REQUIRED`` gate)."""
+        self._require_not_recovering("authorize_sharing_session")
         session = self._require_session(sharing_session_id)
         if session.state != SharingSessionState.PREPARED:
             raise SharingError(
@@ -563,7 +610,11 @@ class SharingRuntime:
         frozen condition (lease/consent/path/quota facts +
         capability + proof + scope).  Any failure: typed raise, the
         session stays ``authorized``, the boundary stays
-        ``verified`` — NO buyer traffic."""
+        ``verified`` — NO buyer traffic.
+
+        Restored durable state must complete :meth:`recover` first
+        (the typed ``RECOVERY_REQUIRED`` gate)."""
+        self._require_not_recovering("activate_sharing_session")
         session = self._require_session(sharing_session_id)
         if session.state != SharingSessionState.AUTHORIZED:
             raise SharingError(
@@ -635,16 +686,22 @@ class SharingRuntime:
         self, sharing_session_id: str, byte_count: int
     ) -> Tuple[SharingSession, int]:
         """Account ``byte_count`` bytes of buyer traffic at the
-        boundary.
+        boundary — an ATOMIC enforcement operation.
 
         Every accounting point re-validates the FULL admission
-        state (fail closed, typed): session active; time quota;
-        lease truth; consent; W041 path ACTIVE for the exact
-        logical session; byte quota (append-only); the containment
-        boundary gate (proof + scope).  On success the primitive
-        counts the bytes and the session's accounted_bytes advance;
-        the usage-evidence emission happens separately (explicit,
+        state (fail closed, typed): session active; restored-state
+        recovery completed; time quota; lease truth; consent; W041
+        path ACTIVE for the exact logical session; byte-quota
+        AVAILABILITY (check-only); the containment boundary gate
+        (proof + scope + facts) — and only when containment
+        CONFIRMS the admission does the local quota counter COMMIT
+        (append-only) and the session's ``accounted_bytes`` advance.
+        A containment denial therefore leaves the quota LEDGER, the
+        session counter, the boundary counter, and the primitive
+        counter all UNCHANGED: rejected bytes never consume quota.
+        The usage-evidence emission happens separately (explicit,
         idempotent) via :meth:`emit_usage_evidence`."""
+        self._require_not_recovering("account_traffic")
         session = self._require_session(sharing_session_id)
         if not isinstance(byte_count, int) or isinstance(byte_count, bool) or byte_count < 0:
             raise SharingError(
@@ -709,18 +766,25 @@ class SharingRuntime:
                 "session (%s); the session is revoked PATH_LOST and no "
                 "bytes are admitted" % path_problem,
             )
-        # 5. byte quota (append-only; enforced BEFORE counting)
+        # 5. byte-quota AVAILABILITY (check-only: NO counter
+        #    mutation — the local quota ledger commits ONLY after
+        #    containment admission confirms the bytes actually
+        #    crossed the boundary; rejected bytes never consume
+        #    quota)
         try:
-            total = self._quota.account(
+            self._quota.check_byte_quota(
                 sharing_session_id=sharing_session_id,
                 byte_quota=session.scope.byte_quota,
-                byte_count=byte_count,
+                additional_bytes=byte_count,
             )
         except SharingError as error:
             if error.reason == SharingReasonCode.QUOTA_EXHAUSTED:
                 self._expire_session(session, "BYTE_QUOTA_REACHED", now=now)
             raise
-        # 6. the containment boundary gate (proof + scope + facts)
+        # 6. the containment boundary gate (proof + scope + facts):
+        #    the primitive counts the bytes ONLY when every
+        #    condition holds; a denial leaves ALL accounting
+        #    untouched (atomic admission — quota commits below)
         facts = self._admission_facts(session)
         try:
             decision = self._containment.admit_bytes(
@@ -742,6 +806,33 @@ class SharingRuntime:
                 "the containment boundary denied byte admission (%s: %s)"
                 % (decision.reason, decision.detail[:140]),
             )
+        # 7. quota COMMIT (only after confirmed admission; the
+        #    check ran at step 5 over the same counter, so this
+        #    appends deterministically — the defensive failure
+        #    path below fails closed WITHOUT rewriting the
+        #    already-admitted boundary history)
+        try:
+            total = self._quota.account(
+                sharing_session_id=sharing_session_id,
+                byte_quota=session.scope.byte_quota,
+                byte_count=byte_count,
+            )
+        except SharingError as error:
+            if error.reason == SharingReasonCode.QUOTA_EXHAUSTED:
+                # defensive (single-threaded deterministic): the
+                # availability check passed; treat any commit-time
+                # exhaustion the same fail-closed way
+                self._expire_session(session, "BYTE_QUOTA_REACHED", now=now)
+                raise
+            self._revoke_session(session, "QUOTA_UNVERIFIABLE", now=now)
+            raise SharingError(
+                SharingReasonCode.QUOTA_UNVERIFIABLE,
+                "the quota counter became unverifiable after containment "
+                "admission; the session revokes fail-closed and the "
+                "admitted-bytes history at the boundary is never rewritten "
+                "(append-only accounting)",
+            ) from error
+        # 8. session record advance (the committed total)
         epoch = session.accounting_epochs + 1
         advanced = replace(
             session,
@@ -893,7 +984,13 @@ class SharingRuntime:
         """``paused -> active`` ONLY through a full re-check (the
         boundary must be re-verified with a FRESH proof — never a
         silent conversion — and consent/lease/path/quota must hold
-        again)."""
+        again).
+
+        Restored durable state must complete :meth:`recover` first
+        (the typed ``RECOVERY_REQUIRED`` gate: a restored paused
+        session never resumes admission before the fresh recovery
+        re-proof)."""
+        self._require_not_recovering("resume_sharing_session")
         session = self._require_session(sharing_session_id)
         if session.state != SharingSessionState.PAUSED:
             raise SharingError(
@@ -1057,7 +1154,11 @@ class SharingRuntime:
         old LAST).  The logical ``session_id`` is STABLE across the
         change (the session authority owns it); the sharing session
         stays active only if the W041 machinery proves the new path
-        ACTIVE for the exact logical session."""
+        ACTIVE for the exact logical session.
+
+        Restored durable state must complete :meth:`recover` first
+        (the typed ``RECOVERY_REQUIRED`` gate)."""
+        self._require_not_recovering("change_path")
         session = self._require_session(sharing_session_id)
         if session.state != SharingSessionState.ACTIVE:
             raise SharingError(
@@ -1158,14 +1259,24 @@ class SharingRuntime:
         1. revalidate the lease (W051 read-only);
         2. revalidate consent;
         3. revalidate the NetworkPath (W041 read-only);
-        4. revalidate quota/capacity;
+        4. revalidate the accounting-consistency invariant (the
+           durable session counter == the local quota-ledger
+           counter, and the boundary's admitted counter never
+           trails the session's — the atomic admission discipline;
+           tampered/divergent accounting revokes fail closed);
         5. RE-PROVE containment (a FRESH primitive verification —
            never stale proof).
 
         A boundary that cannot re-prove containment lands ``failed``
         and its session is revoked (NO buyer traffic resumes).  A
         session whose lease/consent/path/quota no longer hold is
-        expired/revoked with its typed reason.  Returns the
+        expired/revoked with its typed reason.  At the END of the
+        loop the containment authority's recovery condition clears
+        (it self-verifies every non-terminal established boundary
+        carries a fresh post-restore proof) and THIS runtime's
+        ``RECOVERY_REQUIRED`` condition clears — the only clearance
+        path.  A raised error leaves both conditions SET (fail
+        closed: restored state stays non-admitting).  Returns the
         deterministic recovery report."""
         report: Dict[str, Any] = {}
         now = self._clock.now()
@@ -1198,6 +1309,44 @@ class SharingRuntime:
                 self._revoke_session(session, "PATH_LOST", now=now)
                 report[sharing_session_id] = "revoked:PATH_LOST"
                 continue
+            # 4. accounting-consistency invariant (the atomic
+            #    admission discipline): the durable session counter
+            #    MUST equal the local quota-ledger counter, and the
+            #    boundary's admitted counter MUST never trail the
+            #    session's (a boundary cannot have admitted fewer
+            #    bytes than were accounted).  Divergent or
+            #    unverifiable accounting revokes fail closed.
+            try:
+                ledger_bytes = self._quota.accounted_bytes(
+                    sharing_session_id
+                )
+            except SharingError:
+                self._revoke_session(
+                    session, "QUOTA_UNVERIFIABLE", now=now,
+                )
+                report[sharing_session_id] = "revoked:QUOTA_UNVERIFIABLE"
+                continue
+            try:
+                boundary_record = self._containment.boundary(
+                    session.boundary_ref
+                )
+            except ContainmentError:
+                self._revoke_session(
+                    session, "BOUNDARY_UNKNOWN", now=now,
+                )
+                report[sharing_session_id] = "revoked:BOUNDARY_UNKNOWN"
+                continue
+            if (
+                ledger_bytes != session.accounted_bytes
+                or boundary_record.admitted_bytes < session.accounted_bytes
+            ):
+                self._revoke_session(
+                    session, "ACCOUNTING_INCONSISTENT", now=now,
+                )
+                report[sharing_session_id] = (
+                    "revoked:ACCOUNTING_INCONSISTENT"
+                )
+                continue
             # 5: re-prove containment (fresh proof or fail closed)
             try:
                 boundary, proof = self._containment.reprove(
@@ -1215,7 +1364,7 @@ class SharingRuntime:
                 )
                 report[sharing_session_id] = "revoked:ISOLATION_UNPROVABLE"
                 continue
-            if proof is not None and not proof.proves_boundary():
+            if proof is not None and not proof.proves_boundary(boundary):
                 self._revoke_session(
                     session, "ISOLATION_UNPROVABLE", now=now,
                 )
@@ -1232,6 +1381,14 @@ class SharingRuntime:
                     report[sharing_session_id] = "revoked:ADMISSION_LOST"
                     continue
             report[sharing_session_id] = "revalidated:%s" % session.state
+        # recovery completion — the ONLY clearance path: the
+        # containment authority self-verifies that every
+        # non-terminal established boundary carries a FRESH
+        # post-restore proof (mark_recovered raises otherwise and
+        # BOTH conditions stay set: restored state stays
+        # non-admitting, fail closed)
+        self._containment.mark_recovered()
+        self._recovery_pending = False
         return report
 
     # ------------------------------------------------------------------

@@ -163,6 +163,14 @@ class ContainmentAuthority:
         self._event_ids: set = set()
         self._proofs: Dict[str, List[ContainmentProof]] = {}
         self._security_evidence: List[SecurityEvidence] = []
+        # Post-restore recovery condition (an admission CONDITION,
+        # not a lifecycle state): restored durable state is
+        # NON-ADMITTING until the mandatory recovery revalidation
+        # completes with a FRESH containment re-proof for every
+        # non-terminal established boundary.  A freshly constructed
+        # authority is never pending.
+        self._recovery_pending: bool = False
+        self._restore_proof_epochs: Dict[str, int] = {}
 
     # ------------------------------------------------------------------
     # Public reads (deterministic, no clock consumption)
@@ -225,7 +233,17 @@ class ContainmentAuthority:
     ) -> "ContainmentAuthority":
         """Journal-first recovery: rebuild from the snapshot (the
         fold is byte-identical by construction; the primitive scope
-        must be RE-PROVED by the caller via :meth:`reprove`)."""
+        must be RE-PROVED by the caller via :meth:`reprove`).
+
+        The restored authority is NON-ADMITTING until the mandatory
+        recovery revalidation completes: every admission path fails
+        closed with the typed ``RECOVERY_REQUIRED`` condition,
+        cleared ONLY by :meth:`mark_recovered` (which itself
+        requires a FRESH post-restore proof for every non-terminal
+        established boundary).  A restored ``active`` boundary can
+        therefore NEVER admit buyer traffic before the fresh
+        re-proof — a stale-but-structurally-valid proof is not a
+        path around the recovery gate."""
         authority = cls(primitive=primitive, clock=clock)
         for record in snapshot.get("boundaries", ()):
             boundary = ContainmentBoundary.from_dict(record)
@@ -247,7 +265,62 @@ class ContainmentAuthority:
                 exception_class=record.get("exception_class", ""),
             )
             authority._security_evidence.append(evidence)
+        # the post-restore non-admitting condition: record the proof
+        # epochs at restore so recovery completion can PROVE each
+        # non-terminal established boundary carries a strictly
+        # fresher proof than the restored one
+        authority._recovery_pending = True
+        authority._restore_proof_epochs = {
+            boundary_id: boundary.proof_epoch
+            for boundary_id, boundary in sorted(
+                authority._boundaries.items()
+            )
+        }
         return authority
+
+    @property
+    def recovery_pending(self) -> bool:
+        """True while restored durable state has NOT completed the
+        mandatory recovery revalidation (admission fails closed
+        with ``RECOVERY_REQUIRED``; not a lifecycle state)."""
+        return self._recovery_pending
+
+    def mark_recovered(self) -> None:
+        """Clear the post-restore recovery condition — the ONLY
+        clearance path, and it self-verifies: every NON-terminal,
+        ESTABLISHED boundary must carry a proof epoch STRICTLY
+        greater than its restored epoch (a fresh post-restore
+        verification proof, produced by :meth:`verify` or
+        :meth:`reprove`).  Otherwise the typed fail-closed
+        ``RECOVERY_REQUIRED`` error and the authority stays
+        non-admitting.
+
+        :meth:`SharingRuntime.recover` calls this at the END of its
+        full revalidation loop; it is never called by any
+        admission path."""
+        if not self._recovery_pending:
+            return  # idempotent (nothing pending)
+        for boundary_id in sorted(self._boundaries):
+            boundary = self._boundaries[boundary_id]
+            if boundary.state in BoundaryState.terminal_values():
+                continue
+            if boundary.scope_ref == "":
+                # prepared/never established: non-admitting by STATE
+                # (verify + activate are still required before any
+                # traffic can exist)
+                continue
+            restored_epoch = self._restore_proof_epochs.get(boundary_id, 0)
+            if boundary.proof_epoch <= restored_epoch:
+                raise ContainmentError(
+                    ContainmentReasonCode.RECOVERY_REQUIRED,
+                    "boundary %r carries no fresh post-restore proof "
+                    "(epoch %d <= restored epoch %d); recovery cannot "
+                    "complete and the authority stays non-admitting "
+                    "(fail closed: NO buyer traffic)"
+                    % (boundary_id[:23], boundary.proof_epoch, restored_epoch),
+                )
+        self._recovery_pending = False
+        self._restore_proof_epochs = {}
 
     def verify_integrity(self) -> None:
         """Re-verify the journal (content bindings) and that the
@@ -475,6 +548,30 @@ class ContainmentAuthority:
                 % type(error).__name__,
             ) from error
         epoch = boundary.proof_epoch + 1
+        # semantic binding: the primitive proof must correspond to
+        # the EXACT scope just established AND the boundary's exact
+        # declared envelope (scope binding + mechanism + probe
+        # decision semantics + envelope coverage + deny floor).
+        # A structurally shaped proof of another scope, or a lying
+        # probe matrix, proves NOTHING and fails the instance closed.
+        if (
+            primitive_proof.scope_ref != establishment.scope_ref
+            or not primitive_proof.proves_boundary(boundary.scope_spec())
+        ):
+            self._fail_boundary(
+                boundary,
+                ContainmentReasonCode.PROOF_INVALID,
+                "the primitive's verification observation does not prove "
+                "the established scope/envelope (scope binding, mechanism, "
+                "probe decision semantics, envelope coverage, or the "
+                "deny-by-default floor failed); the instance fails closed "
+                "and NO buyer traffic was admitted",
+            )
+            raise ContainmentError(
+                ContainmentReasonCode.PROOF_INVALID,
+                "containment proof does not prove the boundary (fail "
+                "closed; NO buyer traffic)",
+            )
         proof = ContainmentProof(
             proof_id="",
             boundary_id=boundary.boundary_id,
@@ -494,15 +591,29 @@ class ContainmentAuthority:
                 for probe in primitive_proof.deny_probes
             ),
         )
-        if not proof.proves_boundary():
-            # the proof does not prove the boundary: FAIL CLOSED
-            # (terminal failed; no traffic was or is admitted)
+        if not proof.proves_boundary(
+            replace(
+                boundary,
+                state=BoundaryState.VERIFIED,
+                scope_ref=proof.scope_ref,
+                proof_id=proof.proof_id,
+                proof_digest=proof.primitive_proof_digest,
+                verified_at=proof.observed_at,
+                proof_epoch=epoch,
+            )
+        ):
+            # defense in depth: the RECORDED proof material must also
+            # semantically prove the boundary this instance is about
+            # to become (identity/scope/mechanism binding + envelope
+            # semantics); a structurally valid record with a lying
+            # matrix fails closed (never verified)
             self._fail_boundary(
                 boundary,
                 ContainmentReasonCode.PROOF_INVALID,
-                "the primitive's verification proof does not prove the "
-                "boundary (scope/allowlist/deny-probe observation "
-                "insufficient); the instance fails closed",
+                "the recorded verification proof does not semantically "
+                "prove the boundary (identity/scope/mechanism binding or "
+                "probe-matrix envelope semantics failed); the instance "
+                "fails closed",
             )
             raise ContainmentError(
                 ContainmentReasonCode.PROOF_INVALID,
@@ -556,6 +667,19 @@ class ContainmentAuthority:
         ANY failure is a typed DENY — never a crash, never a
         best-effort admit, never a silent degradation."""
         boundary = self._require_boundary(boundary_id)
+        if self._recovery_pending:
+            # P1 recovery gate: restored durable state is NON-ADMITTING
+            # until the mandatory recovery revalidation completes with
+            # a FRESH containment re-proof (fail closed, typed)
+            return AdmissionDecision(
+                boundary_id=boundary_id, admitted=False,
+                reason=ContainmentReasonCode.RECOVERY_REQUIRED,
+                detail="restored durable state requires the mandatory "
+                "recovery revalidation and fresh containment re-proof "
+                "before any buyer-traffic admission (fail closed: NO "
+                "buyer traffic; a stale-but-valid proof is not a path "
+                "around the recovery gate)",
+            )
         containment_problems = self._containment_admission_problems(boundary)
         if containment_problems:
             reason, detail = containment_problems[0]
@@ -759,6 +883,26 @@ class ContainmentAuthority:
                 % type(error).__name__,
             ) from error
         epoch = boundary.proof_epoch + 1
+        # semantic binding (same discipline as verify): the fresh
+        # observation must prove THIS boundary's exact scope and
+        # envelope; a lying or misbound matrix never re-admits
+        if (
+            primitive_proof.scope_ref != boundary.scope_ref
+            or not primitive_proof.proves_boundary(boundary.scope_spec())
+        ):
+            self._fail_boundary(
+                boundary,
+                ContainmentReasonCode.PROOF_INVALID,
+                "the fresh re-verification observation does not prove the "
+                "boundary's scope/envelope (scope binding, mechanism, "
+                "probe decision semantics, envelope coverage, or the "
+                "deny-by-default floor failed); degraded never becomes "
+                "active without a semantically valid proof",
+            )
+            raise ContainmentError(
+                ContainmentReasonCode.PROOF_INVALID,
+                "re-verification proof does not prove the boundary",
+            )
         proof = ContainmentProof(
             proof_id="",
             boundary_id=boundary.boundary_id,
@@ -778,13 +922,14 @@ class ContainmentAuthority:
                 for probe in primitive_proof.deny_probes
             ),
         )
-        if not proof.proves_boundary():
+        if not proof.proves_boundary(boundary):
             self._fail_boundary(
                 boundary,
                 ContainmentReasonCode.PROOF_INVALID,
-                "the fresh re-verification proof does not prove the "
-                "boundary (fail closed; degraded never becomes active "
-                "without proof)",
+                "the fresh re-verification proof does not semantically "
+                "prove the boundary (identity/scope/mechanism binding or "
+                "probe-matrix envelope semantics failed; degraded never "
+                "becomes active without proof)",
             )
             raise ContainmentError(
                 ContainmentReasonCode.PROOF_INVALID,
@@ -950,6 +1095,27 @@ class ContainmentAuthority:
                 % type(error).__name__,
             ) from error
         epoch = boundary.proof_epoch + 1
+        # semantic binding (same discipline as verify): a stale,
+        # lying, or misbound recovery observation NEVER resumes
+        # admission (the fresh proof must prove THIS boundary's
+        # exact scope and envelope)
+        if (
+            primitive_proof.scope_ref != boundary.scope_ref
+            or not primitive_proof.proves_boundary(boundary.scope_spec())
+        ):
+            self._fail_boundary(
+                boundary,
+                ContainmentReasonCode.PROOF_INVALID,
+                "the recovery re-proof observation does not prove the "
+                "boundary's scope/envelope (scope binding, mechanism, "
+                "probe decision semantics, envelope coverage, or the "
+                "deny-by-default floor failed); cannot re-prove "
+                "containment => failed => NO buyer traffic",
+            )
+            return (
+                self._boundaries[boundary.boundary_id],
+                self._empty_proof(boundary),
+            )
         proof = ContainmentProof(
             proof_id="",
             boundary_id=boundary.boundary_id,
@@ -969,12 +1135,14 @@ class ContainmentAuthority:
                 for probe in primitive_proof.deny_probes
             ),
         )
-        if not proof.proves_boundary():
+        if not proof.proves_boundary(boundary):
             failed = self._fail_boundary(
                 boundary,
                 ContainmentReasonCode.PROOF_INVALID,
-                "recovery re-proof does not prove the boundary (cannot "
-                "re-prove containment => failed => NO buyer traffic)",
+                "recovery re-proof does not semantically prove the "
+                "boundary (identity/scope/mechanism binding or "
+                "probe-matrix envelope semantics failed; cannot re-prove "
+                "containment => failed => NO buyer traffic)",
             )
             return failed, proof
         history = self._proofs.setdefault(boundary.boundary_id, [])
@@ -1041,6 +1209,48 @@ class ContainmentAuthority:
                 (
                     ContainmentReasonCode.PROOF_INVALID,
                     "the boundary carries no valid containment proof",
+                )
+            )
+            return problems
+        # the recorded proof must be BOUND to this boundary's exact
+        # proof reference AND must SEMANTICALLY prove this boundary's
+        # declared envelope (identity/scope/mechanism binding +
+        # probe-matrix semantics + coverage + deny floor): a
+        # tampered, stale, or forged proof record can never satisfy
+        # the admission gate
+        recorded = self.latest_proof(boundary.boundary_id)
+        if recorded is None:
+            problems.append(
+                (
+                    ContainmentReasonCode.PROOF_INVALID,
+                    "no containment proof is recorded for the boundary "
+                    "(admission requires proven containment)",
+                )
+            )
+            return problems
+        if (
+            recorded.proof_id != boundary.proof_id
+            or recorded.primitive_proof_digest != boundary.proof_digest
+            or recorded.proof_epoch != boundary.proof_epoch
+        ):
+            problems.append(
+                (
+                    ContainmentReasonCode.PROOF_INVALID,
+                    "the boundary's proof reference does not match the "
+                    "recorded proof (id/digest/epoch binding failed: "
+                    "tampered, stale, or misbound proof material cannot "
+                    "satisfy admission)",
+                )
+            )
+            return problems
+        if not recorded.proves_boundary(boundary):
+            problems.append(
+                (
+                    ContainmentReasonCode.PROOF_INVALID,
+                    "the recorded proof does not semantically prove this "
+                    "boundary's declared envelope (identity/scope/"
+                    "mechanism binding, probe-matrix semantics, coverage, "
+                    "or the deny-by-default floor failed)",
                 )
             )
             return problems

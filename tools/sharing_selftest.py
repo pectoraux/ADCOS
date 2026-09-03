@@ -95,6 +95,7 @@ import os
 import py_compile
 import subprocess  # noqa: S404 - deterministic child processes of this repo's own tools
 import sys
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -156,6 +157,7 @@ from usage import (  # noqa: E402
 
 from containment import (  # noqa: E402
     BOUNDARY_TRANSITIONS,
+    AdmissionFacts,
     BoundaryState,
     CapabilityMatrix,
     CapabilityState,
@@ -165,6 +167,7 @@ from containment import (  # noqa: E402
     PlatformCapability,
     SandboxedIsolationPrimitive,
 )
+from containment.isolation import DenyProbe, ScopeSpec  # noqa: E402
 from containment.model import ContainmentProof  # noqa: E402
 
 from sharing import (  # noqa: E402
@@ -675,13 +678,125 @@ def _second_lease(
 
 def _containment_world(
     shared: StepClock,
+    primitive_factory: Any = None,
 ) -> Tuple[ContainmentAuthority, SandboxedIsolationPrimitive]:
+    """The sandbox containment world; ``primitive_factory`` (the
+    adversarial-primitive seam) lets the adversarial cases inject a
+    tampering primitive while the authority stays stock."""
     matrix = CapabilityMatrix(
         (PlatformCapability(SANDBOX_PLATFORM, "supported", "sandbox-scope"),)
     )
-    primitive = SandboxedIsolationPrimitive()
+    primitive = (
+        primitive_factory()
+        if primitive_factory is not None
+        else SandboxedIsolationPrimitive()
+    )
     authority = ContainmentAuthority(primitive=primitive, clock=shared, matrix=matrix)
     return authority, primitive
+
+
+class _TamperedProofPrimitive(SandboxedIsolationPrimitive):
+    """Adversarial primitive (battery-only failure injection): a
+    mechanism that reports a STRUCTURALLY valid verification
+    observation with SEMANTICALLY false probe material — exactly the
+    forged/altered deny-probe-decision class the Architect's PR #139
+    review requires regression coverage for.  Every mode produces a
+    well-formed :class:`VerificationProof` (all fields shaped,
+    ``decided_by=platform-scope``) whose matrix lies about the
+    boundary envelope or the proof's own binding.
+
+    ``first_tampered_call`` lets the FIRST verification(s) run
+    honestly (establishment flows succeed) and tampers a later one
+    (the re-verification/recovery paths)."""
+
+    def __init__(self, mode: str, first_tampered_call: int = 1) -> None:
+        super().__init__()
+        self._mode = mode
+        self._first_tampered_call = first_tampered_call
+        self._verify_calls = 0
+
+    def verify(self, scope_ref: str, *, at: str):  # type: ignore[override]
+        proof = super().verify(scope_ref, at=at)
+        self._verify_calls += 1
+        if self._verify_calls < self._first_tampered_call:
+            return proof
+        mode = self._mode
+        if mode == "floor-allowed":
+            # deny-by-default lie: a denied destination claims allowed
+            probes: List[DenyProbe] = []
+            flipped = False
+            for probe in proof.deny_probes:
+                if not flipped and probe.decision == "denied":
+                    probes.append(
+                        DenyProbe(
+                            destination=probe.destination,
+                            decision="allowed",
+                            decided_by=probe.decided_by,
+                        )
+                    )
+                    flipped = True
+                else:
+                    probes.append(probe)
+            return replace(proof, deny_probes=tuple(probes))
+        if mode == "envelope-denied":
+            # envelope lie: an allowed destination claims denied
+            probes = []
+            flipped = False
+            for probe in proof.deny_probes:
+                if not flipped and probe.decision == "allowed":
+                    probes.append(
+                        DenyProbe(
+                            destination=probe.destination,
+                            decision="denied",
+                            decided_by=probe.decided_by,
+                        )
+                    )
+                    flipped = True
+                else:
+                    probes.append(probe)
+            return replace(proof, deny_probes=tuple(probes))
+        if mode == "floor-dropped":
+            # deny-by-default never demonstrated: all denied probes omitted
+            return replace(
+                proof,
+                deny_probes=tuple(
+                    probe
+                    for probe in proof.deny_probes
+                    if probe.decision == "allowed"
+                ),
+            )
+        if mode == "coverage-dropped":
+            # coverage lie: one allowed destination is not probed at all
+            probes = list(proof.deny_probes)
+            for index, probe in enumerate(probes):
+                if probe.decision == "allowed":
+                    probes.pop(index)
+                    break
+            return replace(proof, deny_probes=tuple(probes))
+        if mode == "escape-allowed":
+            # escape lie: an out-of-envelope destination claims allowed
+            probes = list(proof.deny_probes)
+            destinations = {probe.destination for probe in probes}
+            for candidate in ("attacker-egress", "extra-internet-exit"):
+                if candidate not in destinations:
+                    probes.append(
+                        DenyProbe(
+                            destination=candidate,
+                            decision="allowed",
+                            decided_by="platform-scope",
+                        )
+                    )
+                    break
+            return replace(proof, deny_probes=tuple(probes))
+        if mode == "wrong-mechanism":
+            # binding lie: the proof claims another mechanism
+            return replace(proof, mechanism="vrf")
+        if mode == "wrong-scope-ref":
+            # binding lie: the proof claims another scope
+            return replace(
+                proof, scope_ref="scope-forged000000000000000000000000",
+            )
+        raise AssertionError("unknown tamper mode %r" % mode)
 
 
 def _scope(
@@ -715,6 +830,7 @@ def _full_world(
     max_buyers: int = 2,
     egress: Tuple[str, ...] = ("egress-internet",),
     services: Tuple[str, ...] = (),
+    primitive_factory: Any = None,
 ) -> Dict[str, Any]:
     """The full composed W048 world through the ordinary public
     production chain: session ESTABLISHED, the WIFI NetworkPath
@@ -730,7 +846,9 @@ def _full_world(
     core, tx = _commercial_chain(
         manager, integrator, session_id, shared, expires_in=expires_in,
     )
-    authority, primitive = _containment_world(shared)
+    authority, primitive = _containment_world(
+        shared, primitive_factory=primitive_factory,
+    )
     sharing = SharingRuntime(
         core=core, paths=manager, containment=authority, clock=shared,
         envelopes=(
@@ -1855,9 +1973,10 @@ def case_18_isolation_verification(results: List[Result]) -> None:
     if len(proofs) != 1:
         problems.append("expected exactly one proof, got %d" % len(proofs))
     proof = proofs[0]
-    # the proof is the PRIMITIVE's own observation (scope exists,
-    # allow-list active, deny-probes decided by the platform scope)
-    if not proof.proves_boundary():
+    # the proof is the PRIMITIVE's own observation AND is
+    # semantically bound to THIS boundary's exact envelope (scope
+    # binding, allow-list coverage, deny floor demonstrated)
+    if not proof.proves_boundary(boundary):
         problems.append("the recorded proof does not prove the boundary")
     if proof.evidence_class != "SOFTWARE":
         problems.append("a primitive proof claimed a non-SOFTWARE class")
@@ -1876,7 +1995,7 @@ def case_18_isolation_verification(results: List[Result]) -> None:
         allowlist_active=False,
         deny_probes=(),
     )
-    if bad.proves_boundary():
+    if bad.proves_boundary(boundary):
         problems.append("a non-proving observation passed as a proof")
     # tampered proof ids are rejected by content binding
     try:
@@ -1893,8 +2012,10 @@ def case_18_isolation_verification(results: List[Result]) -> None:
         name,
         "the verification proof is the primitive's own observation (scope "
         "observed to exist, allow-list active, deny-probes decided by the "
-        "platform scope), SOFTWARE-class, content-bound to the boundary; "
-        "a non-proving observation or a tampered proof id fails closed",
+        "platform scope), SOFTWARE-class, content-bound and SEMANTICALLY "
+        "bound to the boundary's exact envelope (allow-list coverage + "
+        "deny floor); a non-proving observation or a tampered proof id "
+        "fails closed",
     ))
 
 
@@ -3071,6 +3192,741 @@ def case_38_no_fabricated_physical_evidence(results: List[Result]) -> None:
 
 
 # ---------------------------------------------------------------------------
+# 39-45: adversarial regressions for the PR #139 correction round
+# (the Architect's three blockers: semantically weak proof
+# validation, quota accounting before containment admission, and
+# restored active state reaching admission before fresh recovery)
+# ---------------------------------------------------------------------------
+
+
+def case_39_adversarial_probe_matrix(results: List[Result]) -> None:
+    name = "case_39_adversarial_probe_matrix"
+    problems: List[str] = []
+    # P0-1: a structurally valid but SEMANTICALLY false verification
+    # observation (forged/altered deny-probe decisions, a lying
+    # binding, a lying coverage) can NEVER transition
+    # prepared -> verified: the instance fails closed, records NO
+    # proof, and never admits buyer traffic
+    modes = (
+        "floor-allowed",       # a denied destination claims allowed
+        "envelope-denied",     # an allowed destination claims denied
+        "floor-dropped",       # deny-by-default never demonstrated
+        "coverage-dropped",    # an allowed destination not probed
+        "escape-allowed",      # an out-of-envelope destination allowed
+        "wrong-mechanism",     # the proof claims another mechanism
+        "wrong-scope-ref",     # the proof claims another scope
+    )
+    for mode in modes:
+        world = _full_world(
+            primitive_factory=lambda m=mode: _TamperedProofPrimitive(m),
+        )
+        sharing: SharingRuntime = world["sharing"]
+        authority: ContainmentAuthority = world["authority"]
+        session = world["session"]
+        sid = session.sharing_session_id
+        sharing.grant_consent(sid)
+        error = _expect_sharing_error(
+            "authorize-tampered-%s" % mode, problems,
+            sharing.authorize_sharing_session, sid,
+            reason=SharingReasonCode.CONTAINMENT_DENIED,
+        )
+        if error is not None and "containment-proof-invalid" not in error.message:
+            problems.append(
+                "mode %s: the denial is not a proof-invalid failure (%s)"
+                % (mode, error.message[:80])
+            )
+        boundary = authority.boundary(session.boundary_ref)
+        if boundary.state != "failed":
+            problems.append(
+                "mode %s: the boundary is %s (expected terminal failed)"
+                % (mode, boundary.state)
+            )
+        if boundary.failure_reason != ContainmentReasonCode.PROOF_INVALID:
+            problems.append(
+                "mode %s: the typed failure reason is %r"
+                % (mode, boundary.failure_reason)
+            )
+        if authority.proofs(session.boundary_ref):
+            problems.append(
+                "mode %s: a non-proving observation was recorded as a proof"
+                % mode
+            )
+        decision = authority.evaluate_admission(
+            session.boundary_ref,
+            AdmissionFacts(
+                lease_active=True, consent_granted=True,
+                path_active=True, quota_available=True,
+            ),
+        )
+        if decision.admitted:
+            problems.append(
+                "mode %s: the admission gate admitted buyer traffic" % mode
+            )
+        # a FAILED boundary can never activate (terminal, no traffic)
+        _expect_sharing_error(
+            "activate-tampered-%s" % mode, problems,
+            sharing.activate_sharing_session, sid,
+        )
+    # the re-verification path is equally discriminating: an honest
+    # first verification (establishment) then a tampered re-verify
+    # fails closed and never converts degraded -> active
+    world = _full_world(
+        primitive_factory=lambda: _TamperedProofPrimitive(
+            "floor-allowed", first_tampered_call=2,
+        ),
+    )
+    sharing = world["sharing"]
+    authority = world["authority"]
+    session = world["session"]
+    sid = session.sharing_session_id
+    _activated(world)
+    sharing.account_traffic(sid, 100_000)
+    sharing.pause_sharing_session(sid)
+    error = _expect_sharing_error(
+        "resume-tampered-reverify", problems,
+        sharing.resume_sharing_session, sid,
+        reason=SharingReasonCode.CONTAINMENT_DENIED,
+    )
+    if error is not None and "containment-proof-invalid" not in error.message:
+        problems.append(
+            "the tampered re-verification denial is not proof-invalid (%s)"
+            % error.message[:80]
+        )
+    boundary = authority.boundary(session.boundary_ref)
+    if boundary.state != "failed":
+        problems.append(
+            "the tampered reverify left the boundary %s (expected failed)"
+            % boundary.state
+        )
+    if sharing.session(sid).state != "paused":
+        problems.append("the session did not stay paused on failed resume")
+    if problems:
+        results.append(fail(name, "; ".join(problems[:5])))
+        return
+    results.append(ok(
+        name,
+        "adversarial probe matrices (forged deny-probe decisions, lying "
+        "envelope/coverage/scope/mechanism bindings) NEVER transition "
+        "prepared -> verified: the instance fails closed terminal with the "
+        "typed proof-invalid reason, records NO proof, admits NO buyer "
+        "traffic, and the re-verification path is equally discriminating "
+        "(degraded never becomes active on a lying matrix)",
+    ))
+
+
+def case_40_proof_binding_tamper(results: List[Result]) -> None:
+    name = "case_40_proof_binding_tamper"
+    problems: List[str] = []
+    world = _full_world()
+    sharing: SharingRuntime = world["sharing"]
+    authority: ContainmentAuthority = world["authority"]
+    session = world["session"]
+    sid = session.sharing_session_id
+    _activated(world)
+    boundary = authority.boundary(session.boundary_ref)
+    proof = authority.latest_proof(session.boundary_ref)
+    if proof is None or not proof.proves_boundary(boundary):
+        problems.append("the honest proof must semantically prove the boundary")
+        results.append(fail(name, "; ".join(problems)))
+        return
+
+    def _forged(**overrides: Any) -> ContainmentProof:
+        fields = dict(
+            boundary_id=proof.boundary_id,
+            scope_ref=proof.scope_ref,
+            mechanism=proof.mechanism,
+            proof_epoch=proof.proof_epoch,
+            observed_at=proof.observed_at,
+            primitive_proof_digest=proof.primitive_proof_digest,
+            scope_exists=proof.scope_exists,
+            allowlist_active=proof.allowlist_active,
+            deny_probes=proof.deny_probes,
+        )
+        fields.update(overrides)
+        return ContainmentProof(proof_id="", **fields)
+
+    # self-consistent (valid content-derived id) FORGED records whose
+    # material lies: the SEMANTIC validation rejects every one
+    flipped = []
+    flipped_floor = False
+    for probe in proof.deny_probes:
+        entry = dict(probe)
+        if not flipped_floor and probe["decision"] == "denied":
+            entry["decision"] = "allowed"
+            flipped_floor = True
+        flipped.append(entry)
+    liars = (
+        ("flipped-floor-probe", _forged(deny_probes=tuple(flipped))),
+        ("dropped-floor-probes", _forged(deny_probes=tuple(
+            dict(p) for p in proof.deny_probes if p["decision"] == "allowed"
+        ))),
+        ("dropped-envelope-probe", _forged(deny_probes=proof.deny_probes[:-1])),
+        ("scope-ref-mismatch", _forged(
+            scope_ref="scope-forged000000000000000000000000",
+        )),
+        ("mechanism-mismatch", _forged(mechanism="vrf")),
+        ("epoch-zero", _forged(proof_epoch=0)),
+        ("scope-not-observed", _forged(scope_exists=False)),
+    )
+    for label, forged in liars:
+        if forged.proves_boundary(boundary):
+            problems.append(
+                "a forged proof (%s) satisfied the boundary semantics" % label
+            )
+    # a proof of ANOTHER boundary (different envelope) proves nothing
+    other_world = _full_world(egress=("egress-alternate",))
+    other_boundary = other_world["authority"].boundary(
+        other_world["session"].boundary_ref
+    )
+    if proof.proves_boundary(other_boundary):
+        problems.append(
+            "a proof of another boundary/envelope proved this boundary"
+        )
+    # a mismatched EXPLICIT proof id is rejected by content binding
+    try:
+        ContainmentProof.from_dict(
+            dict(proof.to_dict(), proof_id="sha256:" + "0" * 64)
+        )
+        problems.append("a tampered proof id was accepted")
+    except ContainmentError:
+        pass
+    # a tampered DIGEST breaks the derived proof id (id/digest binding)
+    try:
+        ContainmentProof.from_dict(
+            dict(
+                proof.to_dict(),
+                primitive_proof_digest="sha256:" + "1" * 64,
+            )
+        )
+        problems.append("a tampered proof digest was accepted")
+    except ContainmentError:
+        pass
+    # a tampered proof RECORD in the durable snapshot fails the
+    # content binding at RESTORE time (scope-ref rebind)
+    csnap = authority.snapshot()
+    csnap["proofs"][session.boundary_ref][0] = dict(
+        csnap["proofs"][session.boundary_ref][0],
+        scope_ref="scope-forged000000000000000000000000",
+    )
+    try:
+        ContainmentAuthority.restore(
+            primitive=world["primitive"], clock=world["shared"],
+            snapshot=csnap,
+        )
+        problems.append("a tampered proof record restored cleanly")
+    except ContainmentError as error:
+        if error.reason != ContainmentReasonCode.PROOF_INVALID:
+            problems.append(
+                "a tampered proof record failed with %r (expected "
+                "proof-invalid)" % error.reason
+            )
+    if problems:
+        results.append(fail(name, "; ".join(problems[:5])))
+        return
+    results.append(ok(
+        name,
+        "proof id/digest/scope binding: self-consistent forged records with "
+        "lying matrices, mismatched scopes/mechanisms/envelopes, dead "
+        "epochs, or unobserved scopes never satisfy the boundary "
+        "semantics; tampered explicit ids/digests and tampered durable "
+        "proof records are rejected by the content binding (fail closed)",
+    ))
+
+
+def case_41_quota_containment_atomicity(results: List[Result]) -> None:
+    name = "case_41_quota_containment_atomicity"
+    problems: List[str] = []
+    # P0-2: a containment REJECTION after the quota-availability check
+    # must leave the QUOTA LEDGER counter, the session counter, the
+    # boundary counter, and the primitive counter ALL unchanged
+    # (rejected bytes never consume quota; the assertion is on the
+    # LEDGER, not just the session counter)
+    world = _full_world()
+    sharing: SharingRuntime = world["sharing"]
+    authority: ContainmentAuthority = world["authority"]
+    session = world["session"]
+    sid = session.sharing_session_id
+    _activated(world)
+    boundary = authority.boundary(session.boundary_ref)
+    scope_ref = boundary.scope_ref
+    world["primitive"].simulate_scope_loss(scope_ref)
+    _expect_sharing_error(
+        "isolation-loss-at-admission", problems,
+        sharing.account_traffic, sid, 100_000,
+        reason=SharingReasonCode.CONTAINMENT_DENIED,
+    )
+    if sharing.quota_ledger().accounted_bytes(sid) != 0:
+        problems.append(
+            "the quota LEDGER advanced on a containment rejection: %d"
+            % sharing.quota_ledger().accounted_bytes(sid)
+        )
+    if sharing.session(sid).accounted_bytes != 0:
+        problems.append("the session counter advanced on a rejection")
+    if authority.boundary(session.boundary_ref).admitted_bytes != 0:
+        problems.append("the boundary counter advanced on a rejection")
+    if world["primitive"].bytes_observed(scope_ref) != 0:
+        problems.append("the primitive counter advanced on a rejection")
+
+    # the mirror direction: a QUOTA rejection must leave the
+    # containment-side counters unchanged (atomic both ways)
+    world2 = _full_world(byte_quota=100_000)
+    sharing2: SharingRuntime = world2["sharing"]
+    authority2: ContainmentAuthority = world2["authority"]
+    session2 = world2["session"]
+    sid2 = session2.sharing_session_id
+    _activated(world2)
+    boundary2 = authority2.boundary(session2.boundary_ref)
+    resumed, total = sharing2.account_traffic(sid2, 100_000)
+    if total != 100_000:
+        problems.append("the successful accounting did not commit: %d" % total)
+    _expect_sharing_error(
+        "quota-exhausted-after-admission", problems,
+        sharing2.account_traffic, sid2, 1,
+        reason=SharingReasonCode.QUOTA_EXHAUSTED,
+    )
+    if sharing2.quota_ledger().accounted_bytes(sid2) != 100_000:
+        problems.append(
+            "the rejected attempt moved the quota ledger: %d"
+            % sharing2.quota_ledger().accounted_bytes(sid2)
+        )
+    if authority2.boundary(session2.boundary_ref).admitted_bytes != 100_000:
+        problems.append(
+            "the rejected attempt moved the boundary counter: %d"
+            % authority2.boundary(session2.boundary_ref).admitted_bytes
+        )
+    if world2["primitive"].bytes_observed(boundary2.scope_ref) != 100_000:
+        problems.append("the rejected attempt moved the primitive counter")
+
+    # an unverifiable counter fails closed BEFORE any admission
+    world3 = _full_world()
+    sharing3: SharingRuntime = world3["sharing"]
+    authority3: ContainmentAuthority = world3["authority"]
+    session3 = world3["session"]
+    sid3 = session3.sharing_session_id
+    _activated(world3)
+    sharing3.quota_ledger().mark_unverifiable(sid3)
+    _expect_sharing_error(
+        "unverifiable-counter", problems,
+        sharing3.account_traffic, sid3, 100_000,
+        reason=SharingReasonCode.QUOTA_UNVERIFIABLE,
+    )
+    if authority3.boundary(session3.boundary_ref).admitted_bytes != 0:
+        problems.append("an unverifiable counter still admitted bytes")
+    if world3["primitive"].bytes_observed(
+        authority3.boundary(session3.boundary_ref).scope_ref
+    ) != 0:
+        problems.append("an unverifiable counter still counted at the scope")
+
+    # successful accounting stays consistent across ALL counters
+    if not (
+        sharing.session(sid).accounted_bytes
+        == sharing.quota_ledger().accounted_bytes(sid)
+        == authority.boundary(session.boundary_ref).admitted_bytes
+    ):
+        problems.append("honest counters diverged (isolation-loss world)")
+    if not (
+        sharing2.session(sid2).accounted_bytes == 100_000
+        and sharing2.quota_ledger().accounted_bytes(sid2) == 100_000
+        and authority2.boundary(session2.boundary_ref).admitted_bytes
+        == 100_000
+        and world2["primitive"].bytes_observed(boundary2.scope_ref)
+        == 100_000
+    ):
+        problems.append("the committed accounting diverged across counters")
+    if problems:
+        results.append(fail(name, "; ".join(problems[:5])))
+        return
+    results.append(ok(
+        name,
+        "quota and containment admission are ATOMIC: a containment "
+        "rejection (isolation lost at the enforcement point) leaves the "
+        "quota LEDGER, the session, the boundary, and the primitive "
+        "counters unchanged (rejected bytes never consume quota); a quota "
+        "rejection leaves the containment counters unchanged; an "
+        "unverifiable counter refuses admission before any counting; "
+        "successful admissions keep all four counters consistent",
+    ))
+
+
+def case_42_restored_state_requires_recovery(results: List[Result]) -> None:
+    name = "case_42_restored_active_snapshot_without_recovery"
+    problems: List[str] = []
+    # P1-3: a restored ACTIVE snapshot is NON-ADMITTING until the
+    # mandatory recovery revalidation completes (a structurally
+    # valid restored proof is not a path around the gate)
+    world = _full_world()
+    sharing: SharingRuntime = world["sharing"]
+    authority: ContainmentAuthority = world["authority"]
+    session = world["session"]
+    sid = session.sharing_session_id
+    _activated(world)
+    sharing.account_traffic(sid, 400_000)
+    snap = sharing.snapshot()
+    csnap = authority.snapshot()
+    # process death: restore from the durable snapshots (the same
+    # primitive carries the surviving OS scopes)
+    authority2 = ContainmentAuthority.restore(
+        primitive=world["primitive"], clock=world["shared"], snapshot=csnap,
+    )
+    sharing2 = SharingRuntime.restore(
+        core=world["core"], paths=world["manager"],
+        containment=authority2, clock=world["shared"], snapshot=snap,
+    )
+    if not sharing2.recovery_pending or not authority2.recovery_pending:
+        problems.append("the restored state is not recovery-pending")
+    # the containment gate (defense in depth) denies while pending
+    decision = authority2.evaluate_admission(
+        session.boundary_ref,
+        AdmissionFacts(
+            lease_active=True, consent_granted=True,
+            path_active=True, quota_available=True,
+        ),
+    )
+    if decision.admitted or decision.reason != ContainmentReasonCode.RECOVERY_REQUIRED:
+        problems.append(
+            "the restored boundary admitted before recovery (reason %r)"
+            % decision.reason
+        )
+    # EVERY traffic-admitting path on the runtime fails closed
+    # BEFORE any state is touched
+    for label, fn in (
+        ("account", lambda: sharing2.account_traffic(sid, 100_000)),
+        ("authorize", lambda: sharing2.authorize_sharing_session(sid)),
+        ("activate", lambda: sharing2.activate_sharing_session(sid)),
+        ("resume", lambda: sharing2.resume_sharing_session(sid)),
+        ("change-path", lambda: sharing2.change_path(sid, world["eth"])),
+    ):
+        try:
+            fn()
+            problems.append(
+                "the restored runtime admitted via %s before recovery" % label
+            )
+        except SharingError as error:
+            if error.reason != SharingReasonCode.RECOVERY_REQUIRED:
+                problems.append(
+                    "%s failed with %r (expected sharing-recovery-required)"
+                    % (label, error.reason)
+                )
+        except Exception as error:  # noqa: BLE001
+            problems.append(
+                "%s crashed with %s (fail-closed discipline)"
+                % (label, type(error).__name__)
+            )
+    # the failed pre-recovery attempt left ALL durable accounting
+    # exactly at its pre-crash values
+    if sharing2.quota_ledger().accounted_bytes(sid) != 400_000:
+        problems.append(
+            "pre-recovery denial moved the quota ledger: %d"
+            % sharing2.quota_ledger().accounted_bytes(sid)
+        )
+    if sharing2.session(sid).accounted_bytes != 400_000:
+        problems.append("pre-recovery denial moved the session counter")
+    if authority2.boundary(session.boundary_ref).admitted_bytes != 400_000:
+        problems.append("pre-recovery denial moved the boundary counter")
+    if world["primitive"].bytes_observed(
+        authority2.boundary(session.boundary_ref).scope_ref
+    ) != 400_000:
+        problems.append("pre-recovery denial moved the primitive counter")
+    if not sharing2.recovery_pending:
+        problems.append("the denial cleared the recovery condition")
+    # recovery completes and enforcement resumes with a FRESH proof
+    report = sharing2.recover()
+    if not report.get(sid, "").startswith("revalidated:active"):
+        problems.append("recovery did not revalidate: %r" % report.get(sid))
+    if sharing2.recovery_pending or authority2.recovery_pending:
+        problems.append("the recovery condition did not clear")
+    resumed, total = sharing2.account_traffic(sid, 100_000)
+    if total != 500_000:
+        problems.append("post-recovery accounting drifted: %d" % total)
+    if not (
+        sharing2.session(sid).accounted_bytes
+        == sharing2.quota_ledger().accounted_bytes(sid)
+        == authority2.boundary(session.boundary_ref).admitted_bytes
+        == world["primitive"].bytes_observed(
+            authority2.boundary(session.boundary_ref).scope_ref
+        )
+        == 500_000
+    ):
+        problems.append("post-recovery counters diverged")
+    if problems:
+        results.append(fail(name, "; ".join(problems[:5])))
+        return
+    results.append(ok(
+        name,
+        "restored durable state is NON-ADMITTING until recovery: every "
+        "traffic-admitting path (account/authorize/activate/resume/change-"
+        "path) fails closed with the typed RECOVERY_REQUIRED condition and "
+        "leaves every durable counter at its pre-crash value; recovery "
+        "completes the revalidation + FRESH re-proof and only then does "
+        "enforcement resume with all counters consistent",
+    ))
+
+
+def case_43_recovery_reproof_mandatory(results: List[Result]) -> None:
+    name = "case_43_recovery_reproof_mandatory"
+    problems: List[str] = []
+    # the recovery condition clears ONLY through a successful fresh
+    # re-proof: calling mark_recovered() directly (no fresh proof)
+    # fails closed and leaves the authority non-admitting
+    world = _full_world()
+    sharing: SharingRuntime = world["sharing"]
+    authority: ContainmentAuthority = world["authority"]
+    session = world["session"]
+    sid = session.sharing_session_id
+    _activated(world)
+    sharing.account_traffic(sid, 200_000)
+    authority2 = ContainmentAuthority.restore(
+        primitive=world["primitive"], clock=world["shared"],
+        snapshot=authority.snapshot(),
+    )
+    try:
+        authority2.mark_recovered()
+        problems.append(
+            "mark_recovered cleared the condition without a fresh proof"
+        )
+    except ContainmentError as error:
+        if error.reason != ContainmentReasonCode.RECOVERY_REQUIRED:
+            problems.append(
+                "the direct clearance failed with %r (expected "
+                "recovery-required)" % error.reason
+            )
+    if not authority2.recovery_pending:
+        problems.append("the failed clearance still cleared the condition")
+    # the containment-level gate still denies (defense in depth)
+    decision = authority2.evaluate_admission(
+        session.boundary_ref,
+        AdmissionFacts(
+            lease_active=True, consent_granted=True,
+            path_active=True, quota_available=True,
+        ),
+    )
+    if decision.admitted:
+        problems.append("the uncleared authority admitted buyer traffic")
+    # the runtime's recover() completes the re-proof and clears BOTH
+    sharing2 = SharingRuntime.restore(
+        core=world["core"], paths=world["manager"],
+        containment=authority2, clock=world["shared"],
+        snapshot=sharing.snapshot(),
+    )
+    report = sharing2.recover()
+    if not report.get(sid, "").startswith("revalidated:active"):
+        problems.append("recovery did not complete: %r" % report.get(sid))
+    if sharing2.recovery_pending or authority2.recovery_pending:
+        problems.append("the conditions did not clear after recover()")
+
+    # a scope lost while down: recovery re-proof FAILS => the
+    # boundary fails, the session revokes, and NO traffic resumes
+    # (the recovery gate closed the stale-proof path for good)
+    world2 = _full_world()
+    sharing3: SharingRuntime = world2["sharing"]
+    session2 = world2["session"]
+    sid2 = session2.sharing_session_id
+    _activated(world2)
+    sharing3.account_traffic(sid2, 100_000)
+    world2["primitive"].simulate_scope_loss(
+        world2["authority"].boundary(session2.boundary_ref).scope_ref
+    )
+    authority3 = ContainmentAuthority.restore(
+        primitive=world2["primitive"], clock=world2["shared"],
+        snapshot=world2["authority"].snapshot(),
+    )
+    sharing4 = SharingRuntime.restore(
+        core=world2["core"], paths=world2["manager"],
+        containment=authority3, clock=world2["shared"],
+        snapshot=sharing3.snapshot(),
+    )
+    report4 = sharing4.recover()
+    if not report4.get(sid2, "").startswith("revoked:"):
+        problems.append(
+            "the unprovable scope did not revoke: %r" % report4.get(sid2)
+        )
+    _expect_sharing_error(
+        "account-after-failed-recovery", problems,
+        sharing4.account_traffic, sid2, 100,
+    )
+    if problems:
+        results.append(fail(name, "; ".join(problems[:5])))
+        return
+    results.append(ok(
+        name,
+        "the recovery condition is cleared ONLY by a successful fresh "
+        "re-proof: a direct clearance attempt without a fresh post-restore "
+        "proof fails closed typed (the authority stays non-admitting); "
+        "recover() completes the re-proof and clears both conditions; a "
+        "scope lost while down lands the boundary failed and the session "
+        "revoked (no traffic ever resumes from stale proof)",
+    ))
+
+
+def case_44_recovery_accounting_invariant(results: List[Result]) -> None:
+    name = "case_44_recovery_accounting_invariant"
+    problems: List[str] = []
+    # the atomic-admission invariant is enforced at RECOVERY too:
+    # divergent or tampered durable accounting revokes fail closed
+    # (a) the session counter and the quota-ledger counter diverge
+    world = _full_world()
+    sharing: SharingRuntime = world["sharing"]
+    session = world["session"]
+    sid = session.sharing_session_id
+    _activated(world)
+    sharing.account_traffic(sid, 400_000)
+    snap = dict(sharing.snapshot())
+    snap["quota"] = dict(snap["quota"])
+    snap["quota"]["accounted"] = dict(snap["quota"]["accounted"])
+    snap["quota"]["accounted"][sid] = 900_000  # tampered ledger counter
+    authority2 = ContainmentAuthority.restore(
+        primitive=world["primitive"], clock=world["shared"],
+        snapshot=world["authority"].snapshot(),
+    )
+    sharing2 = SharingRuntime.restore(
+        core=world["core"], paths=world["manager"],
+        containment=authority2, clock=world["shared"], snapshot=snap,
+    )
+    report = sharing2.recover()
+    if not report.get(sid, "").startswith("revoked:ACCOUNTING_INCONSISTENT"):
+        problems.append(
+            "a divergent ledger did not revoke: %r" % report.get(sid)
+        )
+    if sharing2.session(sid).state != "revoked":
+        problems.append("the divergent-ledger session is not revoked")
+    # (b) the boundary's admitted counter trails the session's
+    world2 = _full_world()
+    sharing3: SharingRuntime = world2["sharing"]
+    session2 = world2["session"]
+    sid2 = session2.sharing_session_id
+    _activated(world2)
+    sharing3.account_traffic(sid2, 400_000)
+    csnap = world2["authority"].snapshot()
+    csnap["boundaries"] = [
+        dict(record, admitted_bytes=0) if index == 0 else record
+        for index, record in enumerate(csnap["boundaries"])
+    ]
+    authority3 = ContainmentAuthority.restore(
+        primitive=world2["primitive"], clock=world2["shared"],
+        snapshot=csnap,
+    )
+    sharing4 = SharingRuntime.restore(
+        core=world2["core"], paths=world2["manager"],
+        containment=authority3, clock=world2["shared"],
+        snapshot=sharing3.snapshot(),
+    )
+    report2 = sharing4.recover()
+    if not report2.get(sid2, "").startswith("revoked:ACCOUNTING_INCONSISTENT"):
+        problems.append(
+            "a trailing boundary counter did not revoke: %r"
+            % report2.get(sid2)
+        )
+    # (c) an unverifiable restored counter revokes fail closed
+    world3 = _full_world()
+    sharing5: SharingRuntime = world3["sharing"]
+    session3 = world3["session"]
+    sid3 = session3.sharing_session_id
+    _activated(world3)
+    sharing5.account_traffic(sid3, 400_000)
+    snap3 = dict(sharing5.snapshot())
+    snap3["quota"] = dict(snap3["quota"])
+    snap3["quota"]["unverifiable_sessions"] = [sid3]
+    authority5 = ContainmentAuthority.restore(
+        primitive=world3["primitive"], clock=world3["shared"],
+        snapshot=world3["authority"].snapshot(),
+    )
+    sharing6 = SharingRuntime.restore(
+        core=world3["core"], paths=world3["manager"],
+        containment=authority5, clock=world3["shared"], snapshot=snap3,
+    )
+    report3 = sharing6.recover()
+    if not report3.get(sid3, "").startswith("revoked:QUOTA_UNVERIFIABLE"):
+        problems.append(
+            "an unverifiable restored counter did not revoke: %r"
+            % report3.get(sid3)
+        )
+    if problems:
+        results.append(fail(name, "; ".join(problems[:5])))
+        return
+    results.append(ok(
+        name,
+        "recovery enforces the atomic-admission accounting invariant: a "
+        "quota-ledger counter diverging from the durable session counter, "
+        "a boundary admitted-counter trailing the session's, or an "
+        "unverifiable restored counter each revoke the session fail closed "
+        "(tampered accounting never resumes traffic)",
+    ))
+
+
+def case_45_deny_floor_declaration_rejection(results: List[Result]) -> None:
+    name = "case_45_deny_floor_declaration_rejection"
+    problems: List[str] = []
+    # the deny-by-default floor is enforced at DECLARATION: no scope
+    # specification and no boundary record may ever place the
+    # control-plane/admin/private destinations in the buyer envelope
+    for egress, services in (
+        (("provider-control-plane",), ()),
+        (("egress-internet",), ("provider-admin-services",)),
+        (("provider-private-lan", "unrelated-local-service"), ()),
+    ):
+        try:
+            ScopeSpec(
+                boundary_id="boundary-floor-test",
+                mechanism="sandbox-scope",
+                allowed_egress=egress,
+                exposed_local_services=services,
+            )
+            problems.append(
+                "a floor destination was accepted in a scope spec: %s/%s"
+                % (egress, services)
+            )
+        except ContainmentError as error:
+            if error.reason != ContainmentReasonCode.INVALID_INPUT:
+                problems.append(
+                    "the floor rejection is not typed invalid-input (%r)"
+                    % error.reason
+                )
+    # the sharing surface refuses to prepare such an exposure
+    # ATOMICALLY: a second prepare attempt with a floor destination
+    # fails closed leaving the first session's state untouched (no
+    # new session record, no leaked reservation, no evicted buyer)
+    world = _full_world()
+    sharing: SharingRuntime = world["sharing"]
+    first = world["session"]
+    before_sessions = sharing.sessions()
+    _expect_sharing_error(
+        "prepare-floor-egress", problems,
+        sharing.prepare_sharing_session,
+        lease_ref=world["tx"], buyer_ref=BUYER_ID,
+        provider_ref=PROVIDER_ID, session_ref=world["session_id"],
+        path_ref=world["wifi"], scope=_scope(
+            egress=("provider-control-plane",),
+        ),
+        reason=SharingReasonCode.CONTAINMENT_DENIED,
+    )
+    if sharing.sessions() != before_sessions:
+        problems.append("a floor exposure created a session record")
+    if sharing.quota_ledger().reserved_bytes(PROVIDER_ID) != first.reserved_bytes:
+        problems.append(
+            "a floor exposure leaked or lost a capacity reservation: %d"
+            % sharing.quota_ledger().reserved_bytes(PROVIDER_ID)
+        )
+    if sharing.quota_ledger().admitted_buyers(PROVIDER_ID) != (BUYER_ID,):
+        problems.append(
+            "a failed floor prepare evicted the admitted buyer: %s"
+            % (sharing.quota_ledger().admitted_buyers(PROVIDER_ID),)
+        )
+    if sharing.session(first.sharing_session_id).state != first.state:
+        problems.append("the failed floor prepare disturbed the first session")
+    if problems:
+        results.append(fail(name, "; ".join(problems[:5])))
+        return
+    results.append(ok(
+        name,
+        "the deny-by-default floor is enforced at declaration: no scope "
+        "specification and no boundary record accepts the control-plane/"
+        "admin/private destinations into the buyer envelope (typed "
+        "invalid-input), and prepare refuses such an exposure with NO "
+        "session record, NO leaked reservation, and NO admitted buyer",
+    ))
+
+
+# ---------------------------------------------------------------------------
 # main
 # ---------------------------------------------------------------------------
 
@@ -3116,6 +3972,13 @@ def main() -> int:
         case_36_pr_delta_shape,
         case_37_secret_hygiene,
         case_38_no_fabricated_physical_evidence,
+        case_39_adversarial_probe_matrix,
+        case_40_proof_binding_tamper,
+        case_41_quota_containment_atomicity,
+        case_42_restored_state_requires_recovery,
+        case_43_recovery_reproof_mandatory,
+        case_44_recovery_accounting_invariant,
+        case_45_deny_floor_declaration_rejection,
     ):
         case(results)
     failures = [result for result in results if not result[1]]

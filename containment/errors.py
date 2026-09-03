@@ -60,6 +60,12 @@ class ContainmentReasonCode:
     #: the containment proof exists but is stale for admission
     #: (degraded; NO NEW buyer traffic under the frozen contract)
     PROOF_STALE = "containment-proof-stale"
+    #: restored durable state requires the mandatory recovery
+    #: revalidation and FRESH containment re-proof before ANY
+    #: buyer-traffic admission (an admission CONDITION, not a
+    #: lifecycle state: the frozen boundary vocabulary is
+    #: unchanged; fail closed until recovery completes)
+    RECOVERY_REQUIRED = "containment-recovery-required"
     #: the admission gate denied buyer traffic (one or more frozen
     #: preconditions do not hold); the typed denial detail records
     #: exactly which

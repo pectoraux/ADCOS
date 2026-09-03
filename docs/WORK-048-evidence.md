@@ -5,9 +5,70 @@
 **Baseline (authorization record):** `bd544dbce0aec345521d340f45ad4562567927cf`  
 **Implementation branch base:** `72810f4d8d48c16157864017ecf155538a4243c4` (the mainline carrying the reconciled authorization record)  
 **Work Item:** WORK-048 (issue #92)  
-**Battery:** `tools/sharing_selftest.py` (38 deterministic cases, stdlib only)
+**Battery:** `tools/sharing_selftest.py` (45 deterministic cases, stdlib only)
 
 ---
+
+## 0. Correction round (PR #139 Architect review — CHANGES REQUIRED)
+
+The Architect's blocking review of head `ba63371ca75ed18376ddac7eb1cdb67b6f819418`
+identified three substantive defects.  This head corrects all three, within
+the authorized implementation surface and the frozen ACR-012 boundary (no
+`spec/architect/` change, no lifecycle-vocabulary change):
+
+1. **P0-1 — containment proof validation was semantically too weak.**
+   `VerificationProof.proves_boundary()` / `ContainmentProof.proves_boundary()`
+   accepted structurally shaped, `decided_by=platform-scope` probe entries
+   without validating the decision values against the boundary's exact
+   envelope, and `proof_is_valid()` checked only non-empty fields.
+   **Correction:** proof validation is now bound to the exact scope/boundary
+   declaration — identity binding (boundary id, scope ref, mechanism, live
+   epoch), observation binding (scope exists, allow-list active), full
+   probe-matrix semantics (envelope destinations MUST probe `allowed`, all
+   other probed destinations MUST probe `denied`, no duplicates), envelope
+   coverage (every declared allowed-egress/local-service destination is
+   probed), and a frozen **deny-by-default floor**
+   (`provider-control-plane`, `provider-admin-services`,
+   `provider-private-lan`, `unrelated-local-service`) that every proof must
+   demonstrate `denied` and that no declared envelope may ever contain.
+   The authority additionally cross-checks, at every admission point, that
+   the boundary's recorded proof reference (id/digest/epoch) matches the
+   journaled latest proof AND that that proof semantically proves the
+   boundary (tampered/stale/forged material cannot satisfy admission).
+   Adversarial coverage: cases 39/40 (+45 for the declaration floor).
+
+2. **P0-2 — quota accounting committed before containment admission.**
+   `account_traffic()` called `quota.account()` before
+   `containment.admit_bytes()`, so a containment rejection could consume
+   quota.  **Correction:** the enforcement point is now atomic — byte-quota
+   *availability* is checked (no mutation), containment admission confirms
+   the bytes crossed the boundary, and only then does the local quota
+   counter commit (append-only); a failed containment admission leaves the
+   quota LEDGER, the session counter, the boundary counter, and the
+   primitive counter all unchanged.  The same invariant is enforced at
+   recovery (a divergent/tampered counter set revokes fail closed), and the
+   prepare-failure path was tightened the same way (a failed prepare never
+   evicts a buyer already admitted under another session).  Adversarial
+   coverage: cases 41/44.
+
+3. **P1-3 — restored active state could reach admission before mandatory
+   fresh recovery/re-proof.**  `restore()` returned an immediately usable
+   runtime/authority.  **Correction:** restore now sets a non-admitting
+   `RECOVERY_REQUIRED` *condition* (an admission condition, explicitly NOT a
+   lifecycle state — the frozen vocabularies are untouched) on both the
+   containment authority and the sharing runtime; every traffic-admitting
+   path (authorize/activate/account/resume/change-path, plus the
+   containment-level admission gate) fails closed with the typed condition,
+   and the condition clears ONLY through recovery completion, which itself
+   verifies every non-terminal established boundary carries a FRESH
+   post-restore proof (proof epoch strictly greater than the restored
+   epoch) — a direct `mark_recovered()` without fresh re-proof fails closed.
+   Adversarial coverage: cases 42/43.
+
+**The honest flow is byte-identical across the correction:** the golden
+digest stream (§5) is unchanged from the prior head — the correction
+closes the three defect windows without altering any well-formed-flow
+evidence.
 
 ## 1. Delivery statement
 
@@ -31,10 +92,14 @@ frozen authority boundaries:
   truth composition (read-only), W041 NetworkPath composition (through the
   public machinery only), and W052 usage-evidence correlation (idempotent
   emission INTO the canonical ledger; never a second ledger).
-- **`tools/sharing_selftest.py`** — the 38-case deterministic battery
-  (§4 below).
-- **`.github/workflows/spec-check.yml`** — additive CI wiring (one battery
-  step; nothing removed).
+- **`tools/sharing_selftest.py`** — the 45-case deterministic battery
+  (§4 below), including the adversarial regression round for the three
+  PR #139 blockers (cases 39–45).
+- **`.github/workflows/spec-check.yml`** — additive CI wiring (the in-job
+  battery step, plus the independent exact-head `provider-sharing-runtime`
+  job that runs the battery even when the KNOWN, INHERITED governance
+  failures stop the specification job — the inherited failure stays visible
+  and unmasked; nothing is removed, retried, or masked).
 
 The central frozen invariant is enforced end-to-end:
 
@@ -76,8 +141,15 @@ ledger, no session/routing/transport mutation surface).
 
 ```text
 python3 tools/sharing_selftest.py
-Result: PASS (38/38 cases passed)
+Result: PASS (45/45 cases passed)
 ```
+
+**Exact-head CI evidence (the correction round's third disposition item):**
+the independent `provider-sharing-runtime` job runs
+`python3 tools/sharing_selftest.py` on the exact PR head regardless of the
+specification job's inherited ARCH-02 failure (which remains visible and
+unmasked on its own job) — the terminal W048 CI evidence for this head is
+that job's green run (the run URL is recorded on the PR).
 
 - two consecutive runs are **byte-identical** (identical stdout);
 - the golden digest stream is reproduced **byte-for-byte** under
@@ -103,7 +175,7 @@ Result: PASS (38/38 cases passed)
   historical usage facts and the canonical W052 journal digest are
   byte-identical after teardown and revocation (cases 24/33).
 
-## 4. Battery manifest (38 cases → the required coverage)
+## 4. Battery manifest (45 cases → the required coverage)
 
 | Required battery item (handoff) | Case(s) |
 |---|---|
@@ -139,11 +211,20 @@ Result: PASS (38/38 cases passed)
 | 30. teardown/revocation historical-usage immutability | 33 |
 | (structural) frozen vocabularies; two state machines distinct | 01, 02 |
 | (hygiene) py_compile; frozen-spec integrity; PR-delta scope; secret hygiene; evidence-class honesty | 34–38 |
+| (adversarial, P0-1) forged/altered deny-probe decisions; lying coverage/bindings never verify | 39 |
+| (adversarial, P0-1) mismatched proof id/digest/scope binding; self-consistent forged records; tampered durable proof records | 40 |
+| (adversarial, P0-2) containment rejection leaves quota/session/boundary/primitive counters unchanged (LEDGER asserted); quota rejection leaves containment counters unchanged; counter consistency | 41 |
+| (adversarial, P1-3) restored active snapshot is non-admitting (all five traffic paths typed-denied, durable counters at pre-crash values) until recovery completes with a fresh proof | 42 |
+| (adversarial, P1-3) recovery clearance requires a fresh post-restore proof (direct clearance fails closed); unprovable scope revokes | 43 |
+| (adversarial, P0-2) recovery enforces the accounting-consistency invariant (divergent ledger / trailing boundary counter / unverifiable counter revoke) | 44 |
+| (adversarial, P0-1) the deny-by-default floor is enforced at declaration (envelope/spec/boundary rejection; atomic prepare failure) | 45 |
 
 ## 5. The golden digest stream (the deterministic evidence document)
 
 Produced by `python3 tools/sharing_selftest.py --determinism-stream`
-(byte-identical across runs and hash seeds):
+(byte-identical across runs and hash seeds, and **byte-identical to the
+pre-correction head `ba63371`** — the correction round changed no
+honest-flow evidence):
 
 ```text
 accounted_bytes=800000
@@ -213,9 +294,11 @@ and new protocol semantics are out of scope and untouched.
 
 ```text
 implemented:      YES (this PR; the exact delivery SHA is the PR head)
-verified:         YES (SOFTWARE class: 38/38 deterministic battery,
+verified:         YES (SOFTWARE class: 45/45 deterministic battery,
                      two-run byte-identical, hash-seed stable, golden
-                     stream reproduced)
+                     stream reproduced and unchanged across the
+                     correction round; exact-head W048 CI evidence via
+                     the independent provider-sharing-runtime job)
 in-review:        YES (this PR awaits the Architect's exact-SHA review)
 accepted:         NO (only the Architect can accept the exact delivery SHA;
                      tests passing is not acceptance)
