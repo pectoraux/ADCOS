@@ -39,6 +39,7 @@ The acceptance records are DEC-0001..DEC-0039 for WORK-001..WORK-039, plus DEC-0
 | DEC-0076 | governance | WORK-049 | ACCEPTED | ACCEPTED | W049 activation: WORK-049-CORE-001 issued with exact baseline ce1ccae (client-runtime boundary, no new ACR) |
 | DEC-0077 | governance | WORK-049 | ACCEPTED | ACCEPTED | W049 baseline reconciliation to the post-PR-#140 governance mainline |
 | DEC-0078 | governance | WORK-049 | ACCEPTED | ACCEPTED | W049 client runtime acceptance → W050 capability matrix activation |
+| DEC-0079 | governance | WORK-050 | ACCEPTED | ACCEPTED | W050 baseline reconciliation to the post-PR-#143 governance mainline |
 
 ## Rules
 

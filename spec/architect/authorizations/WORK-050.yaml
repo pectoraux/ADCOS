@@ -11,6 +11,11 @@
 # may advance this baseline to the exact post-transition governance mainline
 # once the governance PR carrying this record merges; the W050 implementation
 # branch is cut from the mainline that carries the authorization record.
+# Baseline: advanced to the exact post-PR-#143 governance mainline by the
+# DEC-0079 baseline-advancement-only reconciliation (the
+# DEC-0063/DEC-0066/DEC-0068/DEC-0074/DEC-0077 convention; original
+# DEC-0078 issuance baseline 89ad6ff3d168c59256c3e805539eb9ca22f6b3bc, the
+# W049 acceptance merge mainline).
 # W050 is a CAPABILITY/ISOLATION DECLARATION boundary, not a new enforcement
 # authority: it declares, as versioned advisory capability input consumed by
 # W048/W049, which operating systems, device classes, network configurations,
@@ -30,8 +35,9 @@ authorized: true
 type: implementation
 authorization_id: "WORK-050-CORE-001"
 authorization_decision: DEC-0078
-baseline_sha: 89ad6ff3d168c59256c3e805539eb9ca22f6b3bc
-review_basis: "DEC-0078 activation (issuance baseline 89ad6ff3d168c59256c3e805539eb9ca22f6b3bc, the exact current main: the W049 implementation acceptance merge mainline the governance transition is cut from; the W050 implementation branch is cut from the mainline that carries the authorization record; exactly one implementation PR, no self-authorization, no self-merge). DEC-0078 accepts WORK-049 on PR #142 exact reviewed head b8cc17ef21f6c38266152552590dc73f80c056ce (three Architect review rounds over correction heads 72b830b -> a92c42f -> b8cc17e; the Architect merge at 89ad6ff3d168c59256c3e805539eb9ca22f6b3bc, 2026-09-03T17:16:12Z, is the durable acceptance evidence; exact-head CI run 33781878528 terminal with the client-runtime battery job SUCCESS and the inherited specification condition visible and unmasked; 54/54 deterministic battery; SOFTWARE-only), superseding WORK-049-CORE-001 and releasing the single active execution slot. WORK-050 issue #96 is the next canonical Work Item (the platform connectivity sharing capability and isolation matrix, defined under the accepted ACR-009 commercial planning of DEC-0050 / PR #82); its hard dependencies are exactly the frozen spec/work-items.md declaration (Dependencies: none), and the W050 -> W048/W049 edges are advisory capability-input edges sanctioned by ACR-011 (yielding the sanctioned ADV-01 advisories), never hard gates: W050 must never become a blocking dependency of W048/W049. No WORK-050 implementation delivery exists."
+baseline_sha: deae34612181b9cd0feb4624d7e713adf2801d39
+baseline_reconciliation_decision: DEC-0079
+review_basis: "DEC-0078 activation (issuance baseline 89ad6ff3d168c59256c3e805539eb9ca22f6b3bc, the W049 acceptance merge mainline the governance transition was cut from) with the DEC-0079 / LEDGER-RECON-023 baseline reconciliation to the exact post-transition governance mainline deae34612181b9cd0feb4624d7e713adf2801d39 (the PR #143 governance merge that carries DEC-0078; the W050 implementation branch is cut from the exact reconciled authorized baseline deae346, the mainline that carries the authorization record, only after the DEC-0079 reconciliation merges and the Architect re-reads and confirms the resulting mainline as the sole active authorization baseline; exactly one implementation PR, no self-authorization, no self-merge). DEC-0078 accepts WORK-049 on PR #142 exact reviewed head b8cc17ef21f6c38266152552590dc73f80c056ce (three Architect review rounds over correction heads 72b830b -> a92c42f -> b8cc17e; the Architect merge at 89ad6ff3d168c59256c3e805539eb9ca22f6b3bc, 2026-09-03T17:16:12Z, is the durable acceptance evidence; exact-head CI run 33781878528 terminal with the client-runtime battery job SUCCESS and the inherited specification condition visible and unmasked; 54/54 deterministic battery; SOFTWARE-only), superseding WORK-049-CORE-001 and releasing the single active execution slot. WORK-050 issue #96 is the next canonical Work Item (the platform connectivity sharing capability and isolation matrix, defined under the accepted ACR-009 commercial planning of DEC-0050 / PR #82); its hard dependencies are exactly the frozen spec/work-items.md declaration (Dependencies: none), and the W050 -> W048/W049 edges are advisory capability-input edges sanctioned by ACR-011 (yielding the sanctioned ADV-01 advisories), never hard gates: W050 must never become a blocking dependency of W048/W049. No WORK-050 implementation delivery exists."
 dependencies: []
 authority_inputs:
   - "ACR-009 commercial connectivity control-plane planning (ACCEPTED, DEC-0050 / PR #82) — the canonical planning under which WORK-050 is defined"
