@@ -420,6 +420,72 @@ def derive_proof_id(
     ).hexdigest()
 
 
+def primitive_observation_material(
+    scope_ref: str,
+    scope_exists: bool,
+    allowlist_active: bool,
+    deny_probes: Tuple[Dict[str, str], ...],
+    observed_at: str,
+    mechanism: str,
+) -> Dict[str, Any]:
+    """The canonical content of the preserved primitive observation
+    (the ACTUAL material the durable proof record preserves
+    verbatim: the scope binding, the two observation booleans, the
+    probe matrix, the observation instant, and the mechanism).
+
+    This is EXACTLY the content the primitive's own
+    :meth:`VerificationProof.proof_digest
+    <containment.isolation.VerificationProof.proof_digest>` commits
+    to: the durable record preserves those observation fields
+    verbatim, so the digest of this content MUST equal the record's
+    stored ``primitive_proof_digest`` — the digest is content-derived
+    from the material, never a freely chosen value."""
+    return {
+        "scope_ref": scope_ref,
+        "scope_exists": scope_exists,
+        "allowlist_active": allowlist_active,
+        "deny_probes": [
+            {
+                "destination": probe["destination"],
+                "decision": probe["decision"],
+                "decided_by": probe["decided_by"],
+            }
+            for probe in deny_probes
+        ],
+        "observed_at": observed_at,
+        "mechanism": mechanism,
+    }
+
+
+def derive_primitive_material_digest(
+    scope_ref: str,
+    scope_exists: bool,
+    allowlist_active: bool,
+    deny_probes: Tuple[Dict[str, str], ...],
+    observed_at: str,
+    mechanism: str,
+) -> str:
+    """The INDEPENDENTLY content-derived digest of the actual
+    preserved primitive observation fields.
+
+    The tamper-evident chain of a durable proof record is
+    ``material -> primitive_proof_digest -> proof_id``: EVERY link
+    is recomputable from the record's own fields.  Construction,
+    deserialization/restore, and the admission gate all require the
+    stored ``primitive_proof_digest`` to equal this digest — a
+    tampered durable snapshot cannot mutate the proof material and
+    freely re-choose a digest (recomputing the proof id from it) to
+    produce a self-consistent forged record."""
+    return "sha256:" + hashlib.sha256(
+        canonical_json_bytes(
+            primitive_observation_material(
+                scope_ref, scope_exists, allowlist_active,
+                deny_probes, observed_at, mechanism,
+            )
+        )
+    ).hexdigest()
+
+
 @dataclass(frozen=True)
 class ContainmentProof:
     """The recorded containment verification proof.
@@ -436,6 +502,18 @@ class ContainmentProof:
     mechanism; a PHYSICAL containment claim requires separate
     physical evidence and remains OPEN until physically
     demonstrated (never promoted by this record).
+
+    Tamper-evidence (the frozen integrity chain): the stored
+    ``primitive_proof_digest`` MUST be the content-derived digest of
+    the record's OWN preserved observation material
+    (:meth:`primitive_material_digest`), and the ``proof_id`` MUST
+    be derived over that digest — ``material -> digest -> proof_id``
+    recomputed link by link at construction, deserialization, and
+    the admission gate.  A tampered durable snapshot that mutates
+    the proof material and recomputes BOTH the digest and the proof
+    id (and the boundary's reference) still fails closed: a digest
+    that is not the content-derived digest of the actual preserved
+    material can never construct, restore, or admit.
     """
 
     proof_id: str
@@ -481,6 +559,43 @@ class ContainmentProof:
                 ContainmentReasonCode.INVALID_INPUT,
                 "deny_probes must be a tuple",
             )
+        # the frozen primitive probe-record shape: every durable
+        # probe entry is EXACTLY destination/decision/decided_by
+        # with the mechanism's own decision vocabulary (the record
+        # preserves the primitive's DenyProbe values verbatim)
+        for probe in self.deny_probes:
+            if not isinstance(probe, Mapping):
+                raise ContainmentError(
+                    ContainmentReasonCode.INVALID_INPUT,
+                    "a deny-probe entry must be a mapping (the frozen "
+                    "primitive probe record)",
+                )
+            if set(probe.keys()) != {"destination", "decision", "decided_by"}:
+                raise ContainmentError(
+                    ContainmentReasonCode.INVALID_INPUT,
+                    "a deny-probe entry must carry exactly "
+                    "destination/decision/decided_by (the frozen "
+                    "primitive probe record shape)",
+                )
+            if (
+                not isinstance(probe["destination"], str)
+                or not probe["destination"]
+            ):
+                raise ContainmentError(
+                    ContainmentReasonCode.INVALID_INPUT,
+                    "a deny-probe destination must be a non-empty opaque "
+                    "destination token",
+                )
+            if probe["decision"] not in ("denied", "allowed"):
+                raise ContainmentError(
+                    ContainmentReasonCode.INVALID_INPUT,
+                    "a deny-probe decision must be denied|allowed",
+                )
+            if probe["decided_by"] != "platform-scope":
+                raise ContainmentError(
+                    ContainmentReasonCode.INVALID_INPUT,
+                    "deny-probe decisions come from the platform scope only",
+                )
         if self.evidence_class != "SOFTWARE":
             raise ContainmentError(
                 ContainmentReasonCode.INVALID_INPUT,
@@ -492,6 +607,31 @@ class ContainmentProof:
             raise ContainmentError(
                 ContainmentReasonCode.INVALID_INPUT,
                 "proof_id must be a string",
+            )
+        # P0 (PR #139 review round 2): the stored primitive-proof
+        # digest is NOT a free variable the proof id merely chains
+        # to — it must be the INDEPENDENTLY content-derived digest
+        # of the ACTUAL preserved primitive observation fields.  A
+        # tampered durable snapshot cannot mutate the proof material
+        # and freely choose a new digest (recomputing the proof id
+        # from it, and updating the boundary's reference) to produce
+        # a self-consistent forged record: the digest is rejected
+        # fail closed here, at deserialization/restore, before the
+        # id binding is even consulted.
+        material_digest = self.primitive_material_digest()
+        if self.primitive_proof_digest != material_digest:
+            raise ContainmentError(
+                ContainmentReasonCode.PROOF_INVALID,
+                "the stored primitive-proof digest %s is not the "
+                "content-derived digest of the preserved primitive "
+                "observation material %s (the digest must be "
+                "independently recomputable from the actual scope/"
+                "observation/probe fields: a tampered or freely chosen "
+                "digest cannot bind a proof id -- fail closed)"
+                % (
+                    self.primitive_proof_digest[:23],
+                    material_digest[:23],
+                ),
             )
         expected = derive_proof_id(
             self.boundary_id, self.scope_ref, self.proof_epoch,
@@ -506,6 +646,21 @@ class ContainmentProof:
                 "(content binding -- tampered or misbound proof id rejected)"
                 % (self.proof_id[:80],),
             )
+
+    def primitive_material_digest(self) -> str:
+        """The INDEPENDENTLY content-derived digest of THIS record's
+        actual preserved primitive observation fields.
+
+        Construction, deserialization/restore, and the admission
+        gate all require it to equal the stored
+        ``primitive_proof_digest``: the digest is a commitment to the
+        preserved material (scope binding, observation booleans,
+        probe matrix, instant, mechanism), never an opaque value a
+        tampered snapshot may freely re-choose."""
+        return derive_primitive_material_digest(
+            self.scope_ref, self.scope_exists, self.allowlist_active,
+            self.deny_probes, self.observed_at, self.mechanism,
+        )
 
     def proves_boundary(self, boundary: "ContainmentBoundary") -> bool:
         """The proof proves THIS boundary ONLY when it is fully

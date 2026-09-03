@@ -1243,6 +1243,37 @@ class ContainmentAuthority:
                 )
             )
             return problems
+        # P0 (PR #139 review round 2): the gate INDEPENDENTLY
+        # re-derives the digest from the recorded material instead of
+        # trusting the stored value (defense in depth — construction
+        # and restore already enforce the content binding; the gate
+        # re-establishes it from the record's own fields).  A
+        # self-consistent id/digest binding whose digest does not
+        # commit to the actual preserved observation material can
+        # never satisfy admission.
+        try:
+            material_digest = recorded.primitive_material_digest()
+        except ContainmentError as error:
+            problems.append(
+                (
+                    ContainmentReasonCode.PROOF_INVALID,
+                    "the recorded proof material is malformed (%s)"
+                    % error.message[:80],
+                )
+            )
+            return problems
+        if material_digest != recorded.primitive_proof_digest:
+            problems.append(
+                (
+                    ContainmentReasonCode.PROOF_INVALID,
+                    "the recorded proof's primitive digest does not equal "
+                    "the independently recomputed digest of its preserved "
+                    "observation material (the digest must commit to the "
+                    "actual scope/observation/probe fields: tampered or "
+                    "forged proof material cannot satisfy admission)",
+                )
+            )
+            return problems
         if not recorded.proves_boundary(boundary):
             problems.append(
                 (

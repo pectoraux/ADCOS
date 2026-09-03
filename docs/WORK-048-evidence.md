@@ -5,14 +5,71 @@
 **Baseline (authorization record):** `bd544dbce0aec345521d340f45ad4562567927cf`  
 **Implementation branch base:** `72810f4d8d48c16157864017ecf155538a4243c4` (the mainline carrying the reconciled authorization record)  
 **Work Item:** WORK-048 (issue #92)  
-**Battery:** `tools/sharing_selftest.py` (45 deterministic cases, stdlib only)
+**Battery:** `tools/sharing_selftest.py` (46 deterministic cases, stdlib only)
 
 ---
 
-## 0. Correction round (PR #139 Architect review — CHANGES REQUIRED)
+## 0. Correction rounds (PR #139 Architect reviews — CHANGES REQUIRED)
+
+### Round 2 (follow-up review on head `fc856bb`, review_id 5098744662)
+
+The Architect's independent re-audit of the corrected head confirmed the
+three round-1 corrections substantially present (P0-2 quota ordering,
+P1-3 recovery gate, exact-head CI with the inherited ARCH-02 failure
+visible and unmasked) and identified **one remaining P0 proof-integrity
+defect**:
+
+1. **P0 — the stored `primitive_proof_digest` was not independently
+   content-derived from the actual preserved primitive observation
+   fields.**  `ContainmentProof.proof_id` was bound to the *stored*
+   digest, and nothing ever recomputed that digest from the preserved
+   material — `proof_is_valid()` checked presence/epoch and
+   `proves_boundary()` checked probe semantics, but neither established
+   that the stored digest actually commits to the preserved probe
+   contents.  A tampered durable snapshot could therefore mutate the
+   proof material, **recompute the digest as a freely chosen value,
+   recompute the proof id from that digest, and update the boundary's
+   corresponding digest** — a self-consistent forged record.  The prior
+   regression only rejected a digest change *without* id recomputation.
+   **Correction:** the tamper-evident chain is now
+   `material -> primitive_proof_digest -> proof_id`, recomputed link by
+   link —
+   - `ContainmentProof.primitive_material_digest()`
+     (`derive_primitive_material_digest`) is the canonical content-derived
+     digest over the ACTUAL preserved observation fields (scope ref,
+     scope-exists, allow-list-active, the normalized probe matrix,
+     observed instant, mechanism — exactly the content the primitive's own
+     `VerificationProof.proof_digest()` commits to);
+   - `ContainmentProof.__post_init__` REQUIRES the stored digest to equal
+     the material digest (typed `containment-proof-invalid`), so a
+     freely chosen digest can neither construct nor deserialize nor
+     restore — the durable probe-record shape is frozen to exactly
+     `destination/decision/decided_by` with the mechanism's decision
+     vocabulary;
+   - the admission gate INDEPENDENTLY re-derives the digest from the
+     recorded material (defense in depth: the gate never trusts a stored
+     digest it can recompute);
+   - a maximally self-consistent forgery (material mutated AND digest
+     recomputed per the same derivation AND proof id recomputed AND the
+     boundary's reference updated) still fails closed: it is non-admitting
+     under the typed recovery gate, and the mandatory fresh re-proof
+     observes the LIVE mechanism the snapshot forger cannot rewrite
+     (destroyed scope => boundary `failed`, session `revoked`, zero
+     admitted bytes).
+   Adversarial coverage: **case 46** (snapshot/restore forgery with
+   recomputed digest AND proof id), plus cases 18/40 upgraded to TRUE
+   self-consistent forged records (material, digest, and proof id all
+   recomputed per the same derivations — the battery's earlier
+   "self-consistent" claim is now actually established by the code).
+
+**The honest flow is byte-identical across both correction rounds:** the
+golden digest stream (§5) is unchanged from `ba63371` and from `fc856bb` —
+no well-formed-flow evidence changed.
+
+### Round 1 (blocking review on head `ba63371`)
 
 The Architect's blocking review of head `ba63371ca75ed18376ddac7eb1cdb67b6f819418`
-identified three substantive defects.  This head corrects all three, within
+identified three substantive defects.  Head `fc856bb` corrected all three, within
 the authorized implementation surface and the frozen ACR-012 boundary (no
 `spec/architect/` change, no lifecycle-vocabulary change):
 
@@ -34,8 +91,10 @@ the authorized implementation surface and the frozen ACR-012 boundary (no
    The authority additionally cross-checks, at every admission point, that
    the boundary's recorded proof reference (id/digest/epoch) matches the
    journaled latest proof AND that that proof semantically proves the
-   boundary (tampered/stale/forged material cannot satisfy admission).
-   Adversarial coverage: cases 39/40 (+45 for the declaration floor).
+   boundary, AND (round 2) that the stored digest independently re-derives
+   from the actual preserved observation material (tampered/stale/forged
+   material cannot satisfy admission).
+   Adversarial coverage: cases 39/40/46 (+45 for the declaration floor).
 
 2. **P0-2 — quota accounting committed before containment admission.**
    `account_traffic()` called `quota.account()` before
@@ -65,10 +124,11 @@ the authorized implementation surface and the frozen ACR-012 boundary (no
    epoch) — a direct `mark_recovered()` without fresh re-proof fails closed.
    Adversarial coverage: cases 42/43.
 
-**The honest flow is byte-identical across the correction:** the golden
-digest stream (§5) is unchanged from the prior head — the correction
-closes the three defect windows without altering any well-formed-flow
-evidence.
+### The round-1 honest-flow statement (verified again in round 2)
+
+The golden digest stream (§5) is unchanged from the prior head — both
+correction rounds close their defect windows without altering any
+well-formed-flow evidence.
 
 ## 1. Delivery statement
 
@@ -92,9 +152,10 @@ frozen authority boundaries:
   truth composition (read-only), W041 NetworkPath composition (through the
   public machinery only), and W052 usage-evidence correlation (idempotent
   emission INTO the canonical ledger; never a second ledger).
-- **`tools/sharing_selftest.py`** — the 45-case deterministic battery
-  (§4 below), including the adversarial regression round for the three
-  PR #139 blockers (cases 39–45).
+- **`tools/sharing_selftest.py`** — the 46-case deterministic battery
+  (§4 below), including the adversarial regression rounds for the
+  PR #139 blockers (round 1: cases 39–45; round 2: case 46 plus the
+  true self-consistency upgrade of cases 18/40).
 - **`.github/workflows/spec-check.yml`** — additive CI wiring (the in-job
   battery step, plus the independent exact-head `provider-sharing-runtime`
   job that runs the battery even when the KNOWN, INHERITED governance
@@ -141,7 +202,7 @@ ledger, no session/routing/transport mutation surface).
 
 ```text
 python3 tools/sharing_selftest.py
-Result: PASS (45/45 cases passed)
+Result: PASS (46/46 cases passed)
 ```
 
 **Exact-head CI evidence (the correction round's third disposition item):**
@@ -175,7 +236,7 @@ that job's green run (the run URL is recorded on the PR).
   historical usage facts and the canonical W052 journal digest are
   byte-identical after teardown and revocation (cases 24/33).
 
-## 4. Battery manifest (45 cases → the required coverage)
+## 4. Battery manifest (46 cases → the required coverage)
 
 | Required battery item (handoff) | Case(s) |
 |---|---|
@@ -212,19 +273,21 @@ that job's green run (the run URL is recorded on the PR).
 | (structural) frozen vocabularies; two state machines distinct | 01, 02 |
 | (hygiene) py_compile; frozen-spec integrity; PR-delta scope; secret hygiene; evidence-class honesty | 34–38 |
 | (adversarial, P0-1) forged/altered deny-probe decisions; lying coverage/bindings never verify | 39 |
-| (adversarial, P0-1) mismatched proof id/digest/scope binding; self-consistent forged records; tampered durable proof records | 40 |
+| (adversarial, P0-1) mismatched proof id/digest/scope binding; TRUE self-consistent forged records (material, digest, AND proof id all recomputed); tampered durable proof records; freely chosen digests rejected by the content binding | 40 |
 | (adversarial, P0-2) containment rejection leaves quota/session/boundary/primitive counters unchanged (LEDGER asserted); quota rejection leaves containment counters unchanged; counter consistency | 41 |
 | (adversarial, P1-3) restored active snapshot is non-admitting (all five traffic paths typed-denied, durable counters at pre-crash values) until recovery completes with a fresh proof | 42 |
 | (adversarial, P1-3) recovery clearance requires a fresh post-restore proof (direct clearance fails closed); unprovable scope revokes | 43 |
 | (adversarial, P0-2) recovery enforces the accounting-consistency invariant (divergent ledger / trailing boundary counter / unverifiable counter revoke) | 44 |
 | (adversarial, P0-1) the deny-by-default floor is enforced at declaration (envelope/spec/boundary rejection; atomic prepare failure) | 45 |
+| (adversarial, P0 round 2) the stored primitive-proof digest is independently content-derived from the preserved observation material: a snapshot forger who mutates the proof material and recomputes BOTH the digest and the proof id (and updates the boundary's reference) still fails closed — freely chosen digests cannot construct/restore, the maximally self-consistent forgery is non-admitting (typed recovery gate) and cannot re-prove against the live mechanism (failed boundary, revoked session, zero admitted bytes) | 46 |
 
 ## 5. The golden digest stream (the deterministic evidence document)
 
 Produced by `python3 tools/sharing_selftest.py --determinism-stream`
 (byte-identical across runs and hash seeds, and **byte-identical to the
-pre-correction head `ba63371`** — the correction round changed no
-honest-flow evidence):
+pre-correction head `ba63371` and to the round-1 corrected head
+`fc856bb`** — neither correction round changed any honest-flow
+evidence):
 
 ```text
 accounted_bytes=800000
@@ -294,10 +357,11 @@ and new protocol semantics are out of scope and untouched.
 
 ```text
 implemented:      YES (this PR; the exact delivery SHA is the PR head)
-verified:         YES (SOFTWARE class: 45/45 deterministic battery,
+verified:         YES (SOFTWARE class: 46/46 deterministic battery,
                      two-run byte-identical, hash-seed stable, golden
-                     stream reproduced and unchanged across the
-                     correction round; exact-head W048 CI evidence via
+                     stream reproduced and unchanged across BOTH
+                     correction rounds (byte-identical to ba63371 and
+                     fc856bb); exact-head W048 CI evidence via
                      the independent provider-sharing-runtime job)
 in-review:        YES (this PR awaits the Architect's exact-SHA review)
 accepted:         NO (only the Architect can accept the exact delivery SHA;

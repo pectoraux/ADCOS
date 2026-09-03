@@ -168,7 +168,11 @@ from containment import (  # noqa: E402
     SandboxedIsolationPrimitive,
 )
 from containment.isolation import DenyProbe, ScopeSpec  # noqa: E402
-from containment.model import ContainmentProof  # noqa: E402
+from containment.model import (  # noqa: E402
+    ContainmentProof,
+    derive_primitive_material_digest,
+    derive_proof_id,
+)
 
 from sharing import (  # noqa: E402
     CONSENT_TRANSITIONS,
@@ -1982,7 +1986,10 @@ def case_18_isolation_verification(results: List[Result]) -> None:
         problems.append("a primitive proof claimed a non-SOFTWARE class")
     if proof.scope_ref != boundary.scope_ref:
         problems.append("the proof is not bound to the boundary's scope")
-    # a proof that fails to prove the boundary fails the instance
+    # a self-consistent FORGED non-observation (the material is
+    # mutated AND the digest and proof id are recomputed per the
+    # same derivations): the SEMANTIC layer must reject it (an
+    # unobserved scope never proves anything)
     bad = ContainmentProof(
         proof_id="",
         boundary_id=boundary.boundary_id,
@@ -1990,7 +1997,10 @@ def case_18_isolation_verification(results: List[Result]) -> None:
         mechanism=boundary.mechanism,
         proof_epoch=99,
         observed_at=proof.observed_at,
-        primitive_proof_digest=proof.primitive_proof_digest,
+        primitive_proof_digest=derive_primitive_material_digest(
+            boundary.scope_ref, False, False, (),
+            proof.observed_at, boundary.mechanism,
+        ),
         scope_exists=False,
         allowlist_active=False,
         deny_probes=(),
@@ -3343,10 +3353,22 @@ def case_40_proof_binding_tamper(results: List[Result]) -> None:
             deny_probes=proof.deny_probes,
         )
         fields.update(overrides)
+        # the TRUE self-consistent forgery: the material is mutated
+        # AND the digest is recomputed per the SAME content
+        # derivation AND the proof id derives over that digest
+        # (material -> digest -> proof_id all consistent: nothing
+        # is left for the record layer to catch — the SEMANTIC
+        # layer must reject the lying material)
+        fields["primitive_proof_digest"] = derive_primitive_material_digest(
+            fields["scope_ref"], fields["scope_exists"],
+            fields["allowlist_active"], fields["deny_probes"],
+            fields["observed_at"], fields["mechanism"],
+        )
         return ContainmentProof(proof_id="", **fields)
 
-    # self-consistent (valid content-derived id) FORGED records whose
-    # material lies: the SEMANTIC validation rejects every one
+    # self-consistent (material, digest, AND proof id all recomputed
+    # per the same derivations) FORGED records whose material lies:
+    # the SEMANTIC validation rejects every one
     flipped = []
     flipped_floor = False
     for probe in proof.deny_probes:
@@ -3425,11 +3447,14 @@ def case_40_proof_binding_tamper(results: List[Result]) -> None:
         return
     results.append(ok(
         name,
-        "proof id/digest/scope binding: self-consistent forged records with "
-        "lying matrices, mismatched scopes/mechanisms/envelopes, dead "
-        "epochs, or unobserved scopes never satisfy the boundary "
-        "semantics; tampered explicit ids/digests and tampered durable "
-        "proof records are rejected by the content binding (fail closed)",
+        "proof id/digest/scope binding: TRUE self-consistent forged records "
+        "(material, digest, AND proof id all recomputed per the same "
+        "derivations) with lying matrices, mismatched scopes/mechanisms/"
+        "envelopes, dead epochs, or unobserved scopes never satisfy the "
+        "boundary semantics; tampered explicit ids, freely chosen digests, "
+        "and tampered durable proof records are rejected by the content "
+        "binding (the digest must commit to the actual preserved "
+        "observation material -- fail closed)",
     ))
 
 
@@ -3926,6 +3951,230 @@ def case_45_deny_floor_declaration_rejection(results: List[Result]) -> None:
     ))
 
 
+def case_46_forged_self_consistent_proof(results: List[Result]) -> None:
+    name = "case_46_forged_self_consistent_proof"
+    problems: List[str] = []
+    # P0 (PR #139 review round 2): the stored primitive-proof digest
+    # must be INDEPENDENTLY content-derived from the actual preserved
+    # primitive observation fields.  The adversarial shapes below are
+    # the TRUE self-consistent snapshot forgeries: the proof material
+    # is mutated AND both the digest and the proof id are recomputed
+    # AND the boundary's corresponding reference is updated -- every
+    # one must still fail closed (no buyer traffic).
+    world = _full_world()
+    sharing: SharingRuntime = world["sharing"]
+    authority: ContainmentAuthority = world["authority"]
+    session = world["session"]
+    sid = session.sharing_session_id
+    _activated(world)
+    sharing.account_traffic(sid, 300_000)
+    boundary = authority.boundary(session.boundary_ref)
+    proof = authority.latest_proof(session.boundary_ref)
+    if proof is None or not proof.proves_boundary(boundary):
+        problems.append("the honest proof must semantically prove the boundary")
+        results.append(fail(name, "; ".join(problems)))
+        return
+    # the honest record's stored digest IS the content-derived digest
+    # of its preserved material (the record <-> primitive equivalence)
+    if proof.primitive_proof_digest != proof.primitive_material_digest():
+        problems.append(
+            "the honest record's digest is not the material digest"
+        )
+
+    honest = proof.to_dict()
+    # mutated material: a forged observation instant plus a forged
+    # extra probe entry (both semantically harmless, so ONLY the
+    # integrity/lifecycle layers can catch the forgery)
+    mutated = dict(honest)
+    mutated["observed_at"] = "2026-05-04T00:00:01Z"
+    mutated["deny_probes"] = [
+        dict(entry) for entry in honest["deny_probes"]
+    ] + [
+        {
+            "destination": "forged-unrelated-destination",
+            "decision": "denied",
+            "decided_by": "platform-scope",
+        }
+    ]
+
+    # (a) the literal review attack: CHANGE the primitive digest (a
+    # freely chosen value), RECOMPUTE the proof id from that digest,
+    # and CHANGE the boundary's corresponding digest -- the record
+    # layer rejects it fail closed: the digest is not the
+    # content-derived digest of the (mutated) material
+    free_digest = "sha256:" + "9" * 64
+    free_id = derive_proof_id(
+        mutated["boundary_id"], mutated["scope_ref"],
+        mutated["proof_epoch"], mutated["mechanism"],
+        mutated["observed_at"], free_digest,
+    )
+    free_record = dict(
+        mutated, primitive_proof_digest=free_digest, proof_id=free_id,
+    )
+    try:
+        ContainmentProof.from_dict(free_record)
+        problems.append(
+            "a forged record with a freely chosen digest (id recomputed) "
+            "was accepted"
+        )
+    except ContainmentError as error:
+        if error.reason != ContainmentReasonCode.PROOF_INVALID:
+            problems.append(
+                "the freely-digested forgery failed with %r (expected "
+                "proof-invalid)" % error.reason
+            )
+
+    # the tampered durable snapshot: the forged proof record plus the
+    # boundary's corresponding id/digest/verified-at all updated (the
+    # maximally cooperating snapshot rewriter)
+    def _tampered_snapshot(record: Dict[str, Any]) -> Dict[str, Any]:
+        snap = authority.snapshot()
+        bid = session.boundary_ref
+        snap["proofs"][bid][-1] = dict(record)
+        for entry in snap["boundaries"]:
+            if entry["boundary_id"] == bid:
+                entry["proof_id"] = record["proof_id"]
+                entry["proof_digest"] = record["primitive_proof_digest"]
+                entry["verified_at"] = record["observed_at"]
+        return snap
+
+    # (b) the tampered durable SNAPSHOT (freely chosen digest, proof
+    # id recomputed, boundary reference updated) cannot even RESTORE
+    try:
+        ContainmentAuthority.restore(
+            primitive=world["primitive"], clock=world["shared"],
+            snapshot=_tampered_snapshot(free_record),
+        )
+        problems.append("a tampered durable snapshot restored cleanly")
+    except ContainmentError as error:
+        if error.reason != ContainmentReasonCode.PROOF_INVALID:
+            problems.append(
+                "the tampered snapshot failed with %r (expected "
+                "proof-invalid)" % error.reason
+            )
+
+    # (c) the MAXIMALLY self-consistent forgery: the material is
+    # mutated AND the digest is recomputed per the SAME derivation
+    # AND the proof id is recomputed AND the boundary reference is
+    # updated (internally consistent: the record layer accepts it by
+    # construction) -- the RUNTIME layers must still fail closed
+    smart_digest = derive_primitive_material_digest(
+        mutated["scope_ref"], mutated["scope_exists"],
+        mutated["allowlist_active"], tuple(mutated["deny_probes"]),
+        mutated["observed_at"], mutated["mechanism"],
+    )
+    smart_id = derive_proof_id(
+        mutated["boundary_id"], mutated["scope_ref"],
+        mutated["proof_epoch"], mutated["mechanism"],
+        mutated["observed_at"], smart_digest,
+    )
+    smart_record = dict(
+        mutated, primitive_proof_digest=smart_digest, proof_id=smart_id,
+    )
+    try:
+        smart = ContainmentProof.from_dict(smart_record)
+    except ContainmentError as error:
+        smart = None
+        problems.append(
+            "the self-consistent forged record was rejected at "
+            "construction (%s)" % error.message[:60]
+        )
+    if smart is not None and smart.proof_id != smart_record["proof_id"]:
+        problems.append("the self-consistent forgery lost its derived id")
+    # process death: the durable snapshots were taken while live; the
+    # OS-level scope is destroyed while the authority is down (the
+    # primitive models the platform mechanism that SURVIVES the
+    # authority process: the forger can rewrite the snapshot but not
+    # the live mechanism state)
+    snap = sharing.snapshot()
+    world["primitive"].simulate_scope_loss(boundary.scope_ref)
+    authority2 = ContainmentAuthority.restore(
+        primitive=world["primitive"], clock=world["shared"],
+        snapshot=_tampered_snapshot(smart_record),
+    )
+    sharing2 = SharingRuntime.restore(
+        core=world["core"], paths=world["manager"],
+        containment=authority2, clock=world["shared"], snapshot=snap,
+    )
+    # admission STILL fails closed: the self-consistent forged proof
+    # is not a path around the recovery gate (typed)
+    decision = authority2.evaluate_admission(
+        session.boundary_ref,
+        AdmissionFacts(
+            lease_active=True, consent_granted=True,
+            path_active=True, quota_available=True,
+        ),
+    )
+    if decision.admitted or (
+        decision.reason != ContainmentReasonCode.RECOVERY_REQUIRED
+    ):
+        problems.append(
+            "the self-consistent forgery admitted (reason %r)"
+            % decision.reason
+        )
+    # the runtime admission path fails closed with EVERY durable
+    # counter at its pre-crash value
+    _expect_sharing_error(
+        "forged-snapshot-account", problems,
+        sharing2.account_traffic, sid, 100_000,
+        reason=SharingReasonCode.RECOVERY_REQUIRED,
+    )
+    if sharing2.quota_ledger().accounted_bytes(sid) != 300_000:
+        problems.append("the forged denial moved the quota ledger")
+    if sharing2.session(sid).accounted_bytes != 300_000:
+        problems.append("the forged denial moved the session counter")
+    if authority2.boundary(session.boundary_ref).admitted_bytes != 300_000:
+        problems.append("the forged denial moved the boundary counter")
+    # recovery CANNOT turn the forged material into admission
+    # evidence: the mandatory fresh re-proof observes the LIVE
+    # mechanism (the destroyed scope) => the boundary fails and the
+    # session revokes (no traffic ever resumes from forged proof)
+    report = sharing2.recover()
+    if report.get(sid, "") != "revoked:ISOLATION_UNPROVABLE":
+        problems.append(
+            "the forged state recovered as %r (expected revocation)"
+            % report.get(sid)
+        )
+    if authority2.boundary(session.boundary_ref).state != "failed":
+        problems.append(
+            "the unprovable forged boundary is %s (expected failed)"
+            % authority2.boundary(session.boundary_ref).state
+        )
+    if sharing2.session(sid).state != "revoked":
+        problems.append("the session did not revoke on the failed re-proof")
+    # even after the recovery attempt the gate stays closed
+    after = authority2.evaluate_admission(
+        session.boundary_ref,
+        AdmissionFacts(
+            lease_active=True, consent_granted=True,
+            path_active=True, quota_available=True,
+        ),
+    )
+    if after.admitted:
+        problems.append("the failed boundary admitted after recovery")
+    _expect_sharing_error(
+        "forged-post-recovery-account", problems,
+        sharing2.account_traffic, sid, 100_000,
+        reason=SharingReasonCode.LIFECYCLE_ILLEGAL,
+    )
+    if problems:
+        results.append(fail(name, "; ".join(problems[:5])))
+        return
+    results.append(ok(
+        name,
+        "the stored primitive-proof digest is independently content-derived "
+        "from the actual preserved observation material (material -> digest "
+        "-> proof_id recomputed link by link at construction, restore, and "
+        "the admission gate): a snapshot forger who mutates the proof "
+        "material and recomputes BOTH the digest and the proof id (and "
+        "updates the boundary's reference) still fails closed -- a freely "
+        "chosen digest can neither construct nor restore, and the maximally "
+        "self-consistent forgery is non-admitting (typed recovery gate) and "
+        "can never re-prove against the live mechanism it cannot rewrite "
+        "(failed boundary, revoked session, zero admitted bytes)",
+    ))
+
+
 # ---------------------------------------------------------------------------
 # main
 # ---------------------------------------------------------------------------
@@ -3979,6 +4228,7 @@ def main() -> int:
         case_43_recovery_reproof_mandatory,
         case_44_recovery_accounting_invariant,
         case_45_deny_floor_declaration_rejection,
+        case_46_forged_self_consistent_proof,
     ):
         case(results)
     failures = [result for result in results if not result[1]]
