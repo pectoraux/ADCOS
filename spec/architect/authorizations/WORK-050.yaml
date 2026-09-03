@@ -1,0 +1,108 @@
+# ADCOS Work Item authorization record — WORK-050 active implementation.
+# Issued by DEC-0078 after W049 acceptance (the PR #142 delivery accepted at
+# exact reviewed head b8cc17ef21f6c38266152552590dc73f80c056ce and merged at
+# 89ad6ff3d168c59256c3e805539eb9ca22f6b3bc) on the W049 acceptance merge
+# mainline. The authorization is the ONLY durable authority to implement
+# WORK-050.
+# Baseline: 89ad6ff3d168c59256c3e805539eb9ca22f6b3bc — the exact current main
+# at issuance (the post-W049-reconciliation mainline this governance
+# transition is cut from). Per the DEC-0063/DEC-0066/DEC-0068/DEC-0074/
+# DEC-0077 convention, a follow-up baseline-advancement-only reconciliation
+# may advance this baseline to the exact post-transition governance mainline
+# once the governance PR carrying this record merges; the W050 implementation
+# branch is cut from the mainline that carries the authorization record.
+# W050 is a CAPABILITY/ISOLATION DECLARATION boundary, not a new enforcement
+# authority: it declares, as versioned advisory capability input consumed by
+# W048/W049, which operating systems, device classes, network configurations,
+# and deployment modes can safely provide or consume leased connectivity,
+# which isolation primitives are available, and which sharing modes are
+# unsupported or require additional infrastructure. It is NOT routing,
+# NetworkPath, session, identity, transport, commercial, usage, payment,
+# marketplace, or enforcement authority, and it does not implement
+# W048/W049 enforcement. No new ACR was manufactured for this activation:
+# W050 is already defined under the accepted ACR-009 commercial planning
+# (DEC-0050, PR #82) and the ACR-011-registered frozen registry entry
+# (Dependencies: none; the W050 -> W048/W049 DAG edges are advisory
+# capability-input edges sanctioned by ACR-011, never hard gates).
+work_item: WORK-050
+status: active
+authorized: true
+type: implementation
+authorization_id: "WORK-050-CORE-001"
+authorization_decision: DEC-0078
+baseline_sha: 89ad6ff3d168c59256c3e805539eb9ca22f6b3bc
+review_basis: "DEC-0078 activation (issuance baseline 89ad6ff3d168c59256c3e805539eb9ca22f6b3bc, the exact current main: the W049 implementation acceptance merge mainline the governance transition is cut from; the W050 implementation branch is cut from the mainline that carries the authorization record; exactly one implementation PR, no self-authorization, no self-merge). DEC-0078 accepts WORK-049 on PR #142 exact reviewed head b8cc17ef21f6c38266152552590dc73f80c056ce (three Architect review rounds over correction heads 72b830b -> a92c42f -> b8cc17e; the Architect merge at 89ad6ff3d168c59256c3e805539eb9ca22f6b3bc, 2026-09-03T17:16:12Z, is the durable acceptance evidence; exact-head CI run 33781878528 terminal with the client-runtime battery job SUCCESS and the inherited specification condition visible and unmasked; 54/54 deterministic battery; SOFTWARE-only), superseding WORK-049-CORE-001 and releasing the single active execution slot. WORK-050 issue #96 is the next canonical Work Item (the platform connectivity sharing capability and isolation matrix, defined under the accepted ACR-009 commercial planning of DEC-0050 / PR #82); its hard dependencies are exactly the frozen spec/work-items.md declaration (Dependencies: none), and the W050 -> W048/W049 edges are advisory capability-input edges sanctioned by ACR-011 (yielding the sanctioned ADV-01 advisories), never hard gates: W050 must never become a blocking dependency of W048/W049. No WORK-050 implementation delivery exists."
+dependencies: []
+authority_inputs:
+  - "ACR-009 commercial connectivity control-plane planning (ACCEPTED, DEC-0050 / PR #82) — the canonical planning under which WORK-050 is defined"
+  - "ACR-012 containment authority vocabulary (DEC-0072; containment/ public contract) — the frozen capability dimension unsupported/unknown/supported/restricted reused as the explicit capability-evaluation outcome states; never redefined here"
+  - "WORK-048 provider sharing runtime (accepted-merged, DEC-0075) — a consumer of provider-role platform capability declarations; W050 declares capability, W048 owns sharing/quota/containment enforcement"
+  - "WORK-049 provider & buyer client runtime (accepted-merged, DEC-0078) — a consumer of provider/buyer device capability declarations for its capability fail-closed dimension; W050 declares capability, W049 projects and fails closed"
+  - "ACR-005 NetworkPath platform boundary (ACCEPTED, DEC-0047) — the path authority whose platform boundary W050 describes capability for but never implements"
+  - "WORK-045 eligibility/provider-trust/jurisdiction policy (accepted-merged, DEC-0065) where jurisdiction-aware capability constraints apply"
+  - "the /adapters platform family contracts — the platform primitives (network namespace/interface/firewall/VPN/proxy capability descriptors) are DECLARED as capability, never implemented here"
+authority_outputs:
+  - "Versioned platform connectivity sharing capability registry: provider/buyer role capability declarations, sharing-mode capability classes (for example application proxy, OS-level forwarding, tether-backed path, gateway/router mode — capability classes, never universal assumptions), isolation primitive declarations with minimum security/isolation properties, metering capability and byte-counting authority declarations, lease-enforcement capability declarations (time, byte, concurrency, emergency stop), and lifecycle/platform constraints — a descriptive/capability authority only"
+  - "Deterministic compatibility evaluation producing explicit supported / restricted / unsupported / unknown outcomes, and versioned, auditable historical capability decisions — never an enforcement mechanism, never proof that a particular physical deployment currently works"
+scope:
+  - "versioned platform capability registry"
+  - "provider/buyer role capability declarations"
+  - "sharing-mode capability classes"
+  - "isolation primitive declarations"
+  - "minimum security/isolation properties"
+  - "metering capability declarations"
+  - "lease-enforcement capability declarations"
+  - "lifecycle/platform constraints"
+  - "deterministic compatibility evaluation"
+  - "explicit supported / restricted / unsupported / unknown states"
+  - "versioned, auditable historical decisions"
+  - "deterministic software evidence"
+  - "authority/import/source-boundary audits"
+acceptance_criteria:
+  - "A platform capability registry covers provider and buyer roles, sharing-mode capability classes, isolation-primitive declarations with minimum security properties, metering capability and byte-counting authority declaration, and lease-enforcement capability (time, byte, concurrency, emergency stop)."
+  - "Capability discovery and deterministic compatibility evaluation produce explicit supported, restricted, unsupported, and unknown outcomes."
+  - "The provider/consumer mode compatibility matrix is versioned; capability findings carry evidence references."
+  - "Capability declaration is never confused with proof that a particular physical deployment currently works."
+  - "The registry is not a routing, NetworkPath, session, identity, or transport authority."
+evidence_classes:
+  - criterion: "Capability registry structure, role/sharing-mode/isolation/metering/lease-enforcement declarations, deterministic compatibility evaluation over versioned registries, versioned auditable historical decisions, fail-closed unknown/unsupported behavior, boundary and import audits, determinism, and replay proofs"
+    class: SOFTWARE
+    allowed_statuses:
+      - PASS
+      - PARTIAL
+      - NOT-TESTABLE
+      - OPEN
+  - criterion: "Real platform capability/isolation behavior on physical devices and networks (real isolation-primitive availability, real platform sharing-mode behavior)"
+    class: PHYSICAL
+    allowed_statuses:
+      - OPEN
+      - PARTIAL
+      - NOT-TESTABLE
+      - PASS
+out_of_scope:
+  - "OS firewall, tether, VPN, or proxy implementation"
+  - "packet-forwarding implementation"
+  - "NetworkPath, routing, session, identity, or transport implementation"
+  - "commercial, payment, or usage authority"
+  - "W048 containment enforcement (W048/ACR-012 own it; capability declarations never become enforcement and never create a second containment authority)"
+  - "W049 client runtime implementation"
+  - "marketplace implementation"
+  - "physical-evidence claims (no capability result promotes SOFTWARE evidence into PHYSICAL evidence; a capability declaration is never proof that a particular physical deployment currently works)"
+  - "assuming a platform can share connectivity merely because of an OS/platform label or because it can create a socket or enable tethering (UNKNOWN is never treated as SUPPORTED)"
+  - "becoming a hard dependency that blocks WORK-048 or WORK-049 (the W050 -> W048/W049 edges are advisory capability-input edges only)"
+  - "altering ACR-012, WORK-048, or WORK-049 (their accepted contracts are frozen)"
+  - "modifying spec/architect/ from the eventual implementation PR (self-authorization is prohibited)"
+  - "frozen architecture/protocol/schema changes"
+  - "WORK-040 physical evidence (EVID-007/EVID-008 remain W040-owned and open)"
+acceptance_gate:
+  status: "Architect review required after implementation"
+  required_evidence:
+    - "deterministic capability-evaluation battery over versioned registries: provider/buyer/platform/sharing-mode combinations yield explicit supported, restricted, unsupported, or unknown outcomes"
+    - "fail-closed negative proofs: unknown and unsupported capabilities fail closed (UNKNOWN is never treated as SUPPORTED); restricted capabilities yield constrained declarations only; no implicit platform assumption (an OS/platform label never implies sharing support)"
+    - "isolation-requirement proofs per sharing mode: isolation primitives and minimum security/isolation properties are explicit and testable; isolation is based on enforceable platform mechanisms, not application declarations alone where stronger isolation is required"
+    - "metering and lease-enforcement capability declaration proofs that remain declarations (never commercial truth, never enforcement; byte-counting authority is declared, not exercised)"
+    - "versioning and auditability proofs: capability versions are auditable, historical capability decisions are preserved, and evaluation is deterministic and repeatable (byte-identical repeat output, independence from hash iteration ordering / PYTHONHASHSEED where applicable)"
+    - "authority/import/source-boundary audit proving the registry stays descriptive: no import of or write into W048/W049/W041 enforcement internals, no routing/transport/session/identity authority, no packet forwarding, no OS firewall/tether/VPN/proxy implementation, and composition with W048/W049 and NetworkPath without bypassing their authorities"
+    - "exact reviewed delivery SHA, evidence manifest, CI/provenance condition, and the SOFTWARE/PHYSICAL evidence-class honesty disclosure (all registry/simulation evidence is SOFTWARE; real platform capability behavior remains separately governed PHYSICAL evidence, never claimed from SOFTWARE results)"
+handoff: docs/WORK-050-handoff.md
+handoff_required: true
