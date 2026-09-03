@@ -1,0 +1,48 @@
+# ADCOS Architect decision record.
+# schema: spec/architect/decision-record-template.md; verified by tools/spec_check.py (ARCH-04).
+# Acceptance of ACR-012, the first-class Buyer-Traffic Containment Boundary
+# authority, resolving the DEC-0071 W048-CONTAINMENT-AUTHORITY gate.
+decision_id: DEC-0072
+type: governance
+work_item: null
+acr: ACR-012
+pr: null
+reviewed_sha: 7bc31f2899307c56639887416d602b41b4c16f43
+decision: ACCEPTED
+status: ACCEPTED
+reviewer: "Architect (pectoraux)"
+timestamp: 2026-09-03T03:30:00Z
+findings:
+  - "DEC-0071 gated W048 on the unresolved containment-authority decision. Fresh architectural review of the live repository confirms its premise: no accepted authority owns buyer-traffic containment. ACR-005/W041 NetworkPath owns path selection and validation, not traffic containment to a bounded path; /transport owns secure transport mappings; /adapters owns platform isolation primitives per platform; /services owns the local-service exposure policy; appliance/isolation.py models the isolated-site upstream posture; platform/boundary.py is the platform-event observation boundary. None provides a single auditable containment contract."
+  - "Composition-only reuse (Option A) would leave W048's highest-risk invariant — isolation failures fail closed and cannot be satisfied by application-level declarations — as an emergent three-way interaction of transport/adapter/service modules with no frozen state vocabulary, no verification-proof contract, and no auditable object. That is below the standard the W048 requirement sets."
+  - "ACR-012 (Option B, the first-class Buyer-Traffic Containment Boundary authority) is accepted: it owns admission of buyer traffic into an isolated provider-sharing boundary, platform isolation state, control-plane/buyer-plane separation, deny-by-default containment, capability state for the selected mechanism, fail-closed transitions, isolation establishment/verification, teardown/revocation, and the evidence that the boundary existed for the sharing interval — and it does not own identity, logical session identity, routing, NetworkPath lifecycle, transport semantics, commercial lease truth, usage ledger truth, payment credentials, marketplace ranking, arbitrary packet inspection, or plaintext payload semantics."
+  - "The frozen contract is platform-independent and technology-neutral: capability dimension unsupported/unknown/supported/restricted (reconciled verbatim with the W048 design capability matrix; W050 stays advisory input), boundary lifecycle prepared -> verified -> active -> degraded/failed/revoked/closed (reconciled against the NetworkPath, transport-health, and sharing-session vocabularies; ownership is per-object and frozen)."
+  - "The critical invariant NO PROVEN CONTAINMENT => NO BUYER TRAFFIC is frozen: buyer traffic is permitted only in boundary state active, reachable only from verified, and admission additionally fails closed on lease inactive, consent absent/revoked, NetworkPath not valid/active, quota exhausted, isolation unavailable, or containment proof invalid. Historical usage is never rewritten at teardown/revocation."
+  - "The ACR-012 identifier is allocated as the next genuinely unused sequential identifier by repository inspection: ACR-001..ACR-011 are all allocated (ACR-004-connectivity-commerce-plane and ACR-010-work-item-registry-extension are occupied superseded identities; ACR-008 was never allocated and the numbering has already passed it). The historical ACR-010 identity is NOT reused."
+  - "Acceptance is contract-only: no implementation is authorized by this decision. The containment authority implementation lands inside the WORK-048 authorization scope only after DEC-0073 issues it. Software containment proofs are SOFTWARE-class; physical containment claims remain PHYSICAL and OPEN until physically demonstrated."
+  - "W040 physical-evidence obligations EVID-007 and EVID-008 remain independent and unaffected; nothing in this decision closes or promotes them."
+blockers: []
+required_corrections: []
+evidence:
+  merge_sha: null
+  ci_run: null
+  artifacts:
+    - "spec/acr/ACR-012-buyer-traffic-containment-boundary.md"
+    - "docs/WORK-048-provider-sharing-runtime-design.md"
+    - "spec/architecture-lock.md"
+    - "spec/architect/decisions/DEC-0071-w048-containment-gate.yaml"
+accepted_scope:
+  - "Acceptance of ACR-012 as the frozen first-class Buyer-Traffic Containment Boundary authority contract, including its authority ownership/non-ownership lists, composition boundary, capability and lifecycle state vocabulary, evidence requirements, and fail-closed invariants."
+  - "The vocabulary reconciliation record: capability states match the W048 design matrix; boundary lifecycle states are distinct from the NetworkPath, transport-health, and W048 sharing-session lifecycles, with per-object ownership frozen."
+  - "Preservation of all frozen authority boundaries: ACR-005/W041, ACR-006/W042, ACR-009/W051, /identity, /session, /routing, /transport, /adapters, /services, /policy, /telemetry are composed, never expanded or duplicated."
+rejected_scope:
+  - "Any W048 implementation authorization (issued separately by DEC-0073)."
+  - "Any modification of LOCK-001..LOCK-025, frozen protocol schemas, the Work Item registry, or the dependency DAG."
+  - "Reuse of the superseded ACR-010 identity or any semantic expansion of NetworkPath into traffic containment."
+  - "Any W040 physical-evidence acceptance, obligation closure, or promotion of software evidence to physical PASS."
+downstream_effect:
+  - "The DEC-0071 blocker W048-CONTAINMENT-AUTHORITY is resolved; DEC-0071 carries resolved_by DEC-0072."
+  - "The W048 authorization gate is satisfied architecturally: DEC-0073 may now issue WORK-048-CORE-001 with a literal implementation scope that includes the containment/ authority surface."
+  - "W048's isolation layer implements this frozen contract; WORK-050 remains advisory capability input; WORK-049 composes the accepted authority in its own future cycle."
+  - "No registry, DAG, lock, or protocol-schema change results from this acceptance."
+resolved_by: null
