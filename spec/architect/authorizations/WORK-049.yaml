@@ -1,20 +1,26 @@
-# ADCOS Work Item authorization record — WORK-049 active implementation.
+# ADCOS Work Item authorization record — WORK-049 provenance.
 # Issued by DEC-0076 after W048 acceptance (DEC-0075) on the W048 acceptance
-# merge mainline. The authorization is the ONLY durable authority to
+# merge mainline. The authorization was the ONLY durable authority to
 # implement WORK-049.
 # Baseline: advanced to the exact post-PR-#140 governance mainline by the
 # DEC-0077 baseline-advancement-only reconciliation (the
 # DEC-0063/DEC-0066/DEC-0068/DEC-0074 convention; original DEC-0076 issuance
 # baseline ce1ccaea328743a05cf8d6fa87a114e69d9e253c, the W048 acceptance
 # merge mainline).
+# Superseded by DEC-0078 after Architect acceptance of PR #142 (exact reviewed
+# head b8cc17ef21f6c38266152552590dc73f80c056ce, merge
+# 89ad6ff3d168c59256c3e805539eb9ca22f6b3bc, 2026-09-03T17:16:12Z): the delivered and accepted W049
+# implementation releases the single active execution slot.
 # W049 is a CLIENT/CONSUMER/PROJECTION BOUNDARY, not a new authority: every
 # canonical truth and enforcement stays with its existing owner (identity,
 # sessions, W041 NetworkPath, routing, transport, W051 CommercialCore, W042
 # UsageLedger, W047 discovery, W048 provider sharing / ACR-012 containment,
 # W046 developer API). No new ACR was manufactured for this activation.
 work_item: WORK-049
-status: active
-authorized: true
+status: superseded
+authorized: false
+superseded_by: "WORK-050-CORE-001"
+supersession_decision: DEC-0078
 type: implementation
 authorization_id: "WORK-049-CORE-001"
 authorization_decision: DEC-0076
