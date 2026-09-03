@@ -1,0 +1,43 @@
+# ADCOS Architect decision record.
+# schema: spec/architect/decision-record-template.md; verified by tools/spec_check.py (ARCH-04).
+# Governance correction resolving the mechanically false-negative WORK-047 authorization scope representation.
+decision_id: DEC-0069
+type: governance
+work_item: WORK-047
+acr: null
+pr: null
+reviewed_sha: c2e1b3cdcb5146055e754c4effdf1f3adf53e966
+decision: ACCEPTED
+status: ACCEPTED
+reviewer: "Architect (pectoraux)"
+timestamp: 2026-09-03T02:47:15Z
+findings:
+  - "ARCH-08 correctly evaluates authorization coverage by matching changed implementation paths against literal scope prefixes."
+  - "WORK-047-CORE-001 was validly issued by DEC-0067 and reconciled by DEC-0068, but its first scope entry was expressed as prose (marketplace discovery, proximity, and path-selection implementation defined by issue #91) rather than the literal implementation prefix marketplace/."
+  - "The W047 implementation delivery PR #135 is confined to the intended marketplace/, dedicated battery, evidence document, and additive CI wiring; no implementation authority or work-item contract change is required to resolve this governance representation defect."
+  - "The correction is representation-only: the canonical W047 scope is now explicitly represented by the literal path prefix marketplace/ so ARCH-08 can mechanically authorize the intended implementation package. No frozen architecture/protocol semantic, dependency, baseline, lifecycle, or authority boundary changes."
+blockers:
+  - ARCH-08
+required_corrections: []
+evidence:
+  merge_sha: null
+  ci_run: null
+  artifacts:
+    - "spec/architect/authorizations/WORK-047.yaml"
+    - "tools/spec_check.py"
+    - "PR #135 exact delivery head 348154d063c0e0a12d5635cb2093c67a507a4064"
+accepted_scope:
+  - "Correction of the machine-readable WORK-047 authorization scope to include the literal implementation prefix marketplace/."
+  - "Preservation of all existing W047 authority inputs, outputs, dependencies, acceptance criteria, out-of-scope boundaries, and implementation baseline."
+  - "Resolution of the ARCH-08 authorization-scope finding for the intended W047 implementation surface."
+rejected_scope:
+  - "Any modification to frozen architecture or protocol semantics."
+  - "Any W047 implementation change, acceptance, or merge."
+  - "Any W040 physical-evidence acceptance or obligation closure."
+  - "Any activation of W048/W049 or transfer of the active execution slot."
+downstream_effect:
+  - "ARCH-08 can mechanically match the W047 implementation package under the literal marketplace/ authorization scope."
+  - "WORK-047-CORE-001 remains the sole active implementation authorization with the existing reconciled baseline 825f48f814926223665c1761beaba6cbdd2c2640."
+  - "PR #135 remains open and unaccepted; its exact delivery SHA 348154d063c0e0a12d5635cb2093c67a507a4064 remains subject to the final exact-SHA Architect acceptance audit."
+  - "No execution-ledger lifecycle transition is made by this correction; the ledger continues to record WORK-047 as the active authorized Work Item pending delivery acceptance."
+resolved_by: null

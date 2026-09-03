@@ -1,5 +1,7 @@
 # ADCOS Work Item authorization record — WORK-047 active implementation.
 # Issued by DEC-0067 after Architect acceptance of WORK-046; baseline reconciled by DEC-0068.
+# DEC-0069 corrects only the machine-readable authorization scope so ARCH-08
+# can mechanically bind the authorized W047 implementation package.
 work_item: WORK-047
 status: active
 authorized: true
@@ -8,7 +10,8 @@ authorization_id: "WORK-047-CORE-001"
 authorization_decision: DEC-0067
 baseline_sha: 825f48f814926223665c1761beaba6cbdd2c2640
 baseline_reconciliation_decision: DEC-0068
-review_basis: "DEC-0067 accepts WORK-046 on PR #132 exact reviewed head 09960ea24315e5d0ccfd516d3bdca0802b62d8b7, merged at f45be6dd0544a2fd6cbc910805def28bbe0c71eb. DEC-0068 / LEDGER-RECON-015 reconciles the W047 authorization baseline to the exact post-DEC-0067 governance mainline 825f48f814926223665c1761beaba6cbdd2c2640. W047 issue #91 is the next canonical commercial Work Item; its hard dependencies WORK-051, WORK-044, WORK-045, and WORK-046 are accepted-merged."
+scope_correction_decision: DEC-0069
+review_basis: "DEC-0067 accepts WORK-046 on PR #132 exact reviewed head 09960ea24315e5d0ccfd516d3bdca0802b62d8b7, merged at f45be6dd0544a2fd6cbc910805def28bbe0c71eb. DEC-0068 / LEDGER-RECON-015 reconciles the W047 authorization baseline to the exact post-DEC-0067 governance mainline 825f48f814926223665c1761beaba6cbdd2c2640. DEC-0069 corrects the W047 authorization scope representation from prose to the literal implementation prefix marketplace/ without changing the W047 contract, baseline, dependencies, authority boundaries, or frozen architecture. W047 issue #91 is the next canonical commercial Work Item; its hard dependencies WORK-051, WORK-044, WORK-045, and WORK-046 are accepted-merged."
 dependencies:
   - WORK-051
   - WORK-044
@@ -23,7 +26,7 @@ authority_inputs:
 authority_outputs:
   - "deterministic, eligibility-filtered, privacy-preserving marketplace discovery and candidate selection proposals; no path activation authority"
 scope:
-  - "marketplace discovery, proximity, and path-selection implementation defined by issue #91"
+  - "marketplace/"
   - "provider/offer discovery API and index"
   - "geospatial/proximity abstraction with configurable accuracy/privacy"
   - "eligibility filtering, deterministic candidate ranking, stale-offer handling, quality evidence, privacy-preserving location, fallback and multi-candidate selection"
