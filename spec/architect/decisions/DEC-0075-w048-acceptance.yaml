@@ -1,0 +1,48 @@
+# ADCOS Architect decision record.
+# schema: spec/architect/decision-record-template.md; verified by tools/spec_check.py (ARCH-04).
+# Formal acceptance of the merged WORK-048 implementation delivery.
+decision_id: DEC-0075
+type: acceptance
+work_item: WORK-048
+acr: null
+pr: 139
+reviewed_sha: e2af4bd20e403c1d4ee9717f7eea8809c16a53cd
+decision: ACCEPTED
+status: ACCEPTED
+reviewer: "Architect (pectoraux)"
+timestamp: 2026-09-03T10:30:47Z
+findings:
+  - "The exact reviewed implementation head e2af4bd20e403c1d4ee9717f7eea8809c16a53cd is the accepted W048 delivery head. The canonical Architect acceptance record is PR #139 comment 5524305998 (2026-09-03T10:27:53Z): GitHub does not permit a user to formally approve their own PR, so that comment is the durable acceptance verdict, and the merge by pectoraux at 2026-09-03T10:30:47Z (merge commit ce1ccaea328743a05cf8d6fa87a114e69d9e253c) is the merge-commit time recorded here."
+  - "Three Architect review rounds were rendered on the delivery: round 1 (PR #139 comments 5521109245/5521136572, 2026-09-03T05:43:56Z/05:46:58Z, disposition CHANGES REQUIRED at first delivery head ba63371ca75ed18376ddac7eb1cdb67b6f819418) returned three material defects — P0-1 containment proof validation bound only to non-empty fields, P0-2 quota accounting committed before containment admission, P1-3 restored active state reaching admission before fresh recovery/re-proof — plus the exact-head CI evidence requirement; round 2 (review 5098744662 at correction head fc856bb8adcb8ce594b784f53b8ea06fdf179421) found the remaining P0: the stored primitive-proof digest was not independently content-derived, so a tampered durable snapshot could produce a self-consistent forged proof; the final exact-SHA re-audit at e2af4bd20e403c1d4ee9717f7eea8809c16a53cd rendered the verdict ACCEPTED."
+  - "The acceptance re-audit closed every finding: P0-1 closed (proof semantics bound to the exact scope/boundary envelope, mechanism, probe semantics, coverage, and deny-by-default floor, with journaled proof id/digest/epoch cross-checks); P0-2 closed (quota availability checked without mutation, then containment admission, then quota commit, with recovery accounting-consistency enforcement); P1-3 closed (restore sets a non-admitting RECOVERY_REQUIRED condition; all traffic-admitting paths fail closed until fresh post-restore containment re-proof); the round-2 proof-forgery finding closed (the material->digest->proof-id chain is independently recomputable from the preserved observation material, the admission path re-derives it, and case 46 covers the freely chosen digest, the tampered durable snapshot, and a true self-consistent forgery that still cannot bypass the restored non-admitting gate or re-proof against live primitive state)."
+  - "Exact-head CI was verified by the Architect: run 33727464067 is terminal on e2af4bd20e403c1d4ee9717f7eea8809c16a53cd; the independent provider-sharing-runtime/containment battery job succeeded while the inherited ARCH-02 specification failure remained separately visible and unmasked (no masking, retry, or suppression of the governance condition was introduced). The specification-consistency job itself is NOT represented as a green CI result: it stops at the already-known inherited ARCH-02/ARCH-06 mainline condition, which is inherited governance state, not a W048 regression."
+  - "Governance/scope was verified by the Architect: PR #139 base remains 72810f4d8d48c16157864017ecf155538a4243c4; spec/architect/ and the frozen architecture/authorization surfaces were not modified by the corrections. The delivery is 20 files, +12565/-0, exactly the WORK-048-CORE-001 authorized literal scope (the sharing/ and containment/ packages, tools/sharing_selftest.py, docs/WORK-048-evidence.md, and the additive CI wiring)."
+  - "The dedicated W048 verification battery is documented as PASS 46/46 with byte-identical repeat output, PYTHONHASHSEED 0/1/7919/unset determinism, and a golden digest stream byte-identical across both correction rounds. The delivery implements the ACR-012 containment authority contract under the NO PROVEN CONTAINMENT => NO BUYER TRAFFIC invariant."
+  - "W048 remains a local enforcement mechanism: it composes /identity, /sessions, W041 NetworkPath, /routing, /transport, W051 CommercialCore lease truth, W042 UsageLedger, the ACR-012 containment boundary, /adapters platform primitives, /policy, and /telemetry; it does not become a second identity, session, NetworkPath, routing, transport, commercial, usage, or payment-custody authority, and performs no arbitrary packet interception or plaintext payload inspection."
+  - "The delivery evidence is SOFTWARE-only. WORK-040 physical obligations EVID-007 and EVID-008 remain independent and open; W048's physical containment evidence class likewise remains OPEN and separately governed (no SOFTWARE PASS is upgraded to a PHYSICAL PASS)."
+blockers: []
+required_corrections: []
+evidence:
+  merge_sha: ce1ccaea328743a05cf8d6fa87a114e69d9e253c
+  ci_run: 33727464067
+  artifacts:
+    - "docs/WORK-048-evidence.md"
+    - "tools/sharing_selftest.py"
+    - "PR #139 exact reviewed head e2af4bd20e403c1d4ee9717f7eea8809c16a53cd"
+    - "PR #139 merge commit ce1ccaea328743a05cf8d6fa87a114e69d9e253c"
+    - "PR #139 canonical Architect acceptance comment 5524305998"
+accepted_scope:
+  - "Acceptance of the WORK-048 implementation delivered on PR #139 at exact reviewed head e2af4bd20e403c1d4ee9717f7eea8809c16a53cd and merged at ce1ccaea328743a05cf8d6fa87a114e69d9e253c."
+  - "The provider sharing runtime (sharing/) and the containment authority implementation (containment/) within the previously issued WORK-048-CORE-001 scope: sharing session lifecycle, explicit provider consent, quota/capacity enforcement, isolation and lease expiry, W042 usage evidence correlation, and the ACR-012 Buyer-Traffic Containment Boundary contract."
+  - "The 46-case deterministic implementation evidence and the two-round correction history as documented in docs/WORK-048-evidence.md."
+rejected_scope:
+  - "Any frozen architecture or protocol semantic change."
+  - "Any new identity, session, NetworkPath, routing, transport, commercial, usage, payment-custody, or physical-evidence authority."
+  - "Any closure or acceptance of W040 physical obligations (EVID-007/EVID-008 remain open and W040-owned)."
+  - "Any physical containment PASS claim (W048's physical evidence class remains OPEN and separately governed)."
+  - "Any implicit activation of WORK-049 or WORK-050."
+downstream_effect:
+  - "WORK-048 is accepted-merged and is now a satisfied hard dependency for downstream governance evaluation; this ledger entry is the durable fact that makes downstream WORK-049's hard dependency WORK-048 satisfied (WORK-046 DEC-0067 and WORK-047 DEC-0070 were already satisfied)."
+  - "The single active execution slot is released from WORK-048: the WORK-048-CORE-001 authorization is superseded by this acceptance (status superseded, authorized false, scope and provenance preserved)."
+  - "W040 remains in-review/unaccepted with EVID-007 and EVID-008 open; WORK-049 and WORK-050 remain unauthorized candidates until their own activation decisions."
+resolved_by: null
