@@ -4,8 +4,8 @@ package: "persistent-architect"
 last_updated: "2026-09-03"
 repository:
   canonical: "github.com/pectoraux/ADCOS"
-  main_sha: 7bc31f2899307c56639887416d602b41b4c16f43
-  main_sha_semantics: "Exact W047 implementation merge mainline: PR #135 merged the accepted WORK-047 marketplace implementation (reviewed head 348154d063c0e0a12d5635cb2093c67a507a4064, acceptance DEC-0070) after the DEC-0069 ARCH-08 scope-correction governance merges; this governance transition (W047 acceptance, ACR-012 containment freeze, W048 activation) is cut from and recorded against this exact mainline."
+  main_sha: bd544dbce0aec345521d340f45ad4562567927cf
+  main_sha_semantics: "Exact post-PR-#137 governance mainline: PR #137 merged the already-reviewed governance transition carrying the W047 acceptance (DEC-0070), the ACR-012 containment freeze (DEC-0072), and the W048 activation (DEC-0073; head 704e68e, merge bd544db, 2026-09-03T03:49:46Z), and DEC-0074 / LEDGER-RECON-018 advance this recorded mainline and the WORK-048-CORE-001 authorization baseline to that exact governance commit, so the W048 implementation branch is cut from the mainline that carries the activation record."
 versions:
   architecture_version_reference: "1.0"
   architecture_version_authority: "spec/architecture.md ## Status (single declaration site)"
@@ -15,7 +15,7 @@ execution:
   mode: "implementing"
   active_work_item: WORK-048
   active_authorization: "WORK-048-CORE-001"
-  halted_reason: "W048 is active-authorized from the exact reconciled mainline 7bc31f2 with the containment authority frozen by DEC-0072/ACR-012; Z.ai may implement from this exact mainline."
+  halted_reason: "W048 is active-authorized from the exact reconciled post-PR-#137 governance mainline bd544db with the containment authority frozen by DEC-0072/ACR-012; Z.ai may implement from this exact mainline."
   next_required_decisions:
     - "Review the next authorized Work Item delivery against its exact W048 acceptance gate (ACR-012 containment invariants included) and persist the Architect verdict before downstream work."
 in_review:

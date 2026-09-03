@@ -2,17 +2,21 @@
 # Issued by DEC-0073 after W047 acceptance (DEC-0070) and the frozen
 # buyer-traffic containment authority (DEC-0072 / ACR-012).
 # The authorization is the ONLY durable authority to implement WORK-048.
-# Baseline: the exact W047 merge mainline (this governance transition's base).
+# Baseline: advanced to the exact post-PR-#137 governance mainline by the
+# DEC-0074 baseline-advancement-only reconciliation (the
+# DEC-0063/DEC-0066/DEC-0068 convention; original DEC-0073 issuance
+# baseline 7bc31f2, the W047 merge mainline).
 work_item: WORK-048
 status: active
 authorized: true
 type: implementation
 authorization_id: "WORK-048-CORE-001"
 authorization_decision: DEC-0073
-baseline_sha: 7bc31f2899307c56639887416d602b41b4c16f43
+baseline_sha: bd544dbce0aec345521d340f45ad4562567927cf
+baseline_reconciliation_decision: DEC-0074
 containment_authority_decision: DEC-0072
 containment_authority_acr: ACR-012
-review_basis: "DEC-0070 accepts WORK-047 on PR #135 exact reviewed head 348154d063c0e0a12d5635cb2093c67a507a4064, merged at 7bc31f2899307c56639887416d602b41b4c16f43, releasing the single active execution slot. DEC-0072 accepts ACR-012 (the first-class Buyer-Traffic Containment Boundary authority), resolving the DEC-0071 W048-CONTAINMENT-AUTHORITY gate. DEC-0073 issues WORK-048-CORE-001 with baseline 7bc31f2899307c56639887416d602b41b4c16f43, the exact current main. WORK-048 issue #92 is the next canonical commercial Work Item; its hard dependencies WORK-041, WORK-042, and WORK-051 (exactly the frozen spec/work-items.md declaration) are accepted-merged in the execution ledger. Per the DEC-0063/DEC-0066/DEC-0068 convention, a follow-up baseline-advancement-only reconciliation may align this baseline to the exact post-transition governance mainline once the governance PR carrying this authorization merges; the implementation branch must be cut from the mainline that carries this authorization record, with the W044-established governance-only branch-point offset convention applying in the interim."
+review_basis: "DEC-0073 activation (issuance baseline 7bc31f2899307c56639887416d602b41b4c16f43, the W047 merge mainline the governance transition was cut from) with the DEC-0074 / LEDGER-RECON-018 baseline reconciliation to the exact post-transition governance mainline bd544dbce0aec345521d340f45ad4562567927cf (the PR #137 governance merge that carries DEC-0070/DEC-0071/DEC-0072/DEC-0073); the W048 implementation branch is cut from the exact reconciled authorized baseline bd544db. DEC-0070 accepts WORK-047 on PR #135 exact reviewed head 348154d063c0e0a12d5635cb2093c67a507a4064, merged at 7bc31f2899307c56639887416d602b41b4c16f43, releasing the single active execution slot. DEC-0072 accepts ACR-012 (the first-class Buyer-Traffic Containment Boundary authority), resolving the DEC-0071 W048-CONTAINMENT-AUTHORITY gate. WORK-048 issue #92 is the next canonical commercial Work Item; its hard dependencies WORK-041, WORK-042, and WORK-051 (exactly the frozen spec/work-items.md declaration) are accepted-merged in the execution ledger. No W048 implementation delivery exists."
 dependencies:
   - WORK-041
   - WORK-042
