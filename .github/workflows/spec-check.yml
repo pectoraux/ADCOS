@@ -188,6 +188,9 @@ jobs:
       - name: Run marketplace discovery/proximity/path-selection tests
         run: python3 tools/marketplace_selftest.py
 
+      - name: Run provider sharing runtime/containment tests
+        run: python3 tools/sharing_selftest.py
+
       # Persistent Architect package: authorization provenance for pull
       # requests. Runs LAST on purpose: the frozen-surface batteries above
       # detect the origin/main ref to choose their strict context, and this
