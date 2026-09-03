@@ -12,11 +12,20 @@ question:
 
 Registry invariants (frozen, all enforced at construction):
 
-1. IMMUTABLE — the row mapping is a read-only proxy; profiles are
-   frozen dataclasses; the registry exposes no mutation surface.
-   A new registry version is a new registry instance (the
-   versioned auditable history of registry versions belongs to
-   the later history stage, not here).
+1. IMMUTABLE — the registry OBJECT is frozen at construction:
+   the row mapping is a read-only proxy; profiles are frozen
+   dataclasses; and the registry itself rejects every
+   post-construction state mutation — attribute assignment
+   (including private slots and ``__class__`` reassignment),
+   attribute deletion, and re-initialization all raise, and
+   ``__init__`` writes state through the base-object setter
+   ONLY (so the public ``__setattr__``/``__delattr__`` raise
+   unconditionally, the same guarantee class as the frozen
+   dataclasses the rows use; the deliberate
+   ``object.__setattr__`` escape hatch is outside the
+   contract).  A new registry version is a new registry
+   instance (the versioned auditable history of registry
+   versions belongs to the later history stage, not here).
 2. VERSIONED — every registry carries a ``registry_version``
    from the frozen ``major.minor`` grammar; rows are meaningful
    only within their registry version.
@@ -111,16 +120,31 @@ class PlatformCapabilityRegistry:
     :class:`PlatformProfile` rows.  Construction performs the
     full fail-closed duplicate discipline (identical duplicates
     collapse; conflicting duplicates raise) and then freezes the
-    row mapping — there is NO mutation surface afterwards.
+    REGISTRY OBJECT ITSELF — after construction there is no
+    mutation surface: ``__setattr__`` and ``__delattr__`` reject
+    every attribute mutation unconditionally (private slots,
+    new attributes, ``__class__`` reassignment), and
+    re-invoking ``__init__`` on a constructed instance raises
+    as well.  Construction is the only writer (it uses the
+    base-object setter, never the public assignment surface).
     """
 
-    __slots__ = ("_registry_version", "_profiles_by_id")
+    __slots__ = ("_frozen", "_profiles_by_id", "_registry_version")
 
     def __init__(
         self,
         registry_version: str,
         profiles: Iterable[PlatformProfile] = (),
     ) -> None:
+        if getattr(self, "_frozen", False):
+            # re-initialization of a constructed registry is a
+            # mutation of frozen state — rejected like every
+            # other post-construction write
+            raise AttributeError(
+                "PlatformCapabilityRegistry is frozen after "
+                "construction: re-initialization is rejected "
+                "(a new registry version is a new instance)"
+            )
         version = _require_registry_version(registry_version)
         rows = _require_profile_sequence(profiles)
         by_id: Dict[str, PlatformProfile] = {}
@@ -139,8 +163,34 @@ class PlatformCapabilityRegistry:
                 # canonical content and digest are unchanged)
                 continue
             by_id[profile.identity.platform_id] = profile
-        self._registry_version = version
-        self._profiles_by_id = MappingProxyType(by_id)
+        # The freeze itself: construction is the ONLY writer, and
+        # it writes through the base-object setter exclusively —
+        # the public __setattr__/__delattr__ below raise
+        # unconditionally, so from here on no ordinary attribute
+        # operation can touch this state.  The frozen flag is
+        # written LAST (it is what makes __init__ re-invocation
+        # fail closed as well).
+        object.__setattr__(self, "_registry_version", version)
+        object.__setattr__(self, "_profiles_by_id", MappingProxyType(by_id))
+        object.__setattr__(self, "_frozen", True)
+
+    def __setattr__(self, name: str, value: object) -> None:
+        # Unconditional: there is no post-construction mutation
+        # surface on the registry object itself (the frozen
+        # invariant — enforced, not merely documented).
+        raise AttributeError(
+            "PlatformCapabilityRegistry is frozen after "
+            "construction: attribute assignment %r is rejected "
+            "(immutable registry; a new registry version is a "
+            "new instance)" % (name,)
+        )
+
+    def __delattr__(self, name: str) -> None:
+        raise AttributeError(
+            "PlatformCapabilityRegistry is frozen after "
+            "construction: attribute deletion %r is rejected "
+            "(immutable registry)" % (name,)
+        )
 
     @property
     def registry_version(self) -> str:

@@ -31,6 +31,8 @@ failure inputs produce byte-identical failures.
 
 from __future__ import annotations
 
+from typing import Tuple
+
 
 class PlatformCapabilityReasonCode:
     """The frozen platform capability registry reason vocabulary."""
@@ -72,18 +74,56 @@ class PlatformCapabilityReasonCode:
     #: fail-closed default for unregistered platforms)
     UNKNOWN_PLATFORM = "platformcaps-unknown-platform"
 
+    @classmethod
+    def values(cls) -> Tuple[str, ...]:
+        """The frozen reason vocabulary, explicitly enumerated
+        (the only reasons a PlatformCapabilityError may carry)."""
+        return (
+            cls.INVALID_INPUT,
+            cls.PROFILE_INVALID,
+            cls.ROLE_INVALID,
+            cls.CAPABILITY_INVALID,
+            cls.MECHANISM_INVALID,
+            cls.SHARING_MODE_INVALID,
+            cls.RESTRICTION_INVALID,
+            cls.PROPERTY_INVALID,
+            cls.VERSION_INVALID,
+            cls.SCHEMA_INVALID,
+            cls.EVIDENCE_INVALID,
+            cls.DUPLICATE_CONFLICT,
+            cls.UNKNOWN_PLATFORM,
+        )
+
+
+#: the frozen membership set used to enforce the typed-reason
+#: contract at construction time (fail closed)
+_REASON_CODES = frozenset(PlatformCapabilityReasonCode.values())
+
 
 class PlatformCapabilityError(Exception):
     """The typed platform capability registry exception.
 
-    ``reason`` is always a :class:`PlatformCapabilityReasonCode`
-    member.  The message is deterministic text so identical
+    ``reason`` must be a member of the frozen
+    :class:`PlatformCapabilityReasonCode` vocabulary: the
+    constructor REJECTS any reason outside it (an arbitrary
+    string, a non-string, or an empty reason all fail at
+    construction — no ad-hoc reason can be carried, fail closed).
+    The vocabulary is a frozen string-constant class, so its
+    constants are the frozen value set and membership is by
+    value.  The message is deterministic text so identical
     failure inputs produce byte-identical failures.
     """
 
     def __init__(self, reason: str, message: str) -> None:
         if not isinstance(reason, str) or not reason:
             raise ValueError("platformcaps errors require a reason code")
+        if reason not in _REASON_CODES:
+            raise ValueError(
+                "platformcaps error reason %r is outside the frozen "
+                "PlatformCapabilityReasonCode vocabulary (typed "
+                "reasons only; fail closed — no ad-hoc reason "
+                "strings)" % (reason,)
+            )
         if not isinstance(message, str) or not message:
             raise ValueError("platformcaps errors require a message")
         self.reason = reason
