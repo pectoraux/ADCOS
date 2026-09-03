@@ -50,7 +50,9 @@ from .evidence import (
 )
 from .proximity import (
     DEFAULT_PRECISION_LEVEL,
+    PRECISION_LEVELS,
     LocationBound,
+    cell_size_m,
     distance_bound_m,
 )
 
@@ -636,7 +638,13 @@ class DiscoveryQuery:
     :func:`~marketplace.proximity.bind_query_location`) or ``None``
     (no proximity dimension).  ``location_precision_level``
     records the precision the product rule mandated for the query
-    (frozen vocabulary; audited against the bound's own level).
+    -- the query's precision POLICY.  It must be a member of the
+    frozen precision vocabulary, and the carried bound may never
+    be FINER than the declared policy (a coarse policy with a
+    fine-grained bound is a fail-closed input: the query would
+    disclose more precision than the product rule allows).  A
+    bound COARSER than the policy is honest (it discloses less).
+    The vocabulary check applies even when no location is carried.
     ``payment_reference`` is the opaque payment-authorization
     citation (W045 prerequisite DATA).  ``device_id`` optionally
     scopes the eligibility device dimension.
@@ -654,6 +662,17 @@ class DiscoveryQuery:
     def __post_init__(self) -> None:
         _require_text(self.buyer_id, "buyer_id")
         _require_text(self.jurisdiction, "jurisdiction")
+        # the declared query precision policy is frozen vocabulary
+        # (checked with AND without a carried location)
+        if self.location_precision_level not in PRECISION_LEVELS:
+            raise MarketplaceError(
+                MarketplaceReasonCode.PRECISION_UNKNOWN,
+                "location_precision_level %r is not one of the frozen "
+                "vocabulary %s" % (
+                    self.location_precision_level,
+                    [level for level in sorted(PRECISION_LEVELS)],
+                ),
+            )
         if not isinstance(self.max_distance_m, int) or isinstance(
             self.max_distance_m, bool
         ) or self.max_distance_m < 0:
@@ -672,6 +691,23 @@ class DiscoveryQuery:
                     MarketplaceReasonCode.INVALID_INPUT,
                     "query location must carry consumer-query-bounded "
                     "provenance",
+                )
+            # the carried bound may never be finer than the declared
+            # query policy (fail closed: the product rule's precision
+            # ceiling is enforced, not advisory)
+            if (
+                cell_size_m(self.location.precision_level)
+                < cell_size_m(self.location_precision_level)
+            ):
+                raise MarketplaceError(
+                    MarketplaceReasonCode.QUERY_LOCATION_INVALID,
+                    "query location bound precision %r is finer than "
+                    "the declared query policy %r (the bound must be "
+                    "at least as coarse as the policy)"
+                    % (
+                        self.location.precision_level,
+                        self.location_precision_level,
+                    ),
                 )
         if not isinstance(self.constraints, UserConstraints):
             raise MarketplaceError(

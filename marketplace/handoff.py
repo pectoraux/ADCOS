@@ -17,7 +17,10 @@ reports ``ACTIVE`` -- and even then the recorded fact is a CITATION
 of the machinery's state, never a marketplace-owned connectivity
 claim.  The marketplace never constructs paths, never touches
 routing/session/transport state, and never calls any private
-machinery.
+machinery.  A successful handoff also advances the proposal's
+lifecycle immutably: the returned outcome carries the advanced
+proposal record (status ``handed-off``), and the ORIGINAL proposal
+record stays untouched (no mutation, no second journal).
 
 **Reservation/lease coordination** (:func:`coordinate_reservation`,
 :func:`record_path_activation`): the canonical WORK-051
@@ -32,6 +35,20 @@ idempotent no-op -- the core's own dedup).  The marketplace keeps
 NO journal of its own (no second commercial authority), and a
 successful reservation NEVER implies physical connectivity: the
 coordination record cites commercial state only.
+
+**PATH_ACTIVE requires a PROVEN W041 ACTIVE state**
+(:func:`record_path_activation`): the commercial path-activation
+record is only made against a genuine :class:`HandoffOutcome`
+whose cited machinery state is ``ACTIVE`` AND whose exact
+``network_path_id`` the W041 machinery's own PUBLIC reads prove is
+CURRENTLY ``ACTIVE`` for the exact logical session
+(``manager.path(...).state`` and ``manager.active_path_id(...)``).
+A reference that merely exists in the W051 ``ReferenceIndex`` is
+NOT sufficient: W041 owns connectivity truth, and commercial
+``PATH_ACTIVE`` is only a citation of W041's ``ACTIVE`` state.
+Every unproven case fails closed with the typed
+``PATH_ACTIVE_UNPROVEN`` reason and records NOTHING on the
+canonical journal.
 """
 
 from __future__ import annotations
@@ -45,7 +62,7 @@ from protocol.canonicalization import canonical_json_bytes
 from commercial.errors import CommercialError
 from commercial.lifecycle import CommercialCore
 from networkpath.errors import NetworkPathError
-from networkpath.lifecycle import NetworkPathManager
+from networkpath.lifecycle import NetworkPathManager, NetworkPathState
 
 from .errors import MarketplaceError, MarketplaceReasonCode
 from .index import MarketplaceIndex
@@ -185,10 +202,18 @@ class HandoffOutcome:
 
     ``network_path_state`` is the machinery's OWN state, cited as
     evidence (the marketplace never derives it).  The outcome
-    carries the full attempt chain for audit.  When every fallback
-    was rejected, :func:`handoff_to_networkpath` raises the typed
+    carries the full attempt chain for audit, AND the ADVANCED
+    proposal record (``advanced_proposal``: the immutable
+    ``handed-off`` transition of the proposal this outcome hands
+    off -- the handoff composition is the only status-advancing
+    seam, and it advances by RETURNING a new record, never by
+    mutating the original).  When every fallback was rejected,
+    :func:`handoff_to_networkpath` raises the typed
     ``HANDOFF_REJECTED`` error (fail closed -- a rejected handoff
-    is never a silent success)."""
+    is never a silent success); the caller then composes the frozen
+    ``rejected`` transition through the same immutable
+    ``with_status`` seam if it needs the record.
+    """
 
     proposal_id: str
     session_id: str
@@ -196,6 +221,31 @@ class HandoffOutcome:
     network_path_id: str
     network_path_state: str
     attempts: Tuple[HandoffAttempt, ...]
+    advanced_proposal: SelectionProposal
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.advanced_proposal, SelectionProposal):
+            raise MarketplaceError(
+                MarketplaceReasonCode.INVALID_INPUT,
+                "the handoff outcome must carry the advanced "
+                "SelectionProposal record",
+            )
+        if self.advanced_proposal.status != "handed-off":
+            raise MarketplaceError(
+                MarketplaceReasonCode.INVALID_INPUT,
+                "the outcome's advanced proposal must carry status "
+                "'handed-off' (the accepted-handoff transition)",
+            )
+        if self.advanced_proposal.proposal_id != self.proposal_id:
+            raise MarketplaceError(
+                MarketplaceReasonCode.INVALID_INPUT,
+                "the advanced proposal identity %r does not match the "
+                "outcome's proposal %r"
+                % (
+                    self.advanced_proposal.proposal_id,
+                    self.proposal_id,
+                ),
+            )
 
     def content(self) -> Dict[str, Any]:
         return {
@@ -206,6 +256,7 @@ class HandoffOutcome:
             "network_path_id": self.network_path_id,
             "network_path_state": self.network_path_state,
             "attempts": [attempt.to_dict() for attempt in self.attempts],
+            "proposal_status": self.advanced_proposal.status,
         }
 
     def digest(self) -> str:
@@ -268,6 +319,12 @@ def handoff_to_networkpath(
     accepted candidate; the outcome records the machinery's state
     verbatim.  Rejections are recorded per attempt with the W041
     reason; exhausting the chain raises (fail closed).
+
+    The outcome also RETURNS the advanced immutable proposal
+    record (status ``handed-off``): the handoff composition is the
+    proposal lifecycle's only status-advancing seam, and it
+    advances by returning a NEW record -- the caller's original
+    proposal object is never mutated.
     """
     if not isinstance(manager, NetworkPathManager):
         raise MarketplaceError(
@@ -322,6 +379,7 @@ def handoff_to_networkpath(
             network_path_id=path_id,
             network_path_state=path.state,
             attempts=attempts,
+            advanced_proposal=proposal.with_status("handed-off"),
         )
     raise MarketplaceError(
         MarketplaceReasonCode.HANDOFF_REJECTED,
@@ -523,30 +581,128 @@ def record_path_activation(
     *,
     coordination: ReservationCoordination,
     core: CommercialCore,
+    manager: NetworkPathManager,
+    outcome: HandoffOutcome,
     session_id: str,
-    network_path_id: str,
     actor: str,
 ) -> ReservationCoordination:
     """Record the commercial session authorization and path
-    activation against the NetworkPath outcome.
+    activation against a PROVEN W041 ACTIVE state.
 
+    The seam consumes a genuine :class:`HandoffOutcome` (the result
+    of :func:`handoff_to_networkpath`) and the W041 machinery
+    itself, and PROVES -- before any commercial command is issued --
+    that the exact referenced path is currently ``ACTIVE`` for the
+    exact logical session, through the machinery's own PUBLIC
+    reads only:
+
+    - the outcome's cited ``network_path_state`` is ``ACTIVE``;
+    - ``manager.path(network_path_id).state`` is CURRENTLY
+      ``ACTIVE`` (a stale or hand-crafted outcome cannot survive
+      this read);
+    - ``manager.active_path_id(session_id)`` is exactly the
+      outcome's path (the session's active path, per the
+      machinery);
+    - the outcome's session and proposal identities match the
+      session being recorded and the coordination's proposal.
+
+    A W051 ``ReferenceIndex`` entry alone proves only that a
+    network-path-family reference EXISTS -- it can never prove the
+    current state -- so it is deliberately NOT the proof here.
+    Every unproven case fails closed with the typed
+    ``PATH_ACTIVE_UNPROVEN`` reason and records NOTHING on the
+    canonical journal.  Only after the proof does the seam drive
     ``authorize_session`` (citing the REAL logical session id) and
     ``activate_path`` (citing the REAL NetworkPath id the handoff
     accepted) on the canonical core, with deterministic command
-    ids.  The core's ReferenceIndex must already resolve both
+    ids.  The core's ReferenceIndex must still resolve both
     citations (the CALLER builds that index from the session
     authority's and the NetworkPath machinery's public reads --
     exactly the W051 injection contract).  The returned record
     cites the core's resulting commercial state; it is still NOT a
     connectivity claim (the machinery's state is the connectivity
     truth, and the commercial record is its canonical commercial
-    reflection)."""
+    reflection).
+    """
     if not isinstance(core, CommercialCore):
         raise MarketplaceError(
             MarketplaceReasonCode.INVALID_INPUT,
             "coordination requires a CommercialCore (the accepted W051 "
             "authority)",
         )
+    if not isinstance(manager, NetworkPathManager):
+        raise MarketplaceError(
+            MarketplaceReasonCode.INVALID_INPUT,
+            "the path-activation record requires a NetworkPathManager "
+            "(the accepted W041 machinery whose ACTIVE state is proven)",
+        )
+    if not isinstance(outcome, HandoffOutcome):
+        raise MarketplaceError(
+            MarketplaceReasonCode.INVALID_INPUT,
+            "the path-activation record requires a genuine HandoffOutcome "
+            "(the NetworkPath handoff result being recorded)",
+        )
+    if not isinstance(session_id, str) or not session_id:
+        raise MarketplaceError(
+            MarketplaceReasonCode.INVALID_INPUT,
+            "the path-activation record requires the real logical session "
+            "id (the session authority's own identity, cited as DATA)",
+        )
+    # ------------------------------------------------------------------
+    # The W041 ACTIVE proof (fail closed; W041 owns connectivity
+    # truth, commercial PATH_ACTIVE only cites a PROVEN ACTIVE state)
+    # ------------------------------------------------------------------
+    if outcome.session_id != session_id:
+        raise MarketplaceError(
+            MarketplaceReasonCode.PATH_ACTIVE_UNPROVEN,
+            "the outcome's session %r is not the session being recorded "
+            "%r (the W041 ACTIVE proof must be for the EXACT session)"
+            % (outcome.session_id, session_id),
+        )
+    if outcome.proposal_id != coordination.proposal_id:
+        raise MarketplaceError(
+            MarketplaceReasonCode.PATH_ACTIVE_UNPROVEN,
+            "the outcome belongs to proposal %r, not this coordination's "
+            "proposal %r"
+            % (outcome.proposal_id, coordination.proposal_id),
+        )
+    if outcome.network_path_state != NetworkPathState.ACTIVE:
+        raise MarketplaceError(
+            MarketplaceReasonCode.PATH_ACTIVE_UNPROVEN,
+            "the outcome cites machinery state %r; commercial PATH_ACTIVE "
+            "may only cite the machinery's ACTIVE state"
+            % outcome.network_path_state,
+        )
+    try:
+        path = manager.path(outcome.network_path_id)
+    except NetworkPathError as error:
+        raise MarketplaceError(
+            MarketplaceReasonCode.PATH_ACTIVE_UNPROVEN,
+            "the machinery does not observe path %r (%s: %s)"
+            % (
+                outcome.network_path_id[:23],
+                error.reason,
+                error.detail,
+            ),
+        ) from error
+    if path.state != NetworkPathState.ACTIVE:
+        raise MarketplaceError(
+            MarketplaceReasonCode.PATH_ACTIVE_UNPROVEN,
+            "the machinery's CURRENT public state for the path is %r, "
+            "not ACTIVE (a reference that exists is not a proof)"
+            % path.state,
+        )
+    active_path = manager.active_path_id(session_id)
+    if active_path != outcome.network_path_id:
+        raise MarketplaceError(
+            MarketplaceReasonCode.PATH_ACTIVE_UNPROVEN,
+            "the machinery's active path for session %r is %r, not the "
+            "outcome's path %r"
+            % (session_id, active_path, outcome.network_path_id[:23]),
+        )
+    # ------------------------------------------------------------------
+    # The canonical W051 chain (the proof held; cite the REAL ids)
+    # ------------------------------------------------------------------
     step_authorize = derive_coordination_command_id(
         coordination.proposal_id, "authorize-session"
     )
@@ -566,7 +722,7 @@ def record_path_activation(
             transaction_id=coordination.transaction_id,
             actor=actor,
             source=COORDINATION_SOURCE,
-            path_ref=network_path_id,
+            path_ref=outcome.network_path_id,
         )
     except CommercialError as error:
         raise MarketplaceError(

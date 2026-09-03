@@ -19,12 +19,15 @@ PARTIAL, EVID-008 NOT-TESTABLE) remain open and W040-owned.
 
 A cohesive `marketplace/` package (the W047 surface defined by issue
 #91 and `docs/WORK-047-handoff.md`), plus its dedicated deterministic
-verification battery, evidence documentation, and additive CI wiring:
+verification battery, evidence documentation, and additive CI wiring.
+The delivery now includes the CORRECTION ROUND for the Architect
+review of head `fdd7691` (REQUEST CHANGES, PR #135 comment
+`5518682595` — §14):
 
 ```text
 marketplace/                     (new package, 11 modules, 65 frozen exports)
     __init__.py                  public API (frozen __all__)
-    errors.py                    typed error model + 15-code reason vocabulary
+    errors.py                    typed error model + 16-code reason vocabulary
     proximity.py                 privacy-bounded location: frozen precision
                                  vocabulary, quantized cells, LocationBound,
                                  conservative bounded distance intervals
@@ -34,7 +37,8 @@ marketplace/                     (new package, 11 modules, 65 frozen exports)
                                  fail-closed future instants)
     model.py                     MarketplaceOffer (21 distinct evidence
                                  members), evidence views, DiscoveryQuery
-                                 (bounded location only), DiscoveredCandidate
+                                 (bounded location only, enforced precision
+                                 policy), DiscoveredCandidate
     index.py                     MarketplaceIndex (immutable, deterministic,
                                  version supersession, sorted iteration)
     eligibility.py               EligibilityView (caller-built W045 snapshot)
@@ -42,16 +46,20 @@ marketplace/                     (new package, 11 modules, 65 frozen exports)
                                  pure evaluate_policy boundary
     ranking.py                   RankingPolicy + deterministic integer
                                  ranking (price/quality/latency/availability/
-                                 proximity + frozen tie-break total order)
+                                 proximity + frozen tie-break total order) +
+                                 fail-closed distance filtering
     selection.py                 SelectionProposal (content-derived id,
-                                 ranked fallback chain, PROPOSED status only)
+                                 ranked fallback chain, frozen status
+                                 lifecycle advanced immutably by the handoff)
     handoff.py                   NetworkPath handoff (drives the W041 public
-                                 chain) + reservation/lease coordination
-                                 (drives the W051 canonical chain) + pure
+                                 chain, returns the advanced proposal) +
+                                 reservation/lease coordination (drives the
+                                 W051 canonical chain; PATH_ACTIVE only
+                                 against a PROVEN W041 ACTIVE state) + pure
                                  integer instant arithmetic
     lifecycle.py                 MarketplaceService + DiscoveryResult (the
                                  public production surface)
-tools/marketplace_selftest.py    the W047 battery (38 cases)
+tools/marketplace_selftest.py    the W047 battery (44 cases)
 docs/WORK-047-evidence.md        this document
 .github/workflows/spec-check.yml additive battery step (CI wiring)
 ```
@@ -60,13 +68,14 @@ The completed chain (the delivery's completion standard):
 
 ```text
 eligible offers
-  → privacy-bounded proximity/evidence      (cases 3-6)
+  → privacy-bounded proximity/evidence      (cases 3-6, 39-40)
   → stale/expiry handling                    (cases 7-8, 11)
   → deterministic ranking                    (cases 15-19)
-  → deterministic candidate selection        (cases 20-22)
+  → deterministic candidate selection        (cases 20-22, 43)
   → canonical reservation/lease coordination (cases 27-29)
   → NetworkPath candidate handoff            (cases 23-26)
-  → NetworkPath validation/activation        (case 23, cited)
+  → NetworkPath validation/activation        (case 23, cited;
+                                               PATH_ACTIVE proven: 42)
 ```
 
 and W047 itself never becomes the authority for the final network
@@ -79,8 +88,8 @@ All commands run from the implementation branch
 
 | Command | Result |
 | --- | --- |
-| `python3 tools/marketplace_selftest.py` | **PASS 38/38** |
-| `python3 tools/marketplace_selftest.py` (second run) | **PASS 38/38, byte-identical output** |
+| `python3 tools/marketplace_selftest.py` | **PASS 44/44** |
+| `python3 tools/marketplace_selftest.py` (second run) | **PASS 44/44, byte-identical output** |
 | `python3 tools/marketplace_selftest.py --determinism-stream` (twice) | **byte-identical golden scenario stream** |
 | `PYTHONHASHSEED=0 / 1 / 7919 / <unset>` subprocess golden scenario | **byte-identical across all four seeds** (case 19) |
 | `python3 tools/spec_check.py` | 11/17 blocking — the inherited ARCH-02/ARCH-06 conditions (unchanged, pre-existing on main) **plus ARCH-08** (see §10) |
@@ -105,11 +114,17 @@ handoff_state=ACTIVE
 proposal_chain=["provider-1/eth-stable", "provider-1/wifi-fast", "provider-2/wifi-basic", "provider-3/usb-budget"]
 proposal_id=sha256:ee04d0980c5bdb908af0be92714c780f5439c7cd7fbd3dbeae44b789e950a4e2
 proposal_status=proposed
+proposal_status_after_handoff=handed-off
 reservation_commands=3
 reservation_expires=2026-06-01T01:16:00Z
 reservation_state=RESERVATION_HELD
 reservation_tx=sha256:8ad7fbccd08d1de305d8528db8bb0e88663af30fd61806648bb3b471063fb17a
 ```
+
+(The discovery, journal, and proposal digests are UNCHANGED from the
+reviewed head `fdd7691` — the correction round adds no new digested
+inputs to those records; the stream gains exactly one key, the
+handoff-advanced proposal status.)
 
 ## 3. Frozen vocabularies (case 01-02)
 
@@ -124,9 +139,11 @@ reservation_tx=sha256:8ad7fbccd08d1de305d8528db8bb0e88663af30fd61806648bb3b47106
   `advertised-only`; `observed-load` / `declared-only`), the proposal
   status vocabulary (`proposed` / `handed-off` / `rejected` — **no
   connectivity status exists**), the billing modes, the exclusion
-  reasons, the fail-closed composition reasons, and the 15-code
+  reasons, the fail-closed composition reasons, and the 16-code
   typed reason vocabulary (all `marketplace-` namespaced so composed
-  surfaces can never confuse them with W045/W051/W041 reasons).
+  surfaces can never confuse them with W045/W051/W041 reasons; the
+  correction round added exactly one code,
+  `marketplace-path-active-unproven`).
 
 ## 4. Privacy / proximity (cases 03-06)
 
@@ -134,28 +151,41 @@ reservation_tx=sha256:8ad7fbccd08d1de305d8528db8bb0e88663af30fd61806648bb3b47106
   `LocationBound` — `(cell_id, precision_level, provenance)` and
   nothing else; the bound's explicit precision level is part of the
   record and of its digest. No level can represent an exact position.
-- **K-anonymity by construction**: binding is a deterministic
-  many-to-one quantization — different exact coordinates inside one
-  cell bind to the byte-identical bound (case 03, including
-  southern/western hemispheres).
+- **Bounded spatial resolution (honestly stated)**: binding is a
+  deterministic many-to-one quantization — different exact
+  coordinates inside one cell bind to the byte-identical bound
+  (case 03, including southern/western hemispheres).  This bounds
+  the spatial RESOLUTION of every persisted representation; it is
+  NOT a population-count guarantee (no minimum-k threshold, no
+  census, no suppression rule exists in this family, and none is
+  claimed — case 44 scans the family and this document for any
+  such claim text).  A population-count privacy design would be a
+  separately authorized privacy authority.
 - **Exact coordinates never persist** (case 05, three independent
   proofs): a structural AST audit proving no marketplace record
   class even HAS a latitude/longitude member; behavioral scans
   proving the binding output, discovery results, and proposals never
   contain the exact query coordinates; and the serialized query
   carrying only the bound.
-- **Location is never more precise than required** (case 04): the
-  query's precision level is frozen vocabulary; serialized queries
-  carry no coordinates; every bound re-states its own precision.
+- **Location is never more precise than required** (cases 04 and 40):
+  the query's declared precision policy is frozen vocabulary (checked
+  with AND without a carried location), and the carried bound may
+  never be FINER than the declared policy — a coarse policy with a
+  fine-grained bound is a fail-closed input; a coarser bound is
+  honest.  Serialized queries carry no coordinates; every bound
+  re-states its own precision.
 - **Distance is evidence, not truth** (case 06): the distance between
   two bounds is a conservative BOUNDED interval computed in pure
   integer math (harmonization to the coarser cell only ever
   COARSENS; the equatorial meter basis overestimates east-west
   distance, keeping inclusion decisions fail-closed). Never an exact
   distance, never a reachability claim.
-- **Fail-closed proximity constraint** (case 13): a candidate is only
-  within a distance limit when its ENTIRE bounded interval is within
-  the limit.
+- **Fail-closed proximity constraint** (cases 13 and 39): a candidate
+  is only within a distance limit when its ENTIRE bounded interval
+  is within the limit; with an EXPLICIT distance limit and absent
+  coverage evidence the candidate is EXCLUDED (absent evidence is
+  never an implicit within-limit claim), while without an explicit
+  limit the dimension is simply unconstrained by the buyer.
 
 ## 5. Stale telemetry / evidence discipline (cases 07-09)
 
@@ -207,11 +237,18 @@ reservation_tx=sha256:8ad7fbccd08d1de305d8528db8bb0e88663af30fd61806648bb3b47106
 
 ## 7. Deterministic ranking / selection (cases 13-22)
 
-- **Filters before ranking** (case 13): user constraints
+- **Filters before ranking** (cases 13, 39): user constraints
   (currency/price/latency/throughput/sharing-mode/access-type/
-  metering) and the fail-closed distance bound exclude with frozen
-  reasons; **paid offers additionally require an authorization-
-  capable W044 payment declaration** (case 14) — DATA-level
+  metering) and the fail-closed distance bound (including the
+  fail-closed absent-coverage case) exclude with frozen reasons;
+  **paid offers additionally require the provider's CURRENT W044
+  payment declaration to cover the offer's EXACT terms** (cases 14
+  and 41) — the CURRENT declaration is deterministically the highest
+  declared `schema_version` (caller-order independent; conflicting
+  declarations at the current version fail closed), and it must
+  support authorization AND declare the offer's currency AND bound
+  the offer's exponent and minor-unit amount (the same three DATA
+  comparisons the W044 authority itself applies) — DATA-level
   composition only, no vendor semantics, no payment execution; free
   offers need none.
 - **Deterministic ranking** (cases 15-18): pure integer components
@@ -228,16 +265,23 @@ reservation_tx=sha256:8ad7fbccd08d1de305d8528db8bb0e88663af30fd61806648bb3b47106
   subprocesses all reproduce the byte-identical full-chain golden
   scenario stream (discovery, proposal, reservation, handoff,
   activation, journal digests).
-- **Selection is a proposal** (cases 20-22): content-derived
+- **Selection is a proposal** (cases 20-22, 43): content-derived
   proposal ids (query digest + ranked chain + mode + count + instant
   anchor), the deterministic fallback chain is exactly the ranking
   order minus the selected prefix, the reservation deadline anchors
   on the proposal's own evidence instant (replay determinism), and
   the proposal record carries NO connectivity member — the status
   vocabulary has no "connected"/"active" and rejects attempts to
-  create one.
+  create one.  The frozen status lifecycle actually ADVANCES through
+  the handoff composition (case 43): a successful handoff RETURNS
+  the immutable `handed-off` record inside its `HandoffOutcome`
+  (the original record untouched, the outcome's canonical content
+  recording the advanced status), and the fail-closed
+  full-rejection raise composes the immutable `rejected` record
+  through the same `with_status` seam — no mutation, no second
+  journal.
 
-## 8. NetworkPath composition (cases 23-26)
+## 8. NetworkPath composition (cases 23-26, 43)
 
 - **The handoff drives only the machinery's public chain** (case
   23): `manager.discover()` → public path resolution →
@@ -245,7 +289,8 @@ reservation_tx=sha256:8ad7fbccd08d1de305d8528db8bb0e88663af30fd61806648bb3b47106
   `manager.probe()` → `manager.activate()`. Every state transition
   is journaled BY the W041 machinery (8 events in the golden run);
   the outcome CITES the machinery's own ACTIVE state verbatim; the
-  machinery's active-path table agrees.
+  machinery's active-path table agrees.  The outcome also RETURNS
+  the immutably advanced proposal (status `handed-off`; case 43).
 - **Deterministic fallback** (case 24): with the primary candidate's
   interface down, the machinery's own `validation-rejected` reason
   is recorded and the handoff falls back to the next ranked
@@ -259,7 +304,7 @@ reservation_tx=sha256:8ad7fbccd08d1de305d8528db8bb0e88663af30fd61806648bb3b47106
   paths, 0 journaled events, no active path) — discovery does not
   imply connectivity.
 
-## 9. Reservation/lease coordination + replay (cases 27-30)
+## 9. Reservation/lease coordination + replay (cases 27-30, 42)
 
 - **The canonical W051 chain only** (cases 27-29):
   `submit_intent` → `select_offer` → `hold_reservation` (3 journal
@@ -270,6 +315,22 @@ reservation_tx=sha256:8ad7fbccd08d1de305d8528db8bb0e88663af30fd61806648bb3b47106
   (session id + machinery path ids from PUBLIC reads) — PATH_ACTIVE
   citing the machinery's own NetworkPath id. `verify_integrity`
   holds throughout.
+- **PATH_ACTIVE only against a PROVEN W041 ACTIVE state** (case 42,
+  the correction round's blocker-1 fix): the path-activation seam
+  consumes a genuine `HandoffOutcome` AND the W041 machinery itself,
+  and proves — before any commercial command — that the outcome's
+  cited state is `ACTIVE`, that the machinery's CURRENT public read
+  `manager.path(...).state` is `ACTIVE`, and that
+  `manager.active_path_id(session)` is exactly the outcome's path.
+  A W051 ReferenceIndex entry proves only that a reference EXISTS
+  (family membership), never the current state, so it is
+  deliberately not the proof.  Negative tests cover every
+  non-ACTIVE machinery state (DISCOVERED, VALIDATED, BOUND,
+  RETIRED), a non-ACTIVE cited outcome, session mismatches, and
+  proposal mismatches — every one fails closed with the typed
+  `marketplace-path-active-unproven` reason and records NOTHING on
+  the canonical journal; the genuine ACTIVE proof records
+  PATH_ACTIVE (case 29 control).
 - **No second commercial authority** (cases 27-28, 31): the
   marketplace holds NO journal of its own; the coordination record
   cites commercial state only — it has no path, no session, and no
@@ -376,9 +437,12 @@ no-delta ARCH-08, plus this finding).
 
 ## 13. Provenance of this delivery
 
-- Branch: `work-047-marketplace-discovery` (single implementation
-  commit; the exact delivery SHA is recorded in the PR and below in
-  the PR body — this document cannot embed its own commit hash).
+- Branch: `work-047-marketplace-discovery` (the correction round is
+  a second commit on the same branch; the exact delivery SHA is
+  recorded in the PR and in the PR body — this document cannot
+  embed its own commit hash).  The reviewed first-round head was
+  `fdd7691f90581e9fd7fdd2940966d3ba47dafa15` (PR #135, Architect
+  review comment `5518682595`: REQUEST CHANGES).
 - Base: main `c2e1b3c` (authorization inherited byte-identically
   from the reconciled baseline `825f48f`; the baseline→main delta
   is governance-only).
@@ -388,3 +452,30 @@ no-delta ARCH-08, plus this finding).
   W040 untouched.
 - Acceptance is NOT claimed: the Architect reviews the exact
   delivery SHA against the WORK-047-CORE-001 gate.
+
+## 14. Correction round — Architect review of `fdd7691` (PR #135)
+
+The Architect's REQUEST CHANGES verdict on the first-round head
+listed six implementation blockers plus the ARCH-08 governance
+blocker.  All six implementation blockers are corrected on the new
+head; ARCH-08 remains a separate Architect governance action (the
+implementation PR must not modify `spec/architect/`):
+
+| # | Blocker (review wording, abridged) | Correction | Proof |
+| --- | --- | --- | --- |
+| 1 | W051 PATH_ACTIVE can be recorded without proving W041 ACTIVE | `record_path_activation` now consumes a genuine `HandoffOutcome` AND the W041 machinery, proving the cited state is ACTIVE, `manager.path(...).state` is CURRENTLY ACTIVE, and `manager.active_path_id(session)` is exactly that path, before ANY commercial command; a ReferenceIndex entry alone is deliberately not the proof | case 42 (every non-ACTIVE machinery state, non-ACTIVE cited outcome, session/proposal mismatches: fail closed `marketplace-path-active-unproven`, NOTHING recorded; genuine proof: case 29 control) |
+| 2 | W044 paid-offer gating incomplete and version-order dependent | the gate now selects the CURRENT declaration (highest `schema_version`, caller-order independent, conflicting versions fail closed) and validates the offer's EXACT terms — currency declared, exponent within `max_exponent`, amount within `max_amount` (the W044 authority's own three DATA comparisons) | case 41 (currency/exponent/amount denials with explicit details, both version orderings identical, current-version-rules-over-stale, conflicts fail closed) + case 14 |
+| 3 | Explicit proximity limits do not fail closed when coverage evidence is absent | `distance_violation` now excludes the candidate when an explicit `max_distance_m` is set and the offer declares no coverage evidence (frozen `constraint-distance` reason; absent evidence is never an implicit within-limit claim) | case 39 (excluded under the limit, presented without an explicit limit, deterministic) |
+| 4 | `location_precision_level` declared but not enforced | `DiscoveryQuery.__post_init__` validates the frozen vocabulary (with AND without a carried location) and fails closed when the bound is FINER than the declared policy; a coarser bound is honest | case 40 (unknown vocabulary, finer-than-policy, no-location case, coarser control, canonical case) |
+| 5 | The claimed population-count privacy is not implemented | every such claim is REMOVED from the family, the battery, and this document; the honest statement is bounded spatial resolution only (no minimum-k threshold, census, or suppression rule exists and none is claimed); no new privacy authority invented | case 44 (phrase scan over the family + this document enforces the absence of the claim text; the honest statement asserted present) |
+| 6 | Proposal lifecycle documented but never advanced | `handoff_to_networkpath` now RETURNS the immutably advanced proposal (status `handed-off`) inside the `HandoffOutcome` (validated: genuine record, matching identity, advanced status; original never mutated); the fail-closed full-rejection raise composes the frozen `rejected` record through the same immutable `with_status` seam — no second journal | case 43 (advanced record returned and validated; original immutable; outcome content records the status; all-down world raises HANDOFF_REJECTED; `rejected` composed immutably) |
+| 7 | ARCH-08 authorization-scope governance | NOT fixed here — governance-lane: the implementation PR must not modify `spec/architect/`; the finding and its resolution path remain §10.1 | §10.1 + battery cases 37/38 (spec intact, delta confined) |
+
+Public-surface impact of the correction: one typed reason code
+added (`marketplace-path-active-unproven`, namespaced); the
+`HandoffOutcome` record gained the `advanced_proposal` member and a
+`proposal_status` content member; `record_path_activation`'s
+signature now takes the machinery and the genuine outcome instead
+of a raw path id string.  The `marketplace` package `__all__`
+remains the same 65 frozen exports.  All first-round digests are
+preserved (§2).

@@ -26,9 +26,15 @@ Frozen boundary:
   discovery is a pure read over the index + the caller-built
   snapshots;
 - payment capability composition (W044): a PAID listing is only
-  presented when the provider's payment capability declaration
-  exists and supports authorization -- DATA-level composition
-  through the accepted public record type, never vendor semantics
+  presented when the provider's CURRENT payment capability
+  declaration (deterministically the HIGHEST declared
+  ``schema_version``, independent of caller ordering) supports
+  authorization AND the declaration's explicit limits cover the
+  offer's EXACT commercial terms -- the currency is declared, the
+  exponent is within ``max_exponent``, and the minor-unit amount
+  is within ``max_amount`` (the same three DATA comparisons the
+  W044 authority itself applies).  DATA-level composition through
+  the accepted public record type only, never vendor semantics
   and never payment execution.
 """
 
@@ -36,7 +42,7 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass
-from typing import Any, Dict, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 from agent.clock import AgentClock
 
@@ -170,22 +176,102 @@ class MarketplaceService:
     def policy(self) -> RankingPolicy:
         return self._policy
 
-    def _payment_supports_authorization(
+    def _current_payment_capabilities(
         self, provider_id: str
-    ) -> Tuple[bool, str]:
-        """W044 composition: does the provider declare payment
-        authorization capability?  (DATA-level: the accepted public
-        declaration surface only.)"""
-        declaration = None
-        for candidate in self._payment_capabilities:
-            if candidate.provider_id == provider_id:
-                declaration = candidate
-                break
+    ) -> Optional[ProviderCapabilities]:
+        """The provider's CURRENT W044 declaration: the entry with
+        the HIGHEST declared ``schema_version`` (deterministic and
+        independent of the caller's tuple ordering).  The W044
+        identity rule (one version = one content) is enforced as a
+        fail-closed DATA gate: conflicting declarations at the
+        current version yield ``None`` with a conflict marker so the
+        provider's PAID offers are excluded, never silently
+        presented."""
+        versions = tuple(
+            declaration
+            for declaration in self._payment_capabilities
+            if declaration.provider_id == provider_id
+        )
+        if not versions:
+            return None
+        current_version = max(
+            declaration.schema_version for declaration in versions
+        )
+        current = tuple(
+            declaration
+            for declaration in versions
+            if declaration.schema_version == current_version
+        )
+        if len({declaration.digest() for declaration in current}) > 1:
+            return None  # conflicting current declaration: fail closed
+        return current[0]
+
+    def _payment_gate(
+        self, offer: Any
+    ) -> Tuple[bool, str, str]:
+        """W044 composition: can the provider's CURRENT declaration
+        authorize THIS offer's exact commercial terms?  (DATA-level:
+        the accepted public declaration surface only; the three
+        comparisons mirror the W044 authority's own capability
+        gate -- currency membership, exponent ceiling, amount
+        ceiling in minor units.)"""
+        declaration = self._current_payment_capabilities(
+            offer.provider_id
+        )
         if declaration is None:
-            return False, "payment-capability-undeclared"
+            if any(
+                candidate.provider_id == offer.provider_id
+                for candidate in self._payment_capabilities
+            ):
+                return (
+                    False,
+                    "payment-capability-unsupported",
+                    "provider %s declares conflicting capability "
+                    "versions (fail closed: no current declaration)"
+                    % offer.provider_id,
+                )
+            return (
+                False,
+                "payment-capability-undeclared",
+                "provider %s declares no payment capability at all"
+                % offer.provider_id,
+            )
         if not declaration.supports_authorization:
-            return False, "payment-capability-unsupported"
-        return True, ""
+            return (
+                False,
+                "payment-capability-unsupported",
+                "the current declaration (v%d) does not support "
+                "authorization"
+                % declaration.schema_version,
+            )
+        if offer.currency not in declaration.currencies:
+            return (
+                False,
+                "payment-capability-unsupported",
+                "the current declaration (v%d) supports currencies %s; "
+                "the offer is priced in %s"
+                % (
+                    declaration.schema_version,
+                    ",".join(sorted(declaration.currencies)),
+                    offer.currency,
+                ),
+            )
+        if offer.price_exponent > declaration.max_exponent:
+            return (
+                False,
+                "payment-capability-unsupported",
+                "offer exponent %d exceeds the declared maximum %d"
+                % (offer.price_exponent, declaration.max_exponent),
+            )
+        if offer.price_minor > declaration.max_amount:
+            return (
+                False,
+                "payment-capability-unsupported",
+                "offer amount %d minor units exceeds the declared "
+                "maximum %d"
+                % (offer.price_minor, declaration.max_amount),
+            )
+        return (True, "", "")
 
     def discover(self, *, query: DiscoveryQuery) -> DiscoveryResult:
         """Discover, filter, and rank the eligible candidates.
@@ -232,14 +318,11 @@ class MarketplaceService:
             if not reason:
                 reason, detail = distance_violation(candidate, query)
             if not reason and offer.requires_payment:
-                supported, payment_reason = self._payment_supports_authorization(
-                    offer.provider_id
+                supported, payment_reason, payment_detail = (
+                    self._payment_gate(offer)
                 )
                 if not supported:
-                    reason, detail = payment_reason, (
-                        "paid listing requires a payment capability "
-                        "declaration supporting authorization"
-                    )
+                    reason, detail = payment_reason, payment_detail
             screen: EligibilityScreen
             if not reason:
                 screen = screen_offer_eligibility(
@@ -358,18 +441,22 @@ class MarketplaceService:
         *,
         coordination: ReservationCoordination,
         core: Any,
+        manager: Any,
+        outcome: HandoffOutcome,
         session_id: str,
-        network_path_id: str,
         actor: str,
     ) -> ReservationCoordination:
         """Record the canonical commercial session authorization
-        and path activation against the handoff outcome (the
-        NetworkPath id cited, never owned)."""
+        and path activation against a PROVEN W041 ACTIVE state (the
+        handoff outcome and the machinery's own public reads prove
+        the exact path is currently ACTIVE for the exact session;
+        the NetworkPath id is cited, never owned)."""
         return record_path_activation(
             coordination=coordination,
             core=core,
+            manager=manager,
+            outcome=outcome,
             session_id=session_id,
-            network_path_id=network_path_id,
             actor=actor,
         )
 

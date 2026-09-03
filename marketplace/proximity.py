@@ -23,8 +23,16 @@ Frozen boundary (the W047 contract):
 Determinism: pure integer arithmetic over micro-degree integers
 (no floating point, no wall clock, no randomness).  Two exact
 coordinates inside one cell bind to the byte-identical bound
-(k-anonymity by construction), and identical inputs produce
-byte-identical canonical content.
+(deterministic many-to-one quantization), and identical inputs
+produce byte-identical canonical content.
+
+Privacy honesty: quantization bounds the spatial RESOLUTION of the
+persisted representation (a cell id at an explicit precision level,
+never exact coordinates).  It is deliberately NOT a population-count
+guarantee -- there is no minimum-k threshold, no population census,
+and no suppression rule in this family, and none is claimed.  A
+population-count privacy design would require a separately
+authorized privacy authority; this family does not invent one.
 """
 
 from __future__ import annotations
@@ -245,9 +253,11 @@ def bind_query_location(
     - coordinates are validated against the geodetic domain and
       rejected (fail closed) outside it.
 
-    Two exact positions inside one cell bind to the
-    byte-identical bound: the binding is many-to-one by
-    construction, which is the k-anonymity property.
+    Two exact positions inside one cell bind to the byte-identical
+    bound: the binding is many-to-one by construction, which bounds
+    the spatial resolution of everything downstream.  This is a
+    resolution bound only -- no population-count guarantee is
+    claimed or implied.
     """
     for label, value, low, high in (
         ("latitude_micro_deg", latitude_micro_deg, _LAT_MIN, _LAT_MAX),

@@ -3,20 +3,28 @@
 
 End-to-end verification of the Connectivity Marketplace Discovery,
 Proximity & Path Selection boundary (issue #91, authorization
-WORK-047-CORE-001 / DEC-0067, baseline 825f48f):
+WORK-047-CORE-001 / DEC-0067, baseline 825f48f), including the
+correction round for the Architect review of head fdd7691
+(REQUEST CHANGES, PR #135 comment 5518682595):
 
 - frozen vocabularies: the precision vocabulary (privacy-bounded
   location), the evidence provenance vocabulary, the staleness
   contract, the exclusion/basis/status reason vocabularies, and
   the typed reason vocabulary;
 - privacy: location binding is deterministic and many-to-one
-  (k-anonymity), the persisted representation never carries exact
-  consumer coordinates, precision is bounded by the frozen
-  vocabulary (there is no exact level), and no marketplace record
-  can even represent a coordinate;
+  (bounded spatial resolution -- no population-count guarantee is
+  claimed or implied, and no such claim text exists anywhere in
+  the family or the evidence doc), the persisted representation
+  never carries exact consumer coordinates, precision is bounded
+  by the frozen vocabulary (there is no exact level), no
+  marketplace record can even represent a coordinate, and the
+  query's declared precision POLICY is enforced (the bound may
+  never be finer than the policy; case 40);
 - proximity evidence: distance is a conservative BOUNDED interval
   (integer math, harmonization only coarsens), never an exact
-  distance and never a reachability claim;
+  distance and never a reachability claim, and an EXPLICIT
+  distance limit fails closed when coverage evidence is absent
+  (case 39);
 - stale telemetry: observations retain value/age/confidence/
   provenance, confidence decays deterministically with age, stale
   observations contribute nothing to expected quality while their
@@ -33,20 +41,33 @@ WORK-047-CORE-001 / DEC-0067, baseline 825f48f):
   normalization, frozen tie-breaks), stable across repeated runs
   and across PYTHONHASHSEED 0/1/7919/unset;
 - selection: proposals are content-derived, carry the ranked
-  fallback chain and the deterministic deadline anchor, and are
-  PROPOSALS (no connectivity member anywhere);
+  fallback chain and the deterministic deadline anchor, are
+  PROPOSALS (no connectivity member anywhere), and their frozen
+  status lifecycle actually ADVANCES through the handoff
+  composition (the returned outcome carries the immutable
+  ``handed-off`` record; the fail-closed full-rejection raise
+  composes ``rejected``; case 43);
 - NetworkPath composition: the handoff drives ONLY the accepted
   W041 machinery's public chain (discover -> validate -> bind ->
   probe -> activate), the machinery owns every state transition,
   selection alone never activates anything, rejected candidates
   fall back deterministically, and unobserved interfaces fail
   closed;
+- payment capability gating (W044 DATA): paid offers require the
+  provider's CURRENT declaration (highest schema version,
+  caller-order independent) to support authorization AND cover
+  the offer's EXACT terms (currency, exponent, minor-unit
+  amount; case 41);
 - reservation/lease coordination: the canonical W051 CommercialCore
   chain (submit_intent -> select_offer -> hold_reservation ->
   authorize_session -> activate_path) with deterministic command
   ids, no second commercial journal, reservation success that
-  never implies connectivity, and PATH_ACTIVE citing the
-  machinery's own path id;
+  never implies connectivity, and PATH_ACTIVE recorded ONLY
+  against a PROVEN W041 ACTIVE state (the genuine handoff
+  outcome + the machinery's own public reads proving the exact
+  path is currently ACTIVE for the exact session; every
+  non-ACTIVE machinery state fails closed with nothing recorded
+  -- case 42);
 - replay/recovery: rebuilt index/service/core converge byte-
   identically (same digests, same proposal ids, idempotent
   coordination with zero journal growth);
@@ -565,8 +586,10 @@ def _listing(
         quality_observations=quality_observations,
         declared_capacity_kbps=declared_capacity_kbps,
         capacity_observations=capacity_observations,
-        coverage=coverage or (
-            declare_coverage_cell(5_603_000, -13_000, "district-2500m"),
+        coverage=(
+            coverage if coverage is not None else (
+                declare_coverage_cell(5_603_000, -13_000, "district-2500m"),
+            )
         ),
         provenance="provider-registry",
     )
@@ -810,8 +833,8 @@ def _golden_scenario() -> Dict[str, Any]:
     core_full = CommercialCore.load(store=store, clock=shared, references=refs_full)
     coordination_full = service.record_path_activation(
         coordination=coordination, core=core_full,
-        session_id=session_id, network_path_id=outcome.network_path_id,
-        actor="buyer-1",
+        manager=manager, outcome=outcome,
+        session_id=session_id, actor="buyer-1",
     )
     return {
         "discovery_digest": result.digest(),
@@ -824,6 +847,7 @@ def _golden_scenario() -> Dict[str, Any]:
         ],
         "proposal_id": proposal.proposal_id,
         "proposal_status": proposal.status,
+        "proposal_status_after_handoff": outcome.advanced_proposal.status,
         "proposal_chain": [
             "%s/%s" % entry for entry in proposal.chain
         ],
@@ -948,12 +972,14 @@ def case_03_proximity_binding_determinism(results: List[Result]) -> None:
     b1_again = bind_query_location(5_603_000, -13_000, "district-2500m")
     if b1 != b1_again or b1.digest() != b1_again.digest():
         problems.append("identical coordinates bind non-identically")
-    # k-anonymity: different exact coordinates inside one cell bind
-    # to the SAME bound (the many-to-one property)
+    # different exact coordinates inside one cell bind to the SAME
+    # bound (the deterministic many-to-one quantization property:
+    # bounded spatial resolution, no population-count claim)
     b2 = bind_query_location(5_604_000, -13_050, "district-2500m")
     if b1 != b2:
         problems.append(
-            "nearby coordinates bind to different bounds (k-anonymity broken)"
+            "nearby coordinates bind to different bounds "
+            "(many-to-one quantization broken)"
         )
     if b1.cell_id != b2.cell_id:
         problems.append("same-cell coordinates produced different cell ids")
@@ -984,7 +1010,8 @@ def case_03_proximity_binding_determinism(results: List[Result]) -> None:
         return
     results.append(ok(
         name,
-        "binding deterministic + many-to-one (k-anonymity); domain and "
+        "binding deterministic + many-to-one (bounded spatial "
+        "resolution, no population-count claim); domain and "
         "vocabulary enforced fail closed",
     ))
 
@@ -2256,8 +2283,8 @@ def case_29_path_activation_record(results: List[Result]) -> None:
     core_full = CommercialCore.load(store=store, clock=shared, references=refs_full)
     coordination_full = service.record_path_activation(
         coordination=coordination, core=core_full,
-        session_id=session_id, network_path_id=outcome.network_path_id,
-        actor="buyer-1",
+        manager=manager, outcome=outcome,
+        session_id=session_id, actor="buyer-1",
     )
     if coordination_full.commercial_state != "PATH_ACTIVE":
         problems.append(
@@ -2334,8 +2361,8 @@ def case_30_replay_recovery(results: List[Result]) -> None:
     core_full = CommercialCore.load(store=store, clock=shared, references=refs_full)
     coordination_full = service.record_path_activation(
         coordination=coordination, core=core_full,
-        session_id=session_id, network_path_id=outcome.network_path_id,
-        actor="buyer-1",
+        manager=manager, outcome=outcome,
+        session_id=session_id, actor="buyer-1",
     )
     journal_before = len(core_full.journal_records())
     digest_before = core_full.journal_digest()
@@ -2726,6 +2753,567 @@ def case_38_pr_delta_shape(results: List[Result]) -> None:
 
 
 # ---------------------------------------------------------------------------
+# 39-44: the Architect-review correction round (REQUEST CHANGES on
+# fdd7691, PR #135 comment 5518682595) -- one case per blocker
+# ---------------------------------------------------------------------------
+
+
+def case_39_distance_limit_fail_closed_no_coverage(results: List[Result]) -> None:
+    name = "case_39_distance_fail_closed_missing_coverage"
+    problems: List[str] = []
+    # a listing WITHOUT coverage evidence + an explicit distance limit:
+    # the marketplace cannot establish the bound -> EXCLUDED (fail
+    # closed; absent evidence is never an implicit within-limit claim)
+    no_cov = _listing(
+        offer_id="wifi-nocov", provider_id="provider-1",
+        interface_name=WIFI_IF, link_kind="wireless",
+        coverage=(),
+    )
+    service = MarketplaceService(
+        index=MarketplaceIndex((no_cov,)),
+        clock=StepClock(_EVAL_NOW, 60), policy=RankingPolicy(),
+        eligibility=_view(
+            offers=(_offer_facts("wifi-nocov", "provider-1"),),
+        ),
+        payment_capabilities=(_paycaps(),),
+    )
+    query = _query(
+        location=bind_query_location(5_603_500, -13_000, "district-2500m"),
+        max_distance_m=1_000_000,
+    )
+    result = service.discover(query=query)
+    if result.ranked:
+        problems.append(
+            "no-coverage offer presented under an explicit distance limit"
+        )
+    excluded = [
+        (entry.reason, entry.offer_id) for entry in result.excluded
+    ]
+    if ("constraint-distance", "wifi-nocov") not in excluded:
+        problems.append(
+            "fail-closed distance exclusion missing: %s" % excluded
+        )
+    # control: the SAME offer WITHOUT an explicit distance limit is
+    # presented (absent proximity evidence is only fatal under an
+    # explicit buyer limit -- otherwise the dimension is unconstrained)
+    control = service.discover(
+        query=_query(
+            location=bind_query_location(5_603_500, -13_000, "district-2500m"),
+        )
+    )
+    if not control.ranked:
+        problems.append("no-coverage offer excluded without a distance limit")
+    # determinism: a fresh service/clock reproduces the exclusion
+    # byte-identically (the same first clock read, the same result)
+    service_repeat = MarketplaceService(
+        index=MarketplaceIndex((
+            _listing(
+                offer_id="wifi-nocov", provider_id="provider-1",
+                interface_name=WIFI_IF, link_kind="wireless",
+                coverage=(),
+            ),
+        )),
+        clock=StepClock(_EVAL_NOW, 60), policy=RankingPolicy(),
+        eligibility=_view(
+            offers=(_offer_facts("wifi-nocov", "provider-1"),),
+        ),
+        payment_capabilities=(_paycaps(),),
+    )
+    repeat = service_repeat.discover(query=query)
+    if repeat.digest() != result.digest():
+        problems.append("fail-closed distance exclusion is not deterministic")
+    if problems:
+        results.append(fail(name, "; ".join(problems[:5])))
+        return
+    results.append(ok(
+        name,
+        "explicit distance limit + absent coverage evidence -> excluded "
+        "with the frozen constraint-distance reason (no limit -> "
+        "presented; deterministic)",
+    ))
+
+
+def case_40_query_precision_policy_enforced(results: List[Result]) -> None:
+    name = "case_40_query_precision_policy_enforced"
+    problems: List[str] = []
+    # the declared query precision policy must be frozen vocabulary --
+    # even when NO location is carried (the no-location case)
+    for level in ("exact", "fine", "near-5m", ""):
+        try:
+            DiscoveryQuery(
+                buyer_id="buyer-1", jurisdiction="gh",
+                location_precision_level=level,
+            )
+            problems.append(
+                "precision policy %r accepted without a location" % level
+            )
+        except MarketplaceError as error:
+            if error.reason != MarketplaceReasonCode.PRECISION_UNKNOWN:
+                problems.append(
+                    "unknown policy %r raised %r" % (level, error.reason)
+                )
+    # the same vocabulary check with a carried location
+    try:
+        DiscoveryQuery(
+            buyer_id="buyer-1", jurisdiction="gh",
+            location=bind_query_location(5_603_500, -13_000, "district-2500m"),
+            location_precision_level="exact",
+        )
+        problems.append("unknown precision policy accepted with a location")
+    except MarketplaceError as error:
+        if error.reason != MarketplaceReasonCode.PRECISION_UNKNOWN:
+            problems.append("location policy raised %r" % error.reason)
+    # a bound FINER than the declared policy fails closed (the coarse
+    # policy is a ceiling, not advice)
+    try:
+        DiscoveryQuery(
+            buyer_id="buyer-1", jurisdiction="gh",
+            location=bind_query_location(5_603_500, -13_000, "near-50m"),
+            location_precision_level="district-2500m",
+        )
+        problems.append("finer-than-policy bound accepted")
+    except MarketplaceError as error:
+        if error.reason != MarketplaceReasonCode.QUERY_LOCATION_INVALID:
+            problems.append("finer bound raised %r" % error.reason)
+    # a bound COARSER than the policy is honest (discloses less)
+    try:
+        coarser = DiscoveryQuery(
+            buyer_id="buyer-1", jurisdiction="gh",
+            location=bind_query_location(5_603_500, -13_000, "coarse-50000m"),
+            location_precision_level="district-2500m",
+        )
+        if coarser.location is None:
+            problems.append("coarser-than-policy bound lost its location")
+    except MarketplaceError as error:
+        problems.append("coarser bound rejected: %s" % error)
+    # the canonical equal case and the no-location default still work
+    canonical = _query(
+        location=bind_query_location(5_603_500, -13_000, "district-2500m"),
+    )
+    if canonical.location_precision_level != "district-2500m":
+        problems.append("canonical precision policy drifted")
+    if _query().location is not None:
+        problems.append("default query unexpectedly carries a location")
+    if problems:
+        results.append(fail(name, "; ".join(problems[:5])))
+        return
+    results.append(ok(
+        name,
+        "precision policy is frozen vocabulary (with AND without a "
+        "location); finer-than-policy bounds fail closed; coarser "
+        "bounds are honest",
+    ))
+
+
+def case_41_payment_exact_terms_and_version(results: List[Result]) -> None:
+    name = "case_41_payment_terms_and_version_selection"
+    problems: List[str] = []
+
+    def _caps(
+        schema_version: int = 1,
+        supports_authorization: bool = True,
+        currencies: Tuple[str, ...] = ("USD",),
+        max_exponent: int = 2,
+        max_amount: int = 100_000,
+    ) -> ProviderCapabilities:
+        return ProviderCapabilities(
+            provider_id="provider-1", schema_version=schema_version,
+            supports_authorization=supports_authorization,
+            supports_capture=True, supports_refund=True,
+            supports_partial_refund=False, supports_reversal=True,
+            supports_payout_transfer=True, supports_callbacks=True,
+            supports_status_query=True, currencies=currencies,
+            max_exponent=max_exponent, max_amount=max_amount,
+        )
+
+    def _svc(caps: Tuple[ProviderCapabilities, ...]) -> MarketplaceService:
+        return MarketplaceService(
+            index=MarketplaceIndex((
+                _listing(
+                    offer_id="wifi-basic", provider_id="provider-1",
+                    interface_name=WIFI_IF, link_kind="wireless",
+                ),
+            )),
+            clock=StepClock(_EVAL_NOW, 60), policy=RankingPolicy(),
+            eligibility=_view(
+                offers=(_offer_facts("wifi-basic", "provider-1"),),
+            ),
+            payment_capabilities=caps,
+        )
+
+    # unsupported currency (declaration EUR; the offer is priced USD)
+    result = _svc((_caps(currencies=("EUR",)),)).discover(query=_query())
+    if result.ranked:
+        problems.append("paid offer presented with an undeclared currency")
+    detail = "; ".join(entry.detail for entry in result.excluded)
+    if "EUR" not in detail or "USD" not in detail:
+        problems.append("currency exclusion detail is not explicit: %r" % detail)
+    # exponent exceeds the declared maximum (offer exponent 2 > max 1)
+    result = _svc((_caps(max_exponent=1),)).discover(query=_query())
+    if result.ranked:
+        problems.append("paid offer presented with an excessive exponent")
+    detail = "; ".join(entry.detail for entry in result.excluded)
+    if "exponent" not in detail:
+        problems.append("exponent exclusion detail is not explicit: %r" % detail)
+    # amount exceeds the declared maximum (offer price 250 > max 100)
+    result = _svc((_caps(max_amount=100),)).discover(query=_query())
+    if result.ranked:
+        problems.append("paid offer presented with an excessive amount")
+    detail = "; ".join(entry.detail for entry in result.excluded)
+    if "amount" not in detail:
+        problems.append("amount exclusion detail is not explicit: %r" % detail)
+    # multi-version selection: the CURRENT declaration (highest
+    # schema_version) rules, independent of caller ordering -- v1 is
+    # EUR-only (would exclude), v2 is USD with sufficient limits
+    caps_v1 = _caps(schema_version=1, currencies=("EUR",))
+    caps_v2 = _caps(schema_version=2)
+    digests = set()
+    for order in ((caps_v1, caps_v2), (caps_v2, caps_v1)):
+        result = _svc(order).discover(query=_query())
+        if not result.ranked:
+            problems.append(
+                "version order %s lost the current declaration" % (order,)
+            )
+        digests.add(result.digest())
+    if len(digests) != 1:
+        problems.append("version ordering changed the discovery result")
+    # the CURRENT version rules even when an OLDER version would pass:
+    # v1 authorizes USD, the current v2 does not authorize at all
+    caps_v1_auth = _caps(schema_version=1)
+    caps_v2_noauth = _caps(schema_version=2, supports_authorization=False)
+    for order in (
+        (caps_v1_auth, caps_v2_noauth), (caps_v2_noauth, caps_v1_auth),
+    ):
+        result = _svc(order).discover(query=_query())
+        if result.ranked:
+            problems.append(
+                "stale authorization version won over the current one"
+            )
+        reasons = {entry.reason for entry in result.excluded}
+        if "payment-capability-unsupported" not in reasons:
+            problems.append("current-version denial reason missing")
+    # conflicting declarations at the current version fail closed
+    result = _svc((caps_v2, _caps(schema_version=2, currencies=("EUR",)))).discover(
+        query=_query()
+    )
+    if result.ranked:
+        problems.append("conflicting current declarations presented an offer")
+    if problems:
+        results.append(fail(name, "; ".join(problems[:5])))
+        return
+    results.append(ok(
+        name,
+        "paid offers require the CURRENT (highest-version, "
+        "order-independent) declaration to cover the EXACT terms "
+        "(currency/exponent/amount); conflicts fail closed",
+    ))
+
+
+def case_42_path_activation_requires_w041_active(results: List[Result]) -> None:
+    name = "case_42_path_activation_requires_w041_active"
+    problems: List[str] = []
+    query = _query(
+        location=bind_query_location(5_603_500, -13_000, "district-2500m"),
+        max_distance_m=1_000_000,
+    )
+
+    def _probe_world() -> Tuple[
+        MarketplaceService, SelectionProposal, Any, Any, Any, str,
+    ]:
+        """One full W047 world stopped right after the reservation:
+        the machinery has NOT been driven by the handoff yet (the
+        caller drives it to the exact state under test)."""
+        manager, runtime, session_id, shared = _world()
+        service = _golden_service()
+        proposal = service.propose(query=query)
+        store = MemoryCommercialStore()
+        refs = ReferenceIndex(
+            [Reference(session_id, ReferenceFamily.SESSION, "sessions-authority")]
+        )
+        core = CommercialCore(store=store, clock=shared, references=refs)
+        coordination = service.coordinate_reservation(
+            proposal=proposal, core=core, buyer_id="buyer-1", jurisdiction="gh",
+        )
+        manager.discover()
+        refs_full = ReferenceIndex(
+            [Reference(session_id, ReferenceFamily.SESSION, "sessions-authority")]
+            + [
+                Reference(path_id, ReferenceFamily.NETWORK_PATH, "networkpath-manager")
+                for path_id in manager.paths()
+            ]
+        )
+        core_full = CommercialCore.load(
+            store=store, clock=shared, references=refs_full,
+        )
+        return (
+            service, proposal, coordination, core_full, manager, session_id,
+        )
+
+    def _eth_path(manager: Any) -> str:
+        for path_id in manager.paths():
+            path = manager.path(path_id)
+            if path.interface_name == ETH_IF and path.link_kind == "ethernet":
+                return path_id
+        raise AssertionError("the world exposes no ethernet path")
+
+    # one negative per non-ACTIVE machinery state: DISCOVERED,
+    # VALIDATED, BOUND, RETIRED (an outcome CLAIMING ACTIVE for a path
+    # the machinery does not currently prove ACTIVE must fail closed)
+    for expected_state, drive in (
+        (NetworkPathState.DISCOVERED, ()),
+        (NetworkPathState.VALIDATED, ("validate",)),
+        (NetworkPathState.BOUND, ("validate", "bind")),
+        (NetworkPathState.RETIRED, ("retire",)),
+    ):
+        service, proposal, coordination, core_full, manager, session_id = (
+            _probe_world()
+        )
+        path_id = _eth_path(manager)
+        for action in drive:
+            if action == "validate":
+                manager.validate(path_id)
+            elif action == "bind":
+                manager.bind(path_id, session_id)
+            elif action == "retire":
+                manager.retire(path_id)
+        if manager.path(path_id).state != expected_state:
+            problems.append(
+                "fixture did not reach %s" % expected_state
+            )
+            continue
+        journal_before = len(core_full.journal_records())
+        outcome = HandoffOutcome(
+            proposal_id=proposal.proposal_id,
+            session_id=session_id,
+            accepted_offer_key=proposal.primary,
+            network_path_id=path_id,
+            network_path_state="ACTIVE",  # the CLAIM under test
+            attempts=(
+                HandoffAttempt(offer_key=proposal.primary, outcome="accepted"),
+            ),
+            advanced_proposal=proposal.with_status("handed-off"),
+        )
+        try:
+            service.record_path_activation(
+                coordination=coordination, core=core_full,
+                manager=manager, outcome=outcome,
+                session_id=session_id, actor="buyer-1",
+            )
+            problems.append(
+                "PATH_ACTIVE recorded with machinery state %s" % expected_state
+            )
+        except MarketplaceError as error:
+            if error.reason != MarketplaceReasonCode.PATH_ACTIVE_UNPROVEN:
+                problems.append(
+                    "state %s raised %r" % (expected_state, error.reason)
+                )
+            if len(core_full.journal_records()) != journal_before:
+                problems.append(
+                    "the failed proof recorded commercial state (%s)"
+                    % expected_state
+                )
+    # an outcome whose CITED state is not ACTIVE fails immediately
+    # (here the machinery IS driven to the active state first)
+    service, proposal, coordination, core_full, manager, session_id = (
+        _probe_world()
+    )
+    real = service.handoff_to_networkpath(
+        proposal=proposal, manager=manager, session_id=session_id,
+    )
+    stale_outcome = HandoffOutcome(
+        proposal_id=real.proposal_id,
+        session_id=real.session_id,
+        accepted_offer_key=real.accepted_offer_key,
+        network_path_id=real.network_path_id,
+        network_path_state=NetworkPathState.BOUND,  # cited, not ACTIVE
+        attempts=real.attempts,
+        advanced_proposal=real.advanced_proposal,
+    )
+    try:
+        service.record_path_activation(
+            coordination=coordination, core=core_full,
+            manager=manager, outcome=stale_outcome,
+            session_id=session_id, actor="buyer-1",
+        )
+        problems.append("PATH_ACTIVE recorded from a non-ACTIVE outcome")
+    except MarketplaceError as error:
+        if error.reason != MarketplaceReasonCode.PATH_ACTIVE_UNPROVEN:
+            problems.append("stale outcome raised %r" % error.reason)
+    # a session mismatch fails (the proof is not for THIS session)
+    try:
+        service.record_path_activation(
+            coordination=coordination, core=core_full,
+            manager=manager, outcome=real,
+            session_id="session-other", actor="buyer-1",
+        )
+        problems.append("PATH_ACTIVE recorded for a mismatched session")
+    except MarketplaceError as error:
+        if error.reason != MarketplaceReasonCode.PATH_ACTIVE_UNPROVEN:
+            problems.append("session mismatch raised %r" % error.reason)
+    # a proposal mismatch fails (the outcome belongs to a different
+    # proposal than the coordination's)
+    mismatched = ReservationCoordination(
+        proposal_id="sha256:not-the-outcomes-proposal",
+        transaction_id=coordination.transaction_id,
+        commands=coordination.commands,
+        commercial_state=coordination.commercial_state,
+        expires_at=coordination.expires_at,
+    )
+    try:
+        service.record_path_activation(
+            coordination=mismatched, core=core_full,
+            manager=manager, outcome=real,
+            session_id=session_id, actor="buyer-1",
+        )
+        problems.append("PATH_ACTIVE recorded for a mismatched proposal")
+    except MarketplaceError as error:
+        if error.reason != MarketplaceReasonCode.PATH_ACTIVE_UNPROVEN:
+            problems.append("proposal mismatch raised %r" % error.reason)
+    # control: the genuine outcome + genuinely ACTIVE machinery DOES
+    # record PATH_ACTIVE (the gate is not a blanket rejection)
+    service, proposal, coordination, core_full, manager, session_id = (
+        _probe_world()
+    )
+    outcome = service.handoff_to_networkpath(
+        proposal=proposal, manager=manager, session_id=session_id,
+    )
+    recorded = service.record_path_activation(
+        coordination=coordination, core=core_full,
+        manager=manager, outcome=outcome,
+        session_id=session_id, actor="buyer-1",
+    )
+    if recorded.commercial_state != "PATH_ACTIVE":
+        problems.append(
+            "control recording failed: %r" % recorded.commercial_state
+        )
+    if problems:
+        results.append(fail(name, "; ".join(problems[:6])))
+        return
+    results.append(ok(
+        name,
+        "PATH_ACTIVE requires a proven W041 ACTIVE state: every "
+        "non-ACTIVE machinery state (DISCOVERED/VALIDATED/BOUND/"
+        "RETIRED), non-ACTIVE cited outcomes, and session/proposal "
+        "mismatches fail closed PATH_ACTIVE_UNPROVEN with NOTHING "
+        "recorded; the genuine ACTIVE proof records",
+    ))
+
+
+def case_43_proposal_lifecycle_advances(results: List[Result]) -> None:
+    name = "case_43_proposal_lifecycle_advances"
+    problems: List[str] = []
+    query = _query(
+        location=bind_query_location(5_603_500, -13_000, "district-2500m"),
+        max_distance_m=1_000_000,
+    )
+    # accepted handoff: the outcome RETURNS the advanced proposal
+    manager, runtime, session_id, shared = _world()
+    service = _golden_service()
+    proposal = service.propose(query=query)
+    if proposal.status != "proposed":
+        problems.append("a fresh proposal is not 'proposed'")
+    outcome = service.handoff_to_networkpath(
+        proposal=proposal, manager=manager, session_id=session_id,
+    )
+    advanced = outcome.advanced_proposal
+    if not isinstance(advanced, SelectionProposal):
+        problems.append("the outcome carries no advanced SelectionProposal")
+    else:
+        if advanced.status != "handed-off":
+            problems.append(
+                "advanced status is %r, expected 'handed-off'" % advanced.status
+            )
+        if advanced.proposal_id != proposal.proposal_id:
+            problems.append("the advanced proposal id diverged")
+        if advanced.chain != proposal.chain or advanced.selected != proposal.selected:
+            problems.append("the advanced proposal content diverged")
+        if advanced.mode != proposal.mode or advanced.instant != proposal.instant:
+            problems.append("the advanced proposal basis diverged")
+    # immutability: the ORIGINAL record still says 'proposed'
+    if proposal.status != "proposed":
+        problems.append("the original proposal was mutated by the handoff")
+    # the outcome's canonical content records the advanced status
+    if outcome.to_dict().get("proposal_status") != "handed-off":
+        problems.append("the outcome content omits the advanced status")
+    # rejected transition: with EVERY interface down, the machinery
+    # rejects every fallback; the handoff fails closed (typed raise)
+    # and the caller composes the frozen immutable 'rejected' record
+    all_down = (
+        _snap(name=WIFI_IF, kind="wireless", up=False, addresses=("fd00::a:1",)),
+        _snap(name=ETH_IF, kind="ethernet", up=False, addresses=("fd00::a:2",), speed=1000),
+        _snap(name=USB_IF, kind="other", up=False, addresses=("fd00::a:3",), mtu=1400, speed=400),
+        _snap(name=CELL_IF, kind="other", up=False, addresses=(), mtu=1300, speed=50),
+    )
+    manager2, runtime2, session_id2, shared2 = _world(snapshots=all_down)
+    service2 = _golden_service()
+    proposal2 = service2.propose(query=query)
+    raised = False
+    try:
+        service2.handoff_to_networkpath(
+            proposal=proposal2, manager=manager2, session_id=session_id2,
+        )
+    except MarketplaceError as error:
+        raised = True
+        if error.reason != MarketplaceReasonCode.HANDOFF_REJECTED:
+            problems.append(
+                "full rejection raised %r, expected HANDOFF_REJECTED"
+                % error.reason
+            )
+    if not raised:
+        problems.append("an all-down world did not fail the handoff closed")
+    if proposal2.status != "proposed":
+        problems.append("the rejected path mutated the original proposal")
+    rejected = proposal2.with_status("rejected")
+    if rejected.status != "rejected" or rejected.proposal_id != proposal2.proposal_id:
+        problems.append("the frozen 'rejected' transition is broken")
+    if proposal2.status != "proposed":
+        problems.append("with_status mutated the original record")
+    if problems:
+        results.append(fail(name, "; ".join(problems[:5])))
+        return
+    results.append(ok(
+        name,
+        "the handoff RETURNS the immutable 'handed-off' record (original "
+        "untouched, outcome content records the status); full rejection "
+        "fails closed and composes the immutable 'rejected' record",
+    ))
+
+
+def case_44_no_population_count_claims(results: List[Result]) -> None:
+    name = "case_44_no_population_count_claims"
+    problems: List[str] = []
+    # the family source and the evidence doc must contain NO
+    # population-count privacy claim text (the quantization is a
+    # bounded spatial resolution, nothing more)
+    targets = list(_FAMILY_FILES) + [
+        REPO_ROOT / "docs" / "WORK-047-evidence.md",
+    ]
+    for path in targets:
+        text = path.read_text(encoding="utf-8").lower()
+        for token in ("k-anonymity", "k_anonymity", "anonymity"):
+            if token in text:
+                problems.append("%s claims %r" % (path.name, token))
+    # the honest bounded-resolution statement is present
+    proximity_text = (
+        REPO_ROOT / "marketplace" / "proximity.py"
+    ).read_text(encoding="utf-8").lower()
+    for phrase in ("many-to-one", "no population-count"):
+        if phrase not in proximity_text:
+            problems.append(
+                "proximity.py is missing the honest statement %r" % phrase
+            )
+    if problems:
+        results.append(fail(name, "; ".join(problems[:5])))
+        return
+    results.append(ok(
+        name,
+        "no population-count privacy claim text in the family or the "
+        "evidence doc; the honest bounded-spatial-resolution statement "
+        "is present",
+    ))
+
+
+# ---------------------------------------------------------------------------
 # main
 # ---------------------------------------------------------------------------
 
@@ -2771,6 +3359,12 @@ def main() -> int:
         case_36_py_compile,
         case_37_frozen_spec_intact,
         case_38_pr_delta_shape,
+        case_39_distance_limit_fail_closed_no_coverage,
+        case_40_query_precision_policy_enforced,
+        case_41_payment_exact_terms_and_version,
+        case_42_path_activation_requires_w041_active,
+        case_43_proposal_lifecycle_advances,
+        case_44_no_population_count_claims,
     ):
         case(results)
     failures = [result for result in results if not result[1]]

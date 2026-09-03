@@ -295,12 +295,29 @@ def distance_violation(
 ) -> Tuple[str, str]:
     """The fail-closed proximity constraint: a candidate is only
     within a distance limit when its ENTIRE bounded distance
-    interval is within the limit (never a maybe)."""
+    interval is within the limit (never a maybe).
+
+    When the buyer states an EXPLICIT distance limit, a candidate
+    WITHOUT coverage proximity evidence fails CLOSED: the
+    marketplace cannot establish that the offer lies within the
+    requested bound, so the candidate is excluded with the frozen
+    ``constraint-distance`` reason (presenting it would turn absent
+    evidence into an implicit within-limit claim).  Without an
+    explicit limit, absent proximity evidence is not a violation
+    (the distance dimension is simply unconstrained by the buyer).
+    """
     if not query.max_distance_m or query.location is None:
         return ("", "")
     interval = candidate.proximity_bound_m(query)
     if interval is None:
-        return ("", "")  # no proximity evidence: not a violation
+        return (
+            "constraint-distance",
+            "an explicit %d m distance limit cannot be established: the "
+            "offer declares no coverage proximity evidence for the query "
+            "location (fail closed: absent evidence is never an implicit "
+            "within-limit claim)"
+            % query.max_distance_m,
+        )
     if interval[1] > query.max_distance_m:
         return (
             "constraint-distance",

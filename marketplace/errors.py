@@ -45,6 +45,12 @@ class MarketplaceReasonCode:
     PROPOSAL_STATUS_INVALID = "marketplace-proposal-status-invalid"
     #: the NetworkPath handoff rejected every fallback candidate
     HANDOFF_REJECTED = "marketplace-handoff-rejected"
+    #: the commercial PATH_ACTIVE record could not be made because the
+    #: W041 machinery does not PROVE the exact path is currently
+    #: ACTIVE for the exact session (W041 owns connectivity truth:
+    #: commercial PATH_ACTIVE may only cite a proven W041 ACTIVE
+    #: state, never a reference that merely exists)
+    PATH_ACTIVE_UNPROVEN = "marketplace-path-active-unproven"
     #: the reservation/lease coordination was rejected by the
     #: canonical commercial authority (typed re-wrap only; W051
     #: remains the authority)

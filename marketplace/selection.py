@@ -8,10 +8,18 @@ it) with a content-derived proposal identity.
 The frozen discipline:
 
 - a proposal is a PROPOSAL: its status starts ``proposed`` and
-  only the NetworkPath handoff composition may advance it
-  (``handed-off`` when the machinery accepted a candidate,
-  ``rejected`` when every fallback was rejected).  Nothing in this
-  module claims connectivity, reachability, or activation;
+  only the NetworkPath handoff composition advances it.  The
+  advance is immutable and handoff-returned: a successful handoff
+  (:func:`marketplace.handoff.handoff_to_networkpath`) RETURNS the
+  advanced record (status ``handed-off``) inside its
+  :class:`~marketplace.handoff.HandoffOutcome`, and the original
+  record is never mutated.  When every fallback candidate is
+  rejected the handoff fails closed (the typed
+  ``HANDOFF_REJECTED`` raise) and the caller composes the frozen
+  ``rejected`` transition through the same immutable
+  ``with_status`` seam.  No mutation, no second journal, and
+  nothing in this module claims connectivity, reachability, or
+  activation;
 - the proposal identity is content-derived (W003 canonical JSON
   over the query digest + the ranked chain + the mode), so
   identical discovery inputs yield byte-identical proposal ids
@@ -168,7 +176,12 @@ class SelectionProposal:
 
     def with_status(self, status: str) -> "SelectionProposal":
         """A new proposal with an advanced status (immutable
-        update; the status vocabulary is frozen)."""
+        update; the status vocabulary is frozen).  This is the ONLY
+        status-advancing seam: the NetworkPath handoff composition
+        uses it to RETURN the advanced record (``handed-off`` on a
+        successful handoff; ``rejected`` composed by the caller of
+        the fail-closed ``HANDOFF_REJECTED`` raise) -- never a
+        mutation of this record."""
         return SelectionProposal(
             proposal_id=self.proposal_id,
             query_digest=self.query_digest,
