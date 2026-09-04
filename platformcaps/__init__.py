@@ -1,9 +1,16 @@
-"""ADCOS platform capability package — WORK-050.1: the versioned
-platform connectivity sharing capability registry.
+"""ADCOS platform capability package — WORK-050: the versioned
+platform connectivity sharing capability registry and its
+deterministic compatibility evaluation.
 
-Implements the frozen WORK-050 W050.1 stage under the active
+Implements the frozen WORK-050 stages under the active
 authorization WORK-050-CORE-001 (DEC-0078; baseline advanced to
-deae346 by DEC-0079 / LEDGER-RECON-023).  The central boundary:
+deae346 by DEC-0079 / LEDGER-RECON-023): W050.1 — the
+declaration model and the immutable versioned content-addressed
+registry (accepted); W050.2 — the deterministic compatibility
+evaluation ((profile x role x sharing mode x isolation
+requirement) -> supported/restricted/unsupported/unknown + typed
+findings; unregistered is the fail-closed unknown default; no
+label ever implies support).  The central boundary:
 
     W050 "supported"  !=  permission
                       !=  authorization
@@ -54,11 +61,11 @@ Fail-closed rules (frozen):
    declaration is never a PHYSICAL platform claim and never
    proof that a particular physical deployment currently works.
 
-W050.1 stop boundary (frozen): this package contains the
-declaration model and the registry ONLY.  Compatibility
-EVALUATION, versioned auditable HISTORY, the deterministic
-battery, and CI wiring are later stages (evaluation.py /
-history.py / selftest are NOT implemented here); W048/W049
+W050.2 stop boundary (frozen): this package contains the
+declaration model, the registry, and the deterministic
+compatibility evaluation ONLY.  Versioned auditable HISTORY,
+the deterministic battery, and CI wiring are later stages
+(history.py / selftest are NOT implemented here); W048/W049
 integration, OS/platform adapters, packet forwarding, and
 firewall/tether/VPN/proxy implementation are forbidden
 territory.  This package composes with the authorities — it
@@ -68,6 +75,11 @@ replaces none of them.
 from __future__ import annotations
 
 from .errors import PlatformCapabilityError, PlatformCapabilityReasonCode
+from .evaluation import (
+    CompatibilityEvaluation,
+    EvaluationFinding,
+    evaluate_sharing_compatibility,
+)
 from .model import (
     EVIDENCE_CLASS_SOFTWARE,
     ROLE_BUYER,
@@ -93,6 +105,8 @@ __all__ = [
     "ROLES",
     "SCHEMA_VERSION",
     "CapabilityState",
+    "CompatibilityEvaluation",
+    "EvaluationFinding",
     "IsolationPrimitive",
     "LeaseEnforcementCapability",
     "MeteringCapability",
@@ -104,4 +118,5 @@ __all__ = [
     "RoleCapability",
     "SharingModeClass",
     "SharingModeDeclaration",
+    "evaluate_sharing_compatibility",
 ]
