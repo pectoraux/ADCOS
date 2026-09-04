@@ -267,3 +267,41 @@ jobs:
 
       - name: Run provider/buyer client runtime tests
         run: python3 tools/client_selftest.py
+
+  # WORK-050 exact-head evidence (independent job, the W048/W049
+  # precedent): the specification job above carries the KNOWN,
+  # INHERITED governance failures (ARCH-02 historical ledger/schema
+  # defects and their prerequisite cascades, plus the ARCH-08
+  # authorization-provenance condition, visible and unmasked here
+  # exactly as on main).  This job runs the permanent W050 platform
+  # capability registry/evaluation/history battery regardless of the
+  # specification job's outcome and never edits, retries, or masks it.
+  # It checks out the EXACT delivered head with full history (the
+  # immutable authorized baseline and the branch-point convention are
+  # ancestors of the head and are therefore present locally) and
+  # fetches the baseline commit as belt-and-braces, exactly like the
+  # accepted W049 client-runtime precedent.  origin/main is
+  # deliberately NOT fetched for this job: it is not an audit
+  # authority for this battery (the battery's frozen-surface, scope,
+  # and authorization-provenance audits are pinned to the immutable
+  # anchors declared by the frozen WORK-050-CORE-001 authorization
+  # record).
+  platform-capability-runtime:
+    name: Platform capability registry/evaluation/history battery (W050 exact-head)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the exact delivery head (full history)
+        uses: actions/checkout@v4
+        with:
+          # the exact PR head (push events: the pushed head) so the
+          # baseline-pinned audits see exactly the delivered tree
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+
+      - name: Fetch the immutable authorized baseline commit
+        run: |
+          git fetch --no-tags origin deae34612181b9cd0feb4624d7e713adf2801d39 || \
+            echo "baseline fetch unavailable (the baseline is already an ancestor of the head)"
+
+      - name: Run platform capability registry/evaluation/history tests
+        run: python3 tools/platformcaps_selftest.py
