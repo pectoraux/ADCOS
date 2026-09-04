@@ -15,56 +15,63 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Reconcile persistent state
+      - name: Reconcile persistent projections
         run: |
           python3 - <<'PY'
           from pathlib import Path
           import re
           ROOT=Path('.')
           SNAP='bcaf0d0677437d1ffca8f5e493cab516c87e7194'
-          W052='bcaf0d0677437d1ffca8f5e493cab516c87e7194'
-          DEC='DEC-0063'
+          MAIN='246366a875d455cc6ba2605c8851a76825da1b9f'
+
+          # execution-state: current snapshot is bcaf0d (the W052 merge baseline); main later advanced only by governance PR #150.
           p=ROOT/'spec/architect/execution-state.yaml'
           s=p.read_text()
-          # Replace the single machine-readable main_sha semantics line only.
           s=re.sub(r'^  main_sha_semantics: ".*"$',
-              '  main_sha_semantics: "The persistent governance snapshot is the post-W052-acceptance mainline `bcaf0d0677437d1ffca8f5e493cab516c87e7194` established by DEC-0061 / LEDGER-RECON-010. PR #150 then merged that governance transition as `246366a875d455cc6ba2605c8851a76825da1b9f`; that merge is a governance-only continuation beyond the reconciled snapshot, preserving the standing branch-point convention. The sole active authorization is WORK-053-CORE-001 with baseline `bcaf0d0677437d1ffca8f5e493cab516c87e7194`; any W053 implementation branch must re-read the exact live main and inherit the authorization byte-identically."', s, count=1, flags=re.M)
-          # Accepted work item pointer: W052 is now the latest accepted item.
+              '  main_sha_semantics: "Persistent governance snapshot: post-W052 acceptance mainline `'+SNAP+'`, established by DEC-0061 / LEDGER-RECON-010. Governance PR #150 merged that transition as `'+MAIN+'`; this later governance-only merge sits beyond the reconciled snapshot under the standing branch-point convention. The sole active authorization is WORK-053-CORE-001 with baseline `'+SNAP+'`; a W053 implementation branch must re-read exact live main and inherit the authorization byte-identically."', s, count=1, flags=re.M)
           s=s.replace('  last: "WORK-051"','  last: "WORK-052"',1)
-          s=s.replace('  note: "WORK-001 through WORK-039 (chat-era migration), WORK-041 (DEC-0054, PR #107), WORK-042 (DEC-0057, PR #110), and WORK-051 (DEC-0059, PR #145 head e247b4e / merge 41b3380 — the conformance completion over the original PR #117 core implementation) are Architect-accepted and merged; WORK-040 remains in-review and is NOT accepted"',
-              '  note: "WORK-001 through WORK-039 (chat-era migration), WORK-041 (DEC-0054, PR #107), WORK-042 (DEC-0057, PR #110), WORK-051 (DEC-0059, PR #145 head e247b4e / merge 41b3380), and WORK-052 (DEC-0061, PR #149 exact reviewed head 7d883b2 / merge bcaf0d0) are Architect-accepted and merged; WORK-040 remains in-review and is NOT accepted"',1)
-          # Convert the first W052 planned pointer from stale active to accepted-merged and remove its authorization.
-          old='''  - work_item: WORK-052\n    issue: 84\n    status: "active (WORK-052-CORE-001, DEC-0059: the UsageLedger is the single active authorization; implementation under the frozen WORK-052 contract per the issue #84 contract and the Architect-issued handoff docs/WORK-052-handoff.md — usage derives only from authoritative delivered-traffic evidence)"\n    contract: "issue #84"\n    authorization: "WORK-052-CORE-001"'''
-          new='''  - work_item: WORK-052\n    issue: 84\n    status: "accepted-merged (DEC-0061; PR #149 exact reviewed head 7d883b2, merge bcaf0d0; WORK-052-CORE-001 superseded)"\n    contract: "issue #84"\n    authorization: "none"'''
-          if old not in s: raise SystemExit('stale W052 active pointer not found')
-          s=s.replace(old,new,1)
-          # Replace the current W053 ready-candidate entry with the active authorized entry.
+          old_note='  note: "WORK-001 through WORK-039 (chat-era migration), WORK-041 (DEC-0054, PR #107), WORK-042 (DEC-0057, PR #110), and WORK-051 (DEC-0059, PR #145 head e247b4e / merge 41b3380 — the conformance completion over the original PR #117 core implementation) are Architect-accepted and merged; WORK-040 remains in-review and is NOT accepted"'
+          new_note='  note: "WORK-001 through WORK-039 (chat-era migration), WORK-041 (DEC-0054, PR #107), WORK-042 (DEC-0057, PR #110), WORK-051 (DEC-0059, PR #145 head e247b4e / merge 41b3380), and WORK-052 (DEC-0061, PR #149 exact reviewed head 7d883b2 / merge bcaf0d0) are Architect-accepted and merged; WORK-040 remains in-review and is NOT accepted"'
+          if old_note not in s: raise SystemExit('accepted-work-item note anchor missing')
+          s=s.replace(old_note,new_note,1)
+          old52='''  - work_item: WORK-052\n    issue: 84\n    status: "active (WORK-052-CORE-001, DEC-0059: the UsageLedger is the single active authorization; implementation under the frozen WORK-052 contract per the issue #84 contract and the Architect-issued handoff docs/WORK-052-handoff.md — usage derives only from authoritative delivered-traffic evidence)"\n    contract: "issue #84"\n    authorization: "WORK-052-CORE-001"'''
+          new52='''  - work_item: WORK-052\n    issue: 84\n    status: "accepted-merged (DEC-0061; PR #149 exact reviewed head 7d883b2, merge bcaf0d0; WORK-052-CORE-001 superseded)"\n    contract: "issue #84"\n    authorization: "none"'''
+          if old52 not in s: raise SystemExit('W052 active planned anchor missing')
+          s=s.replace(old52,new52,1)
           old53='''  - work_item: WORK-053\n    issue: 85\n    status: "ready-candidate"\n    contract: "issue #85"\n    authorization: "none"\n    prerequisite: "W051/W052 accepted/merged where their interfaces are consumed"'''
           new53='''  - work_item: WORK-053\n    issue: 85\n    status: "active-authorized (WORK-053-CORE-001, DEC-0061; sole active implementation authorization on the post-W052 acceptance mainline)"\n    contract: "issue #85"\n    authorization: "WORK-053-CORE-001"\n    prerequisite: "Satisfied (WORK-051 and WORK-052 accepted-merged; W041/W042 dependencies satisfied where their interfaces are consumed)"'''
-          if old53 not in s: raise SystemExit('W053 ready pointer not found')
+          if old53 not in s: raise SystemExit('W053 ready anchor missing')
           s=s.replace(old53,new53,1)
-          # Persist correction record in a dedicated governance note inside execution state comments.
-          if '# DEC-0063 / STATE-RECON-001:' not in s:
-              s='# DEC-0063 / STATE-RECON-001: normalize execution-state projections after DEC-0061; W052 accepted, W053 active.\n'+s
+          if '# STATE-RECON-001:' not in s:
+              s='# STATE-RECON-001: post-DEC-0061 execution-state projection normalization; W052 accepted, W053 active.\n'+s
           p.write_text(s)
 
-          # Align current-state projection to the execution truth already present elsewhere.
+          # current-state: normalize the projection to W052 accepted / W053 active.
           p=ROOT/'spec/architect/current-state.md'; cs=p.read_text()
-          cs=cs.replace('Reconciled snapshot baseline: `39d40b752f9129ac898fb74da1e485c20c6fbdc6`','Reconciled snapshot baseline: `bcaf0d0677437d1ffca8f5e493cab516c87e7194`',1)
-          cs=cs.replace('baseline `39d40b752f9129ac898fb74da1e485c20c6fbdc6` (atomic activation after the W051 acceptance; the baseline is advanced from the DEC-0059 issuance mainline `41b338080fbeb79627bff45cd79ddf09bf5cbb29` to the post-PR-#146 governance mainline by the DEC-0060 / LEDGER-RECON-009 baseline-advancement-only reconciliation)','baseline `bcaf0d0677437d1ffca8f5e493cab516c87e7194` (atomic activation by DEC-0061 after W052 acceptance; the governance snapshot is the post-W052 merge mainline)',1)
+          cs=cs.replace('Reconciled snapshot baseline: `39d40b752f9129ac898fb74da1e485c20c6fbdc6`','Reconciled snapshot baseline: `'+SNAP+'`',1)
+          cs=cs.replace('baseline `39d40b752f9129ac898fb74da1e485c20c6fbdc6` (atomic activation after the W051 acceptance; the baseline is advanced from the DEC-0059 issuance mainline `41b3380` to the post-PR-#146 governance mainline by the DEC-0060 / LEDGER-RECON-009 baseline-advancement-only reconciliation)','baseline `'+SNAP+'` (W053 activation by DEC-0061 after W052 acceptance; persistent snapshot is the post-W052 merge mainline)',1)
           cs=cs.replace('`WORK-052` UsageLedger (issue #84) is the **active authorized** chain successor under `WORK-052-CORE-001` (DEC-0059, baseline reconciled to `39d40b7` by DEC-0060 / LEDGER-RECON-009) — the single active implementation track, gated per docs/WORK-052-handoff.md delivery protocol;','`WORK-052` UsageLedger (issue #84) is **accepted-merged** under DEC-0061 (PR #149 exact reviewed head `7d883b2`, merge `bcaf0d0`); its `WORK-052-CORE-001` authorization is superseded;')
-          cs=cs.replace('The active authorization is scoped to WORK-053 only and does not authorize WORK-043 (retired), WORK-044–WORK-052','The active authorization is scoped to WORK-053 only and does not authorize WORK-043 (retired), WORK-044–WORK-052')
-          cs=cs.replace('The W053 Architect handoff: `docs/WORK-053-handoff.md` (the Architect-issued handoff merged documentation-only by PR #118; implementation is gated on the WORK-052-CORE-001 authorization now active)','The W053 Architect handoff: `docs/WORK-053-handoff.md` (the Architect-issued current activation packet under WORK-053-CORE-001 / DEC-0061)')
+          cs=cs.replace('WORK-052 Architect work order: `docs/WORK-052-handoff.md`','WORK-052 Architect work order: `docs/WORK-052-handoff.md`')
+          cs=cs.replace('implementation is gated on the WORK-052-CORE-001 authorization now active','implementation is gated on the WORK-053-CORE-001 authorization now active')
+          # Explicitly retire the stale W052 sentence in the commercial chain, if present.
+          cs=cs.replace('only WORK-052 is activated, by DEC-0059.','WORK-052 is accepted-merged and WORK-053 is the sole active authorization, by DEC-0061.')
           p.write_text(cs)
 
-          print('reconciliation staged')
+          # self-test must mutate the CURRENT active authorization record, W053, not superseded W052.
+          p=ROOT/'tools/spec_check_selftest.py'; t=p.read_text()
+          t=t.replace('spec/architect/authorizations/WORK-052.yaml','spec/architect/authorizations/WORK-053.yaml')
+          t=t.replace('WORK-053-CORE-001 landed through the DEC-0059 governance transition','WORK-053-CORE-001 activated through the DEC-0061 governance transition')
+          t=t.replace('active WORK-053-CORE-001 scope (usage/)','active WORK-053-CORE-001 scope (allocation/)')
+          p.write_text(t)
+
+          print('state projections normalized; W053 remains sole active authorization')
           PY
           python3 tools/spec_check.py
           python3 tools/spec_check_selftest.py
+          rm -f .github/workflows/_tmp_reconcile_w053.yml
           git config user.name "ADCOS Architect Governance"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          rm -f .github/workflows/_tmp_reconcile_w053.yml
           git add -A
           git diff --cached --check
-          git commit -m "governance: reconcile W053 active-state projections (DEC-0063)"
+          git commit -m "governance: normalize W053 execution state (STATE-RECON-001)"
           git push origin HEAD:governance/w053-state-reconciliation
