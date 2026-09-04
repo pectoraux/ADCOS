@@ -15,45 +15,75 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Normalize current governance assumptions
+      - name: Normalize and clean governance state
         run: |
           python3 - <<'PY'
           from pathlib import Path
-          p=Path('tools/spec_check_selftest.py')
-          s=p.read_text(encoding='utf-8')
-          reps={
-            'spec/architect/authorizations/WORK-052.yaml':'spec/architect/authorizations/WORK-053.yaml',
-            'active_work_item: WORK-052':'active_work_item: WORK-053',
-            'active_authorization: "WORK-052-CORE-001"':'active_authorization: "WORK-053-CORE-001"',
-            'WORK-053-CORE-001 landed through the DEC-0059 governance transition':'WORK-053-CORE-001 activated through the DEC-0061 governance transition',
-            'active WORK-053-CORE-001 scope (usage/)':'active WORK-053-CORE-001 scope (allocation/)',
-          }
-          for old,new in reps.items(): s=s.replace(old,new)
-          p.write_text(s,encoding='utf-8')
-
-          p=Path('spec/architect/current-state.md')
-          s=p.read_text(encoding='utf-8')
-          s=s.replace('Reconciled snapshot baseline: `39d40b752f9129ac898fb74da1e485c20c6fbdc6`','Reconciled snapshot baseline: `bcaf0d0677437d1ffca8f5e493cab516c87e7194`',1)
-          s=s.replace('`WORK-052` UsageLedger (issue #84) is the **active authorized** chain successor under `WORK-052-CORE-001` (DEC-0059, baseline reconciled to `39d40b7` by DEC-0060 / LEDGER-RECON-009) — the single active implementation track, gated per docs/WORK-052-handoff.md delivery protocol;', '`WORK-052` UsageLedger (issue #84) is **accepted-merged** under DEC-0061 (PR #149 exact reviewed head `7d883b2`, merge `bcaf0d0`); its `WORK-052-CORE-001` authorization is superseded;')
-          s=s.replace('implementation is gated on the WORK-052-CORE-001 authorization now active','implementation is gated on the WORK-053-CORE-001 authorization now active')
-          s=s.replace('only WORK-052 is activated, by DEC-0059.','WORK-052 is accepted-merged and WORK-053 is the sole active authorization, by DEC-0061.')
-          p.write_text(s,encoding='utf-8')
-
-          p=Path('spec/architect/execution-state.yaml')
-          s=p.read_text(encoding='utf-8')
+          import re
+          ROOT=Path('.')
+          SNAP='bcaf0d0677437d1ffca8f5e493cab516c87e7194'
+          MAIN='246366a875d455cc6ba2605c8851a76825da1b9f'
+          p=ROOT/'spec/architect/execution-state.yaml'; s=p.read_text()
+          s=re.sub(r'^  main_sha_semantics: ".*"$', '  main_sha_semantics: "Persistent governance snapshot: post-W052 acceptance mainline `'+SNAP+'`, established by DEC-0061 / LEDGER-RECON-010. Governance PR #150 merged that transition as `'+MAIN+'`; this later governance-only merge sits beyond the reconciled snapshot under the standing branch-point convention. The sole active authorization is WORK-053-CORE-001 with baseline `'+SNAP+'`; a W053 implementation branch must re-read exact live main and inherit the authorization byte-identically."', s, count=1, flags=re.M)
           s=s.replace('  last: "WORK-051"','  last: "WORK-052"',1)
-          s=s.replace('active (WORK-052-CORE-001, DEC-0059:', 'accepted-merged (DEC-0061; PR #149 exact reviewed head 7d883b2, merge bcaf0d0; WORK-052-CORE-001 superseded)',1)
-          s=s.replace('authorization: "WORK-052-CORE-001"','authorization: "none"',1)
-          s=s.replace('status: "ready-candidate"\n    contract: "issue #85"\n    authorization: "none"','status: "active-authorized (WORK-053-CORE-001, DEC-0061; sole active implementation authorization on the post-W052 acceptance mainline)"\n    contract: "issue #85"\n    authorization: "WORK-053-CORE-001"',1)
-          p.write_text(s,encoding='utf-8')
-
-          for q in ['governance/.reconcile-trigger','governance/.selftest-fix-trigger','governance/.state-trigger']:
-              Path(q).unlink(missing_ok=True)
-          print('current governance projections normalized')
+          old52='''  - work_item: WORK-052
+    issue: 84
+    status: "active (WORK-052-CORE-001, DEC-0059: the UsageLedger is the single active authorization; implementation under the frozen WORK-052 contract per the issue #84 contract and the Architect-issued handoff docs/WORK-052-handoff.md — usage derives only from authoritative delivered-traffic evidence)"
+    contract: "issue #84"
+    authorization: "WORK-052-CORE-001"'''
+          new52='''  - work_item: WORK-052
+    issue: 84
+    status: "accepted-merged (DEC-0061; PR #149 exact reviewed head 7d883b2, merge bcaf0d0; WORK-052-CORE-001 superseded)"
+    contract: "issue #84"
+    authorization: "none"'''
+          if old52 in s: s=s.replace(old52,new52,1)
+          old53='''  - work_item: WORK-053
+    issue: 85
+    status: "ready-candidate"
+    contract: "issue #85"
+    authorization: "none"
+    prerequisite: "W051/W052 accepted/merged where their interfaces are consumed"'''
+          new53='''  - work_item: WORK-053
+    issue: 85
+    status: "active-authorized (WORK-053-CORE-001, DEC-0061; sole active implementation authorization on the post-W052 acceptance mainline)"
+    contract: "issue #85"
+    authorization: "WORK-053-CORE-001"
+    prerequisite: "Satisfied (WORK-051 and WORK-052 accepted-merged; W041/W042 dependencies satisfied where their interfaces are consumed)"'''
+          if old53 in s: s=s.replace(old53,new53,1)
+          if '# STATE-RECON-001:' not in s: s='# STATE-RECON-001: post-DEC-0061 execution-state projection normalization; W052 accepted, W053 active.\n'+s
+          p.write_text(s)
+          p=ROOT/'spec/architect/current-state.md'; cs=p.read_text()
+          cs=cs.replace('Reconciled snapshot baseline: `39d40b752f9129ac898fb74da1e485c20c6fbdc6`','Reconciled snapshot baseline: `'+SNAP+'`',1)
+          cs=cs.replace('`WORK-052` UsageLedger (issue #84) is the **active authorized** chain successor under `WORK-052-CORE-001` (DEC-0059, baseline reconciled to `39d40b7` by DEC-0060 / LEDGER-RECON-009) — the single active implementation track, gated per docs/WORK-052-handoff.md delivery protocol;','`WORK-052` UsageLedger (issue #84) is **accepted-merged** under DEC-0061 (PR #149 exact reviewed head `7d883b2`, merge `bcaf0d0`); its `WORK-052-CORE-001` authorization is superseded;')
+          cs=cs.replace('implementation is gated on the WORK-052-CORE-001 authorization now active','implementation is gated on the WORK-053-CORE-001 authorization now active')
+          cs=cs.replace('only WORK-052 is activated, by DEC-0059.','WORK-052 is accepted-merged and WORK-053 is the sole active authorization, by DEC-0061.')
+          p.write_text(cs)
+          p=ROOT/'tools/spec_check_selftest.py'; t=p.read_text()
+          for old,new in {
+              'spec/architect/authorizations/WORK-052.yaml':'spec/architect/authorizations/WORK-053.yaml',
+              'active_work_item: WORK-052':'active_work_item: WORK-053',
+              'active_authorization: "WORK-052-CORE-001"':'active_authorization: "WORK-053-CORE-001"',
+              'WORK-053-CORE-001 landed through the DEC-0059 governance transition':'WORK-053-CORE-001 activated through the DEC-0061 governance transition',
+              'active WORK-053-CORE-001 scope (usage/)':'active WORK-053-CORE-001 scope (allocation/)',
+          }.items(): t=t.replace(old,new)
+          p.write_text(t)
+          # Remove every temporary file BEFORE scope/provenance checks.
+          for q in [
+              '.github/workflows/_tmp_w052_w053_governance.yml',
+              '.github/workflows/_tmp_reconcile_w053.yml',
+              '.github/workflows/_tmp_reconcile_w053_v2.yml',
+              '.github/workflows/_tmp_reconcile_w053_v3.yml',
+              '.github/workflows/_tmp_reconcile_w053_v2.yml',
+              'governance/.reconcile-trigger',
+              'governance/.selftest-fix-trigger',
+              'governance/.state-trigger',
+              'governance/.state-trigger-v3',
+              'governance/.state-trigger-v3',
+          ]: Path(q).unlink(missing_ok=True)
+          print('governance projections normalized; temporary artifacts removed before checks')
           PY
           python3 tools/spec_check.py
           python3 tools/spec_check_selftest.py
-          rm -f .github/workflows/_tmp_reconcile_w053.yml .github/workflows/_tmp_reconcile_w053_v2.yml .github/workflows/_tmp_reconcile_w053_v3.yml
           git config user.name "ADCOS Architect Governance"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
