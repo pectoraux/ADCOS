@@ -1,0 +1,62 @@
+name: temporary-w053-state-reconciliation-v3
+
+on:
+  push:
+    branches:
+      - governance/w053-state-reconciliation
+
+permissions:
+  contents: write
+
+jobs:
+  reconcile:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Normalize current governance assumptions
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('tools/spec_check_selftest.py')
+          s=p.read_text(encoding='utf-8')
+          reps={
+            'spec/architect/authorizations/WORK-052.yaml':'spec/architect/authorizations/WORK-053.yaml',
+            'active_work_item: WORK-052':'active_work_item: WORK-053',
+            'active_authorization: "WORK-052-CORE-001"':'active_authorization: "WORK-053-CORE-001"',
+            'WORK-053-CORE-001 landed through the DEC-0059 governance transition':'WORK-053-CORE-001 activated through the DEC-0061 governance transition',
+            'active WORK-053-CORE-001 scope (usage/)':'active WORK-053-CORE-001 scope (allocation/)',
+          }
+          for old,new in reps.items(): s=s.replace(old,new)
+          p.write_text(s,encoding='utf-8')
+
+          p=Path('spec/architect/current-state.md')
+          s=p.read_text(encoding='utf-8')
+          s=s.replace('Reconciled snapshot baseline: `39d40b752f9129ac898fb74da1e485c20c6fbdc6`','Reconciled snapshot baseline: `bcaf0d0677437d1ffca8f5e493cab516c87e7194`',1)
+          s=s.replace('`WORK-052` UsageLedger (issue #84) is the **active authorized** chain successor under `WORK-052-CORE-001` (DEC-0059, baseline reconciled to `39d40b7` by DEC-0060 / LEDGER-RECON-009) — the single active implementation track, gated per docs/WORK-052-handoff.md delivery protocol;', '`WORK-052` UsageLedger (issue #84) is **accepted-merged** under DEC-0061 (PR #149 exact reviewed head `7d883b2`, merge `bcaf0d0`); its `WORK-052-CORE-001` authorization is superseded;')
+          s=s.replace('implementation is gated on the WORK-052-CORE-001 authorization now active','implementation is gated on the WORK-053-CORE-001 authorization now active')
+          s=s.replace('only WORK-052 is activated, by DEC-0059.','WORK-052 is accepted-merged and WORK-053 is the sole active authorization, by DEC-0061.')
+          p.write_text(s,encoding='utf-8')
+
+          p=Path('spec/architect/execution-state.yaml')
+          s=p.read_text(encoding='utf-8')
+          s=s.replace('  last: "WORK-051"','  last: "WORK-052"',1)
+          s=s.replace('active (WORK-052-CORE-001, DEC-0059:', 'accepted-merged (DEC-0061; PR #149 exact reviewed head 7d883b2, merge bcaf0d0; WORK-052-CORE-001 superseded)',1)
+          s=s.replace('authorization: "WORK-052-CORE-001"','authorization: "none"',1)
+          s=s.replace('status: "ready-candidate"\n    contract: "issue #85"\n    authorization: "none"','status: "active-authorized (WORK-053-CORE-001, DEC-0061; sole active implementation authorization on the post-W052 acceptance mainline)"\n    contract: "issue #85"\n    authorization: "WORK-053-CORE-001"',1)
+          p.write_text(s,encoding='utf-8')
+
+          for q in ['governance/.reconcile-trigger','governance/.selftest-fix-trigger','governance/.state-trigger']:
+              Path(q).unlink(missing_ok=True)
+          print('current governance projections normalized')
+          PY
+          python3 tools/spec_check.py
+          python3 tools/spec_check_selftest.py
+          rm -f .github/workflows/_tmp_reconcile_w053.yml .github/workflows/_tmp_reconcile_w053_v2.yml .github/workflows/_tmp_reconcile_w053_v3.yml
+          git config user.name "ADCOS Architect Governance"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "governance: finalize W053 execution-state reconciliation"
+          git push origin HEAD:governance/w053-state-reconciliation
