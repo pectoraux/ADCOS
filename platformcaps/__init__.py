@@ -1,6 +1,7 @@
 """ADCOS platform capability package — WORK-050: the versioned
-platform connectivity sharing capability registry and its
-deterministic compatibility evaluation.
+platform connectivity sharing capability registry, its
+deterministic compatibility evaluation, and its versioned
+auditable history.
 
 Implements the frozen WORK-050 stages under the active
 authorization WORK-050-CORE-001 (DEC-0078; baseline advanced to
@@ -10,7 +11,11 @@ registry (accepted); W050.2 — the deterministic compatibility
 evaluation ((profile x role x sharing mode x isolation
 requirement) -> supported/restricted/unsupported/unknown + typed
 findings; unregistered is the fail-closed unknown default; no
-label ever implies support).  The central boundary:
+label ever implies support) (accepted); W050.3 — the versioned
+auditable history (append-only, content-derived decision ids,
+deterministic replay/restoration; registry evolution never
+rewrites preserved provenance; history preserves results, it
+never re-evaluates them).  The central boundary:
 
     W050 "supported"  !=  permission
                       !=  authorization
@@ -61,12 +66,12 @@ Fail-closed rules (frozen):
    declaration is never a PHYSICAL platform claim and never
    proof that a particular physical deployment currently works.
 
-W050.2 stop boundary (frozen): this package contains the
-declaration model, the registry, and the deterministic
-compatibility evaluation ONLY.  Versioned auditable HISTORY,
-the deterministic battery, and CI wiring are later stages
-(history.py / selftest are NOT implemented here); W048/W049
-integration, OS/platform adapters, packet forwarding, and
+W050.3 stop boundary (frozen): this package contains the
+declaration model, the registry, the deterministic compatibility
+evaluation, and the versioned auditable history ONLY.  The
+deterministic battery and CI wiring are the later stage
+(selftest is NOT implemented here); W048/W049 integration,
+OS/platform adapters, packet forwarding, and
 firewall/tether/VPN/proxy implementation are forbidden
 territory.  This package composes with the authorities — it
 replaces none of them.
@@ -79,6 +84,12 @@ from .evaluation import (
     CompatibilityEvaluation,
     EvaluationFinding,
     evaluate_sharing_compatibility,
+)
+from .history import (
+    CompatibilityHistory,
+    HistoricalDecisionRecord,
+    HISTORY_SCHEMA_VERSION,
+    decision_identity,
 )
 from .model import (
     EVIDENCE_CLASS_SOFTWARE,
@@ -100,13 +111,16 @@ from .registry import PlatformCapabilityRegistry
 
 __all__ = [
     "EVIDENCE_CLASS_SOFTWARE",
+    "HISTORY_SCHEMA_VERSION",
     "ROLE_BUYER",
     "ROLE_PROVIDER",
     "ROLES",
     "SCHEMA_VERSION",
     "CapabilityState",
     "CompatibilityEvaluation",
+    "CompatibilityHistory",
     "EvaluationFinding",
+    "HistoricalDecisionRecord",
     "IsolationPrimitive",
     "LeaseEnforcementCapability",
     "MeteringCapability",
@@ -118,5 +132,6 @@ __all__ = [
     "RoleCapability",
     "SharingModeClass",
     "SharingModeDeclaration",
+    "decision_identity",
     "evaluate_sharing_compatibility",
 ]
