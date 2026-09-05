@@ -1,0 +1,47 @@
+# ADCOS Work Item authorization record — WORK-044 active implementation.
+# Issued by DEC-0063 after Architect acceptance of W053.
+work_item: WORK-044
+status: active
+authorized: true
+type: implementation
+authorization_id: "WORK-044-CORE-001"
+authorization_decision: DEC-0063
+baseline_sha: 08fa890307ee54a93397515cd219b0d93c89e9f4
+review_basis: "DEC-0063 accepts W053 on PR #152 exact reviewed head 4a0021c4d464bf1e0e9d9b29ff8a87ed8eb8146a, merged as bb29c11c8bba6c9db5b87f85b1d62faad0bf7825. W044 issue #88 is the deterministic next commercial Work Item in the accepted execution lane, with hard dependencies WORK-051 and WORK-053 satisfied."
+dependencies:
+  - WORK-051
+  - WORK-053
+authority_inputs:
+  - "WORK-051 CommercialCore (accepted-merged by DEC-0059): canonical commercial state lifecycle and transaction identities"
+  - "WORK-052 UsageLedger (accepted-merged by DEC-0061): billable-final usage facts and delivery correlation"
+  - "WORK-053 EconomicAllocation (accepted-merged by DEC-0063): finalized allocations and settlement/reconciliation references"
+  - "WORK-033 AgentClock seam"
+authority_outputs:
+  - "the provider-neutral payment/settlement adapter boundary and reconciliation state: idempotent payment intents, authorization/capture/refund/reversal status mapping, payout/transfer instruction emission from finalized allocations, callback/webhook observation with signature and anti-replay protection, provider failure normalization, provider/ADCOS reconciliation, explicit versioned provider capabilities, and the deterministic sandbox provider; never a usage authority, a delivery-evidence authority, a session/path/routing authority, or a regulated-funds custody authority"
+scope:
+  - "payment/"
+  - "tools/payment_selftest.py"
+  - "docs/WORK-044-evidence.md"
+  - ".github/workflows/spec-check.yml"
+acceptance_criteria:
+  - "Provider success can never create UsageLedger facts and can never bypass BILLABLE_FINAL; payment adapters consume commercial and allocation facts through existing public authorities only."
+  - "Payment intent creation/retrieval is idempotent; duplicate, replayed, and out-of-order callbacks are idempotent and append-only; settled history is never rewritten (corrections are compensating records)."
+  - "Provider-specific semantics do not leak into the canonical model: authorization/capture/refund/reversal mapping and payout/transfer instruction emission are provider-neutral, with explicit versioned provider capabilities."
+  - "Provider/ADCOS divergence reconciliation is explicit and never rewrites history; provider failures are normalized at the adapter boundary."
+  - "A deterministic fake/sandbox provider proves the flows; strict import/boundary tests prove payment adapters never import identity/session/routing/NetworkPath/transport/packet authorities in forbidden directions, and no live-money custody or real provider onboarding is introduced by WORK-044."
+out_of_scope:
+  - "WORK-045 and later commercial Work Items"
+  - "marketplace, developer API/SDK/webhook client runtime, and client runtime implementation"
+  - "KYC/KYB, custody of regulated funds, merchant-of-record, and jurisdiction policy implementation"
+  - "identity/session/routing/networking/transport/packet authority changes"
+  - "wire-schema or frozen architecture/protocol changes"
+  - "W040 physical evidence and its obligations"
+  - "modifying spec/architect/ from the WORK-044 implementation PR"
+acceptance_gate:
+  status: "Architect review required after implementation"
+  required_evidence:
+    - "dedicated deterministic payment-adapter battery over the sandbox provider covering idempotent intent/capture/refund/reversal/payout flows, callback signature and anti-replay checks, duplicate/replay/out-of-order idempotency, reconciliation, and import discipline"
+    - "negative proofs that provider success never creates usage and never bypasses billable-final, and that settled history stays immutable"
+    - "exact reviewed delivery SHA, evidence manifest, scope audit, CI/provenance, replay and hash-seed determinism"
+handoff: "docs/roadmap/commercial-dependency-model.md"
+handoff_required: false
