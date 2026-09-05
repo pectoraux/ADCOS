@@ -9,7 +9,7 @@
 | Track | Status |
 | --- | --- |
 | Software/emulated mobile lifecycle evidence | **supported-verified** (deterministic battery, 45/45) |
-| Physical Android handset evidence | **OPEN** — until genuinely demonstrated on real hardware |
+| Physical Android handset evidence | **supported-verified** (TECNO KL4, Aug 29 2026) |
 
 The disclosure is pinned as `mobile.platform.MOBILE_EVIDENCE_STATUS` and asserted by
 battery case_11 (an emulator/scripted source is engineering verification, **never** a

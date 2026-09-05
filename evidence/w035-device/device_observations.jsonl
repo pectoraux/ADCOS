@@ -1,0 +1,9 @@
+{"timestamp":"2026-08-29T06:16:14.052140Z","app_phase":"foreground","power_state":"charging","screen_on":true,"locked":false,"network_kind":"wifi","metered":false,"background_restricted":false}
+{"timestamp":"2026-08-29T06:17:10.463072Z","app_phase":"foreground","power_state":"charging","screen_on":true,"locked":false,"network_kind":"wifi","metered":false,"background_restricted":false}
+{"timestamp":"2026-08-29T06:17:11.633615Z","app_phase":"background","power_state":"charging","screen_on":true,"locked":false,"network_kind":"wifi","metered":false,"background_restricted":false}
+{"timestamp":"2026-08-29T06:17:45.788720Z","app_phase":"foreground","power_state":"charging","screen_on":true,"locked":false,"network_kind":"cellular","metered":true,"background_restricted":false}
+{"timestamp":"2026-08-29T06:17:51.950406Z","app_phase":"foreground","power_state":"charging","screen_on":true,"locked":false,"network_kind":"cellular","metered":true,"background_restricted":false}
+{"timestamp":"2026-08-29T06:18:17.898497Z","app_phase":"foreground","power_state":"charging","screen_on":true,"locked":false,"network_kind":"wifi","metered":false,"background_restricted":false}
+{"timestamp":"2026-08-29T06:18:26.029940Z","app_phase":"foreground","power_state":"charging","screen_on":true,"locked":false,"network_kind":"wifi","metered":false,"background_restricted":false}
+{"timestamp":"2026-08-29T06:18:29.247158Z","app_phase":"foreground","power_state":"charging","screen_on":true,"locked":false,"network_kind":"wifi","metered":false,"background_restricted":false}
+{"timestamp":"2026-08-29T06:18:37.390160Z","app_phase":"foreground","power_state":"on-battery","screen_on":true,"locked":false,"network_kind":"wifi","metered":false,"background_restricted":false}

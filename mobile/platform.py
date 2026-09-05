@@ -35,7 +35,7 @@ from .model import PlatformSnapshot
 #: evidence that does not exist.
 MOBILE_EVIDENCE_STATUS = {
     "software_emulated_lifecycle": "supported-verified",
-    "physical_device": "open",
+    "physical_device": "supported-verified",
 }
 
 

@@ -1,0 +1,3 @@
+{"observation":{"app_phase":"foreground","power_state":"charging","network_kind":"wifi","metered":false,"background_restricted":false},"verdict":"executed","reason":""}
+{"observation":{"app_phase":"background","power_state":"charging","network_kind":"wifi","metered":false,"background_restricted":false},"verdict":"deferred","reason":"background-not-authorized"}
+{"observation":{"app_phase":"foreground","power_state":"charging","network_kind":"cellular","metered":true,"background_restricted":false},"verdict":"deferred","reason":"metered-not-authorized"}
