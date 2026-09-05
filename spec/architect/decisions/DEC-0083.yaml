@@ -1,0 +1,45 @@
+# ADCOS Decision Record — DEC-0083
+# W050 retrospective acceptance after exact repository re-review
+
+decision_id: DEC-0083
+type: acceptance
+status: ACCEPTED
+work_item: WORK-050
+date: "2026-09-05"
+subject: "Accept WORK-050 Platform Connectivity Sharing Capability & Isolation Matrix at its exact final delivery"
+
+context:
+  governing_roadmap: "spec/architect/roadmap.yaml Version 1.1"
+  authorization_history: "WORK-050-CORE-001 issued by DEC-0078 and baseline-reconciled by DEC-0079"
+  delivery_head: "815f4febbc64d55d3576386e65adaa6244c4f7cb"
+  evidence_document: "docs/WORK-050-evidence.md"
+  evidence_basis: "W050.1, W050.2, and W050.3 were accepted stage heads; W050.4 is the final permanent verification package. The final package reports 76/76 deterministic vectors across obligations A–S, exact source/surface and authorization provenance audits, authority/import boundary audits, replay/restoration integrity, hash-seed/repeat determinism, fresh-world/order independence, and explicit SOFTWARE/PHYSICAL separation."
+
+review:
+  disposition: ACCEPTED
+  reviewed_sha: "815f4febbc64d55d3576386e65adaa6244c4f7cb"
+  review_basis:
+    - "W050.1 declaration registry accepted at 4a37408f1c36566babf58163bed26ac5a75ff655 with corrected immutability and error-vocabulary discipline."
+    - "W050.2 deterministic compatibility evaluation accepted at c5cb509d17274f1c762ce7e9b273d12acf7dac79."
+    - "W050.3 versioned auditable history accepted at 279871c72039042f9674d0e191defc37dc97e5b7."
+    - "W050.4 permanent verification covers the complete frozen contract in vectors A–S and reports 76/76 PASS."
+    - "The permanent battery proves byte-identical repeat and PYTHONHASHSEED=0/1/7919/unset determinism."
+    - "The package proves exact authorization/surface provenance, authority/import boundaries, replay/restoration integrity, and SOFTWARE/PHYSICAL honesty."
+    - "No architecture, protocol, registry, dependency, containment, networking, payment, or physical-evidence authority is introduced by W050."
+
+ruling:
+  - "WORK-050 is ACCEPTED at the exact reviewed delivery head 815f4febbc64d55d3576386e65adaa6244c4f7cb."
+  - "This decision resolves the acceptance-provenance uncertainty identified by DEC-0082."
+  - "Acceptance is retrospective over the already-delivered authorized W050 package; it creates no new implementation authorization."
+  - "W050 remains a capability/isolation declaration and compatibility-evaluation authority only; it is not a containment-enforcement, routing, session, identity, transport, usage, payment, marketplace, client, or physical authority."
+  - "The W050 -> W048/W049 relationship remains advisory capability input, never a hard dependency."
+  - "W040 physical evidence remains independently governed and W040-owned."
+
+preservation:
+  - "All prior decision records, including DEC-0082, remain unchanged in Git history."
+  - "All prior lifecycle reconciliations remain unchanged; the execution ledger receives a new explicit reconciliation."
+  - "No frozen architecture or protocol semantics are changed."
+  - "No physical evidence obligation is promoted by software evidence."
+
+next_gate: R1_GOVERNANCE_RECONCILIATION
+implementation_effect: "No new implementation authorization; W050 acceptance closes its provenance blocker."
