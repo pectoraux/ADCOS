@@ -176,6 +176,25 @@ jobs:
       - name: Run economic allocation tests
         run: python3 tools/allocation_selftest.py
 
+      # Restored accepted commercial-phase implementation batteries. These
+      # are the exact W044-W049 battery artifacts accepted at their original
+      # delivery heads; only their missing CI invocation wiring is restored
+      # here. No implementation semantics are recreated or modified.
+      - name: Run payment provider adapter tests
+        run: python3 tools/payment_selftest.py
+
+      - name: Run eligibility policy tests
+        run: python3 tools/eligibility_selftest.py
+
+      - name: Run developer API/SDK/webhook tests
+        run: python3 tools/developerapi_selftest.py
+
+      - name: Run marketplace discovery tests
+        run: python3 tools/marketplace_selftest.py
+
+      - name: Run provider/buyer client runtime tests
+        run: python3 tools/client_selftest.py
+
       # Persistent Architect package: authorization provenance for pull
       # requests. Runs LAST on purpose: the frozen-surface batteries above
       # detect the origin/main ref to choose their strict context, and this
