@@ -1,7 +1,7 @@
 schema_version: 1
 kind: canonical_implementation_roadmap
 status: authoritative
-last_reconciled_main_sha: bcaf0d0677437d1ffca8f5e493cab516c87e7194
+last_reconciled_main_sha: bb29c11c8bba6c9db5b87f85b1d62faad0bf7825
 architecture_authority:
   frozen: spec/architecture.md
   lock: spec/architecture-lock.md
@@ -72,7 +72,7 @@ work_items:
   WORK-041: {title: First-Class Network Path and Platform Integration, status: accepted-merged, authorization: none, dependencies: [WORK-016, WORK-018, WORK-033, WORK-034], dependency_type: [hard, hard, hard, hard], contract: spec/architect/work-items/WORK-041.md, architecture_basis: ACR-005}
   WORK-042: {title: Event-Driven Platform Integration and Journal-First Recovery, status: accepted-merged, authorization: none, dependencies: [WORK-012, WORK-013, WORK-014, WORK-033, WORK-035, WORK-041], dependency_type: [hard, hard, hard, hard, hard, hard], contract: spec/architect/work-items/WORK-042.md, architecture_basis: ACR-006}
   WORK-043: {title: retired-unassigned, status: retired, authorization: none, dependencies: [], dependency_type: [], contract: null}
-  WORK-044: {title: Payment Provider Adapters & Settlement Gateway, status: accepted-merged, authorization: none, dependencies: [WORK-051, WORK-053], dependency_type: [hard, hard], contract: issue-88+authorization-history, architecture_basis: ACR-009}
+  WORK-044: {title: Payment Provider Adapters & Settlement Gateway, status: active-authorized, authorization: WORK-044-CORE-001, dependencies: [WORK-051, WORK-053], dependency_type: [hard, hard], contract: issue-88+docs/WORK-044-handoff.md, architecture_basis: ACR-009, baseline: bb29c11c8bba6c9db5b87f85b1d62faad0bf7825, decision: DEC-0063}
   WORK-045: {title: Connectivity Eligibility, Provider Trust & Jurisdiction Policy, status: accepted-merged, authorization: none, dependencies: [WORK-051, WORK-053, WORK-044], dependency_type: [hard, hard, hard], contract: issue-89+authorization-history, architecture_basis: ACR-009}
   WORK-046: {title: Developer Connectivity API, SDK & Webhook Platform, status: accepted-merged, authorization: none, dependencies: [WORK-051, WORK-052, WORK-053, WORK-044, WORK-045], dependency_type: [hard, hard, hard, hard, hard], contract: issue-90+authorization-history, architecture_basis: ACR-009}
   WORK-047: {title: Connectivity Marketplace Discovery, Proximity & Path Selection, status: accepted-merged, authorization: none, dependencies: [WORK-051, WORK-044, WORK-045, WORK-046], dependency_type: [hard, hard, hard, hard], contract: issue-91+authorization-history, architecture_basis: ACR-009}
@@ -81,9 +81,9 @@ work_items:
   WORK-050: {title: Platform Connectivity Sharing Capability & Isolation Matrix, status: accepted-merged, authorization: none, dependencies: [], dependency_type: [], contract: issue-96+authorization-history, architecture_basis: ACR-009+ACR-012, note: advisory capability input; not an enforcement authority}
   WORK-051: {title: CommercialCore: connectivity intent, offers, reservation, lease, and transaction lifecycle, status: accepted-merged, authorization: none, dependencies: [], dependency_type: [], contract: issue-83+docs/WORK-051-handoff.md, architecture_basis: ACR-009}
   WORK-052: {title: UsageLedger: delivered-usage metering, billable finality, and append-only reconciliation, status: accepted-merged, authorization: none, dependencies: [WORK-051], dependency_type: [hard], contract: issue-84+docs/WORK-052-handoff.md, decision: DEC-0061}
-  WORK-053: {title: EconomicAllocation: developer/provider/ADCOS revenue-share policy and external payment boundary, status: active-authorized, authorization: WORK-053-CORE-001, dependencies: [WORK-051, WORK-052], dependency_type: [hard, hard], contract: issue-85+docs/WORK-053-handoff.md, architecture_basis: ACR-009}
+  WORK-053: {title: EconomicAllocation: developer/provider/ADCOS revenue-share policy and external payment boundary, status: accepted-merged, authorization: none, dependencies: [WORK-051, WORK-052], dependency_type: [hard, hard], contract: issue-85+docs/WORK-053-handoff.md, architecture_basis: ACR-009, decision: DEC-0063}
 execution_order:
-  active: WORK-053
+  active: WORK-044
   next_after_active: []
   commercial_hard_gates:
     WORK-053: [WORK-052]

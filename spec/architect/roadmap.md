@@ -7,17 +7,18 @@ Frozen architecture remains authoritative in `spec/architecture.md`, `spec/archi
 
 ## Current execution state
 
-- Live main at W052 acceptance/transition: `bcaf0d0677437d1ffca8f5e493cab516c87e7194`
-- Active Work Item: **WORK-053 EconomicAllocation**
-- Active authorization: **WORK-053-CORE-001**
-- Authorized baseline: **bcaf0d0677437d1ffca8f5e493cab516c87e7194**
+- Live main at W053 acceptance/transition: `bb29c11c8bba6c9db5b87f85b1d62faad0bf7825`
+- Active Work Item: **WORK-044 Payment Provider Adapters & Settlement Gateway**
+- Active authorization: **WORK-044-CORE-001**
+- Authorized baseline: **bb29c11c8bba6c9db5b87f85b1d62faad0bf7825**
 - W051: accepted/merged
 - W052: accepted/merged at exact reviewed head `7d883b2`, merge `bcaf0d0677437d1ffca8f5e493cab516c87e7194`
-- W053: active-authorized; implementation not yet delivered
+- W053: accepted/merged at exact reviewed head `4a0021c`, merge `bb29c11c8bba6c9db5b87f85b1d62faad0bf7825`
+- W044: active-authorized; implementation not yet delivered (no W044 code exists yet)
 - W040: independent physical-validation/evidence track, in-review and not accepted
 - W043: retired/unassigned
 
-The live baseline was reconciled by DEC-0060 / LEDGER-RECON-009 and PR #147, merged as `2e87cb3`. The authorization itself is unchanged; only the persistent baseline was advanced to the authorization-bearing post-transition mainline.
+The live baseline was reconciled by DEC-0063 / LEDGER-RECON-011 after the W053 acceptance (PR #152) and the W044 activation. Governance commits beyond the reconciled snapshot (the accidental direct-main transition add/remove pair and this transition's own merge) sit beyond the baseline without changing persistent state; the W044 implementation branch must be cut from the exact live authorization-bearing main re-read at activation time.
 
 ## Authority model
 
@@ -87,24 +88,26 @@ W043 is retired and intentionally unassigned.
 
 | State | Work Items |
 |---|---|
-| Accepted / merged | W001–W039, W041, W042, W044–W052 |
-| Active / authorized | W053 |
+| Accepted / merged | W001–W039, W041, W042, W045–W053 |
+| Active / authorized | W044 |
 | In review / not accepted | W040 |
 | Retired | W043 |
 
-## W053 execution packet
+(The `Accepted / merged` row above carries the pre-existing commercial-era projection quirk inherited from the obsolete downstream lineage roadmap state — WORK-045–WORK-050 are in fact registered-only and unauthorized per the execution ledger; this transition changes only the W053/W044 status fields, mirroring the DEC-0061 minimal-delta precedent, and does not repair the inherited row.)
 
-Contract: `spec/work-items.md` WORK-053 + `docs/WORK-053-handoff.md` + `spec/architect/authorizations/WORK-053.yaml`.
+## W044 execution packet
 
-Scope: `usage/`, `tools/usage_selftest.py`, `docs/WORK-052-handoff.md`, `docs/WORK-052-evidence.md`, and one additive CI battery step. The implementation PR must not modify `spec/architect/`.
+Contract: `spec/work-items.md` WORK-044 + `docs/WORK-044-handoff.md` + `spec/architect/authorizations/WORK-044.yaml`.
 
-Authority: W052 owns usage/economic ledger state only. It consumes authoritative delivery evidence and references W051/W041/W042/W033 interfaces; it must not create or mutate identity, session, NetworkPath, routing, transport, payment, or delivery authority.
+Scope: the payment adapter implementation and its deterministic battery, the W044 evidence record, and one additive CI battery step — all created by the future W044 implementation PR (none exists yet in this transition); the machine-readable scope list is `spec/architect/authorizations/WORK-044.yaml`. The implementation PR must not modify `spec/architect/`.
 
-Acceptance: authoritative delivery evidence only; payment capture never creates usage; reservation/lease never creates usage; duplicates do not double-charge; out-of-order/delayed observations are deterministic; billable finality is explicit/immutable; corrections are append-only; restart/replay is byte-identical; unknown/fabricated evidence fails closed.
+Authority: the payment layer owns the provider-neutral adapter boundary only. It consumes public EconomicAllocation settlement/payout projections and public commercial references as DATA; it must not create or mutate identity, session, NetworkPath, routing, transport, usage, allocation, or delivery authority. Provider callbacks are external observations until reconciled; corrections are append-only; no custody or regulated funds movement.
+
+Acceptance: idempotent intent/capture/refund/reversal/payout through the abstract adapter and the deterministic sandbox provider; provider success never creates usage or bypasses billable-final; callback replay/duplicate/out-of-order remain idempotent and append-only; reconciliation detects divergence without rewriting history; capabilities are explicit and versioned; strict import discipline; restart/replay is byte-identical; unknown/fabricated provider state fails closed.
 
 ## Next-order rule
 
-Exactly one Work Item may be active-authorized. The current target is W053 under `WORK-053-CORE-001`. Roadmap placement alone never authorizes W044 or any other downstream item.
+Exactly one Work Item may be active-authorized. The current target is W044 under `WORK-044-CORE-001`. Roadmap placement alone never authorizes W045 or any other downstream item.
 
 ## Fresh-architect recovery
 

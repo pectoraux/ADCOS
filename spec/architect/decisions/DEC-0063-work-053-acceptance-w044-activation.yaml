@@ -1,0 +1,61 @@
+# ADCOS Architect decision record.
+# Atomic WORK-053 acceptance -> WORK-044 activation after the accepted
+# WORK-053 delivery on current main (PR #152). Governance-only: no
+# WORK-044 implementation is included in this transition.
+#
+# Provenance note: the initial attempt at this exact transition was
+# accidentally written directly to main (commit 0e0e321 creating a
+# DEC-0063 record, removed by eddf98e; a placeholder commit 4c512ac
+# removed by 08fa890; the net main tree is byte-identical to the
+# accepted W053 merge bb29c11). This properly-routed record supersedes
+# those accidental commits, which remain in history as the transparent
+# record. The earlier DEC-0062 file on the stale
+# governance/w053-acceptance-w044-activation lineage is historical
+# pre-reconstruction material based on superseded PR #124 and is not
+# the current acceptance authority.
+# schema: spec/architect/decision-record-template.md; verified by tools/spec_check.py (ARCH-04).
+decision_id: DEC-0063
+type: governance
+work_item: WORK-053
+acr: null
+pr: 152
+reviewed_sha: 4a0021c4d464bf1e0e9d9b29ff8a87ed8eb8146a
+decision: ACCEPTED
+status: ACCEPTED
+reviewer: "Architect (pectoraux)"
+timestamp: 2026-09-05T03:27:11Z
+findings:
+  - "WORK-053 is accepted at exact reviewed head 4a0021c4d464bf1e0e9d9b29ff8a87ed8eb8146a (review round 1; zero correction rounds on the PR); the Architect review found no P0/P1 contract or architectural defect; the durable acceptance record is the PR #152 Architect acceptance comment 5549039574 (2026-09-05T03:27:11Z)."
+  - "The required EconomicAllocation battery, provenance, replay-integrity, deterministic arithmetic, exact conservation/rounding, immutable-policy, compensation, external-reference, and authority-boundary requirements were satisfied on the exact reviewed head."
+  - "CI run 33931905976 is SUCCESS on the exact reviewed head 4a0021c4d464bf1e0e9d9b29ff8a87ed8eb8146a and includes the dedicated W053 battery step and provenance checks."
+  - "PR #152 merged the exact reviewed head as bb29c11c8bba6c9db5b87f85b1d62faad0bf7825 (2026-09-05T03:27:16Z) with no implementation changes after Architect acceptance."
+  - "This acceptance is SOFTWARE-class only; no physical evidence is created or promoted. W040 remains an independent physical-evidence track: in-review, unaccepted, EVID-007 OPEN, EVID-008 OPEN, W040-owned."
+  - "This is a governance transition only: no architecture or protocol semantics change, no frozen specification document is modified, and no WORK-044 implementation is included."
+blockers: []
+required_corrections: []
+evidence:
+  merge_sha: bb29c11c8bba6c9db5b87f85b1d62faad0bf7825
+  ci_run: 33931905976
+  artifacts:
+    - "docs/WORK-053-evidence.md"
+    - "docs/WORK-053-handoff.md"
+    - "PR #152 Architect acceptance comment 5549039574 (the durable exact-SHA acceptance record)"
+accepted_scope:
+  - "WORK-053 EconomicAllocation as delivered on exact reviewed head 4a0021c4d464bf1e0e9d9b29ff8a87ed8eb8146a and merged as bb29c11c8bba6c9db5b87f85b1d62faad0bf7825."
+  - "The allocation model, validation, journal, lifecycle, digest, evidence boundary, immutable projection semantics, replay integrity, and deterministic battery evidenced by the delivery record."
+  - "SOFTWARE evidence classification only; no physical evidence is accepted or implied."
+rejected_scope:
+  - "Any modification to frozen architecture or protocol semantics."
+  - "Any acceptance or closure of W040 physical evidence obligations EVID-007/EVID-008."
+  - "Any WORK-044 implementation or payment-provider onboarding in this governance transition."
+  - "Any live-money custody or regulated funds movement."
+  - "Any activation of WORK-045 or later Work Items."
+downstream_effect:
+  - "WORK-053 transitions registered -> accepted-merged with acceptance_decision DEC-0063; the exact reviewed/pr/merge/CI facts are preserved in the execution ledger."
+  - "WORK-053-CORE-001 is superseded (status superseded, authorized false, superseded_by WORK-044-CORE-001, supersession_decision DEC-0063); its original authorization record remains durable provenance with scope and issuance facts preserved."
+  - "WORK-044-CORE-001 is created as the sole active implementation authorization from the post-W053-merge mainline bb29c11c8bba6c9db5b87f85b1d62faad0bf7825 with dependencies exactly WORK-051 and WORK-053 (both accepted-merged and satisfied)."
+  - "The single active execution slot transfers from WORK-053 to WORK-044; W044 may implement only the provider-neutral payment/settlement adapter boundary defined by issue #88, the frozen spec/work-items.md WORK-044 contract, and its repository-local authorization spec/architect/authorizations/WORK-044.yaml."
+  - "WORK-044 implementation is NOT included in this transition; a W044 implementation PR may issue only after the Architect merges this governance PR, with the implementation branch cut from the exact live authorization-bearing main re-read at activation time."
+  - "W040 remains independent, in-review, and unaccepted; its physical obligations remain OPEN and W040-owned."
+  - "Historical W053 PR #124 lineage and the later W044-W050 downstream material are neither reused nor imported; the stale DEC-0062 record is not the current authority."
+resolved_by: null

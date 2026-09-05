@@ -1,0 +1,54 @@
+# ADCOS Work Item authorization record — WORK-044 active implementation.
+# Issued by DEC-0063 after Architect acceptance of W053 PR #152.
+work_item: WORK-044
+status: active
+authorized: true
+type: implementation
+authorization_id: "WORK-044-CORE-001"
+authorization_decision: DEC-0063
+baseline_sha: bb29c11c8bba6c9db5b87f85b1d62faad0bf7825
+review_basis: "DEC-0063 accepts W053 on PR #152 exact reviewed head 4a0021c4d464bf1e0e9d9b29ff8a87ed8eb8146a, merged as bb29c11c8bba6c9db5b87f85b1d62faad0bf7825 (CI run 33931905976 SUCCESS); W044 issue #88 is the next hard-dependent commercial Work Item (dependencies WORK-051 and WORK-053, both accepted-merged and satisfied). This fresh authorization is issued against the post-W053-merge mainline; the implementation branch must be cut from the exact live authorization-bearing main re-read at activation time and must inherit this record byte-identically."
+dependencies:
+  - WORK-051
+  - WORK-053
+authority_inputs:
+  - "WORK-053 EconomicAllocation (accepted-merged by DEC-0063)"
+  - "WORK-052 UsageLedger (accepted-merged by DEC-0061)"
+  - "WORK-051 CommercialCore (accepted-merged by DEC-0059)"
+  - "WORK-033 AgentClock seam"
+authority_outputs:
+  - "the provider-neutral payment/settlement adapter boundary only: payment intent creation/retrieval through an abstract provider adapter, idempotent provider references correlated to ADCOS transactions, authorization/capture/refund/reversal status mapping, payout/transfer instruction emission from finalized allocations, provider callback/webhook ingestion with signature/anti-replay checks delegated to provider-specific adapters, provider failure normalization, provider-event reconciliation references, a deterministic sandbox provider, and explicit versioned provider capability declarations; never a custody, KYC/KYB, jurisdiction, usage, allocation, or connectivity authority"
+scope:
+  - "payment/"
+  - "tools/payment_selftest.py"
+  - "docs/WORK-044-evidence.md"
+  - ".github/workflows/spec-check.yml"
+acceptance_criteria:
+  - "Idempotent payment intent creation/retrieval, authorization/capture/refund/reversal status mapping, and payout/transfer instruction emission from finalized allocations work through an abstract provider adapter without importing provider-specific semantics into the canonical ledger."
+  - "Provider callbacks are external observations until reconciled against ADCOS state; callback replay/duplicate/out-of-order delivery is idempotent, append-only, and never mutates settled history."
+  - "Provider success never creates usage or connectivity-delivery facts and never bypasses billable-final requirements; corrections are compensating records."
+  - "Reconciliation identifies provider/ADCOS divergence deterministically without rewriting history."
+  - "Provider-specific capabilities are explicit and versioned; a deterministic sandbox provider proves the full intent/capture/refund/reversal/payout flows."
+  - "No regulated funds movement, custody, merchant-of-record, KYC/KYB, or jurisdiction policy is implemented: those remain external provider/jurisdiction responsibilities represented as capability/eligibility state."
+  - "Strict import/boundary discipline: payment adapters never import connectivity, session, identity, NetworkPath, routing, or transport authorities in forbidden directions."
+out_of_scope:
+  - "W045 and every later Work Item (eligibility/trust/jurisdiction, developer API/SDK, marketplace, sharing runtime, client runtime, capability matrix)"
+  - "implementation of any downstream Work Item"
+  - "payment custody or movement of regulated funds"
+  - "KYC/KYB onboarding"
+  - "jurisdiction policy"
+  - "marketplace discovery"
+  - "SDK/client/runtime surfaces"
+  - "live payment-account onboarding"
+  - "identity/session/routing/path/transport/federation/policy authority"
+  - "usage or allocation authority (payment callbacks are data, never usage or allocation truth)"
+  - "wire-schema or frozen architecture changes"
+  - "modifying spec/architect/ from the implementation PR (the implementation PR inherits this authorization byte-identically from the mainline carrying it)"
+acceptance_gate:
+  status: "Architect review required after implementation"
+  required_evidence:
+    - "dedicated deterministic payment battery proving idempotent intent, capture, refund, reversal, and payout flows through the sandbox provider"
+    - "negative cases proving provider success cannot create usage or bypass billable-final requirements, plus callback replay/duplicate/out-of-order idempotency"
+    - "exact reviewed delivery SHA, evidence manifest, scope audit, CI/provenance, replay and hash-seed determinism"
+handoff: docs/WORK-044-handoff.md
+handoff_required: true

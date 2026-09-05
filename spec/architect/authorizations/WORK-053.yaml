@@ -1,11 +1,13 @@
 # ADCOS Work Item authorization record — WORK-053 active implementation.
 # Issued by DEC-0061 after Architect acceptance of W052 PR #149.
 work_item: WORK-053
-status: active
-authorized: true
+status: superseded
+authorized: false
 type: implementation
 authorization_id: "WORK-053-CORE-001"
 authorization_decision: DEC-0061
+superseded_by: "WORK-044-CORE-001"
+supersession_decision: DEC-0063
 baseline_sha: bcaf0d0677437d1ffca8f5e493cab516c87e7194
 review_basis: "DEC-0061 accepts W052 on PR #149 exact reviewed head 7d883b227e9792b98efdbc1916d413491d20d458, merged as bcaf0d0677437d1ffca8f5e493cab516c87e7194; W053 issue #85 is the next hard-dependent commercial Work Item. This fresh authorization is issued against the post-W052-merge mainline."
 dependencies:

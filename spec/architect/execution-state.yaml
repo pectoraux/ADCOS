@@ -95,12 +95,12 @@
 # schema: spec/architect/ (execution state v1); verified by ARCH-02/ARCH-03.
 schema_version: 1
 package: "persistent-architect"
-last_updated: "2026-09-04"
+last_updated: "2026-09-05"
 
 repository:
   canonical: "github.com/pectoraux/ADCOS"
-  main_sha: bcaf0d0677437d1ffca8f5e493cab516c87e7194
-  main_sha_semantics: "Persistent governance snapshot: post-W052 acceptance mainline `bcaf0d0677437d1ffca8f5e493cab516c87e7194`, established by DEC-0061 / LEDGER-RECON-010. Governance PR #150 merged that transition as `246366a875d455cc6ba2605c8851a76825da1b9f`; this later governance-only merge is a continuation beyond the reconciled snapshot. The sole active authorization is WORK-053-CORE-001 with baseline `bcaf0d0677437d1ffca8f5e493cab516c87e7194`; a W053 implementation branch must re-read exact live main and inherit that authorization byte-identically."
+  main_sha: bb29c11c8bba6c9db5b87f85b1d62faad0bf7825
+  main_sha_semantics: "Persistent governance snapshot: post-W053 acceptance mainline `bb29c11c8bba6c9db5b87f85b1d62faad0bf7825` (PR #152 merged the WORK-053 EconomicAllocation implementation at exact reviewed head 4a0021c4d464bf1e0e9d9b29ff8a87ed8eb8146a, CI run 33931905976 SUCCESS), established by DEC-0063 / LEDGER-RECON-011. An initial attempt at this transition was accidentally written directly to main (0e0e321 creating a DEC-0063 record, removed by eddf98e; a placeholder 4c512ac removed by 08fa890; net tree byte-identical to bb29c11) and is superseded by the properly-routed DEC-0063 transition; those commits and the governance PR carrying this transition sit beyond the reconciled snapshot without changing persistent state (the standing governance-only branch-point offset). The sole active authorization is WORK-044-CORE-001 with baseline `bb29c11c8bba6c9db5b87f85b1d62faad0bf7825`; a W044 implementation branch must re-read exact live main and inherit that authorization byte-identically."
 
 versions:
   architecture_version_reference: "1.0"
@@ -110,12 +110,12 @@ versions:
 
 execution:
   mode: "implementing"
-  active_work_item: WORK-053
-  active_authorization: "WORK-053-CORE-001"
-  halted_reason: "Atomic transition DEC-0061: W052 is accepted-merged at exact reviewed head 7d883b227e9792b98efdbc1916d413491d20d458, merge bcaf0d0677437d1ffca8f5e493cab516c87e7194, CI 33926974221 SUCCESS; WORK-052-CORE-001 is superseded. The sole active execution slot transfers to W053 at the exact post-W052-merge mainline bcaf0d0677437d1ffca8f5e493cab516c87e7194. W053 is authorized only for its frozen EconomicAllocation scope and has not yet been implemented. W040 remains an independent physical validation track; W043 is retired; all other unaccepted commercial items remain unauthorized."
+  active_work_item: WORK-044
+  active_authorization: "WORK-044-CORE-001"
+  halted_reason: "Atomic transition DEC-0063: W053 is accepted-merged at exact reviewed head 4a0021c4d464bf1e0e9d9b29ff8a87ed8eb8146a (review round 1, zero correction rounds; the durable exact-SHA acceptance record is the PR #152 Architect acceptance comment 5549039574), merge bb29c11c8bba6c9db5b87f85b1d62faad0bf7825, CI 33931905976 SUCCESS; WORK-053-CORE-001 is superseded. The sole active execution slot transfers to W044 at the exact post-W053-merge mainline bb29c11c8bba6c9db5b87f85b1d62faad0bf7825. W044 is authorized only for its frozen Payment Provider Adapters & Settlement Gateway scope (payment/, tools/payment_selftest.py, docs/WORK-044-evidence.md, additive CI wiring) and has not yet been implemented; this transition includes NO W044 implementation. W040 remains an independent physical validation track (in-review, NOT accepted; EVID-007/EVID-008 OPEN and W040-owned); W043 is retired; W045+ and all other unaccepted commercial items remain unauthorized."
   next_required_decisions:
-    - "Review the WORK-053 implementation PR on the exact active authorization baseline and require the frozen EconomicAllocation contract, authority boundaries, deterministic battery, replay integrity, and exact conservation proofs."
-    - "After WORK-053 acceptance/merge, evaluate the next authorized Work Item in the frozen commercial DAG; W044 and W045 remain hard-gated by W053 and preceding dependencies."
+    - "Review the WORK-044 implementation PR on the exact active authorization baseline and require the frozen payment-adapter contract, authority boundaries, deterministic battery, callback replay/idempotency, reconciliation divergence handling, and provider-boundary import discipline."
+    - "After WORK-044 acceptance/merge, evaluate the next authorized Work Item in the frozen commercial DAG; W045 remains hard-gated on WORK-051, WORK-053, and WORK-044."
     - "Resume W040 only under a future evidence-continuation authorization when physical evidence is available; EVID-007/EVID-008 remain OPEN."
 
 in_review:
@@ -195,8 +195,8 @@ open_architectural_questions: []
 
 accepted_work_items:
   first: "WORK-001"
-  last: "WORK-052"
-  note: "WORK-001 through WORK-039 (chat-era migration), WORK-041 (DEC-0054, PR #107), WORK-042 (DEC-0057, PR #110), and WORK-051 (DEC-0059, PR #145 head e247b4e / merge 41b3380 — the conformance completion over the original PR #117 core implementation) are Architect-accepted and merged; WORK-040 remains in-review and is NOT accepted"
+  last: "WORK-053"
+  note: "WORK-001 through WORK-039 (chat-era migration), WORK-041 (DEC-0054, PR #107), WORK-042 (DEC-0057, PR #110), WORK-051 (DEC-0059, PR #145 head e247b4e / merge 41b3380 — the conformance completion over the original PR #117 core implementation), WORK-052 (DEC-0061, PR #149 head 7d883b2 / merge bcaf0d0), and WORK-053 (DEC-0063, PR #152 head 4a0021c / merge bb29c11) are Architect-accepted and merged; WORK-040 remains in-review and is NOT accepted"
 
 planned_work_items:
   - work_item: WORK-052
@@ -207,10 +207,10 @@ planned_work_items:
     prerequisite: "Satisfied (DEC-0059 atomic activation): WORK-051 CommercialCore accepted-merged (DEC-0059, PR #145 head e247b4e, merge 41b3380) so the consumed commercial interfaces are available; W041 NetworkPath accepted-merged (DEC-0054) where NetworkPath identities are referenced; W042 journal-first discipline accepted-merged (DEC-0057) where consumed; the WORK-033 clock seam established. W040 physical validation is advisory only (DEC-0051) and continues independently (in-review, NOT accepted; EVID-007/EVID-008 OPEN and W040-owned)."
   - work_item: WORK-044
     issue: 88
-    status: "ready-candidate"
+    status: "active-authorized (WORK-044-CORE-001, DEC-0063; sole active implementation authorization on the post-W053 acceptance mainline) — the provider-neutral payment/settlement adapter boundary per the issue #88 contract, the frozen spec/work-items.md WORK-044 declaration, and the Architect-issued handoff docs/WORK-044-handoff.md; dependencies WORK-051 and WORK-053 are both accepted-merged"
     contract: "issue #88"
-    authorization: "none"
-    prerequisite: "W051 CommercialCore and W053 EconomicAllocation accepted/merged where their interfaces are consumed (commercial-era W041/W042/W043 references in the issue body are superseded by the canonical model)"
+    authorization: "WORK-044-CORE-001"
+    prerequisite: "Satisfied (DEC-0063 atomic activation): W051 CommercialCore and W053 EconomicAllocation are both accepted-merged where their interfaces are consumed (commercial-era W041/W042/W043 references in the issue body are superseded by the canonical model). W040 physical validation is advisory only (DEC-0051) and continues independently (in-review, NOT accepted; EVID-007/EVID-008 OPEN and W040-owned)."
   - work_item: WORK-045
     issue: 89
     status: "ready-candidate"
@@ -261,7 +261,7 @@ planned_work_items:
     prerequisite: "W051 accepted/merged where its interfaces are consumed; W042 journal-first discipline where consumed"
   - work_item: WORK-053
     issue: 85
-    status: "active-authorized (WORK-053-CORE-001, DEC-0061; sole active implementation authorization on the post-W052 acceptance mainline)"
+    status: "accepted-merged (DEC-0063; PR #152 exact reviewed head 4a0021c, merge bb29c11; WORK-053-CORE-001 superseded) — SOFTWARE-class evidence only"
     contract: "issue #85"
-    authorization: "WORK-053-CORE-001"
+    authorization: "none"
     prerequisite: "W051/W052 accepted/merged where their interfaces are consumed"
