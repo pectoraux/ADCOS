@@ -86,7 +86,7 @@
 # semantic changes.
 
 schema_version: 1
-main_sha: bb29c11c8bba6c9db5b87f85b1d62faad0bf7825
+main_sha: 338af793923e1267ff3523de4310be273d75a2cd
 last_updated: "2026-09-05"
 work_items:
   - work_item: WORK-001
@@ -838,112 +838,111 @@ work_items:
   - work_item: WORK-044
     title: "Payment Provider Adapters & Settlement Gateway"
     phase: 10
-    branch: null
-    baseline_sha: null
-    pr: null
-    pr_head: null
-    reviewed_sha: null
-    merge_sha: null
-    merged_at: null
+    branch: "work-044-payment-adapters"
+    baseline_sha: 66f6c4f0ae2c5e4cd4498e6090f876acb1859e45
+    pr: 127
+    pr_head: 6720d220e390999e17707537ab587c1da3b09eb9
+    reviewed_sha: 6720d220e390999e17707537ab587c1da3b09eb9
+    merge_sha: 90864ac257a3d93d94852cfa3a74577903f508d3
+    merged_at: 2026-09-02T09:45:40Z
     ci_run: null
-    review_rounds: null
-    acceptance_decision: null
+    review_rounds: 1
+    acceptance_decision: DEC-0064
     correction_decisions: []
-    handoff: docs/WORK-044-handoff.md
-    handoff_required: true
-    lifecycle: registered
-    note: "Registered-only W044 (ACR-011 registration; definition source: tracking issue #88 and the canonical commercial dependency model; WORK-043 retired with its slot vacant) now has the sole active repository-local authorization WORK-044-CORE-001 under DEC-0063 at exact main baseline bb29c11c8bba6c9db5b87f85b1d62faad0bf7825 (the post-W053-merge mainline; dependencies WORK-051 and WORK-053 are both accepted-merged and satisfied by this transition). The Architect-issued handoff (docs/WORK-044-handoff.md) is a work order, NOT an implementation. No implementation has yet been delivered or accepted; the entry stays lifecycle registered with null delivery fields until a real delivery PR exists, and the W044 implementation branch must be cut from the exact live authorization-bearing main re-read at activation time. The historical W044-W050 downstream material is superseded lineage and is not reused."
-
+    handoff: null
+    handoff_required: false
+    lifecycle: accepted-merged
+    note: "delivery accepted by DEC-0064 on the exact reviewed head 6720d220e390999e17707537ab587c1da3b09eb9: the implementation branch work-044-payment-adapters is cut from the exact DEC-0063-reconciled authorized baseline 66f6c4f0 (the merge-base; the recorded PR base ref d7a7645 is one governance merge later because the DEC-0063 reconciliation PR #126 merged between branch-cut and PR-open). The delivery is 16 files, +12206/-0, exactly the WORK-044-CORE-001 scope list with zero spec/ files: the payment/ package (12 modules, 97 frozen exports), tools/payment_selftest.py (44-case deterministic battery), docs/WORK-044-evidence.md, and one additive CI step. The 44/44 battery passes in both the raw-branch and Architect-simulated merge-ref contexts with two-run and PYTHONHASHSEED determinism (golden digest stream f0c6258908cdd635b94a0f1344e567a26f044d2487d58c15af41ddd63d386ba2); the seven mandatory negative proofs pass (provider success never creates usage or bypasses BILLABLE_FINAL; callbacks never manufacture delivery evidence; payout never manufactures allocations; settled history immutable; vendor semantics never cross the boundary; import discipline); ARCH-08 provenance PASSES at the merge ref. PR #127 merged at 90864ac257a3d93d94852cfa3a74577903f508d3 (2026-09-02T09:45:40Z) after the Architect gate verification (issuecomment 5506329459); no successful CI run exists on the exact head or the merge commit (the recorded specification-consistency run stops at the already-known inherited spec/architect condition — the delivery adds zero new failures, verified byte-identical to the clean authorized baseline 66f6c4f0); W040 physical obligations remain independent and open. The acceptance transition supersedes WORK-044-CORE-001 and activates WORK-045-CORE-001 as the sole active implementation authorization; this ledger entry is the durable fact that makes WORK-045's hard dependency WORK-044 satisfied."
   - work_item: WORK-045
     title: "Connectivity Eligibility, Provider Trust & Jurisdiction Policy"
     phase: 10
-    branch: null
-    baseline_sha: null
-    pr: null
-    pr_head: null
-    reviewed_sha: null
-    merge_sha: null
-    merged_at: null
+    branch: "work-045-eligibility-policy"
+    baseline_sha: 90864ac257a3d93d94852cfa3a74577903f508d3
+    pr: 129
+    pr_head: 827234ec3a245a6b9f2f2de5d6525afb495684cc
+    reviewed_sha: 827234ec3a245a6b9f2f2de5d6525afb495684cc
+    merge_sha: a789d9b403d0e2a6e05276bb3cdc2b7d092c6d88
+    merged_at: 2026-09-02T13:53:09Z
     ci_run: null
-    review_rounds: null
-    acceptance_decision: null
+    review_rounds: 2
+    acceptance_decision: DEC-0065
     correction_decisions: []
     handoff: null
     handoff_required: false
-    lifecycle: registered
-    note: "registered-only entry added by ACR-011: WORK-045 is formally registered in the frozen registry (Phase 10, canonical commercial phase) with NO delivery yet. Definition source: tracking issue #89 and the canonical commercial dependency model. Dependencies (hard): WORK-051, WORK-053, WORK-044. Authorization: none — registration is representation only, never authorization; the item stays a ready-candidate until its own repository-local authorization issues."
+    lifecycle: accepted-merged
+    note: "delivery accepted by DEC-0065 on the exact reviewed correction-round head 827234ec3a245a6b9f2f2de5d6525afb495684cc: the implementation branch work-045-eligibility-policy is cut from the exact DEC-0064-issued authorized baseline 90864ac2 (the recorded baseline; the PR base ref 4540dea is one governance merge later because the DEC-0064 governance PR #128 merged between branch-cut and PR-open — the W044-established branch-point offset, governance-only and Architect-reviewed). Review round 1 (issuecomment 5510023240, 2026-09-02T13:07:39Z) returned two blocking defects on head 9894d83: command/event persistence was not atomic (a crash between the two writes strands the command as a permanent duplicate), and one conferment event incremented provider event_count twice. The correction round (issuecomment 5510517141) advanced the head to 827234ec: the journal was refactored to the accepted W044 atomic single-record shape (one durable record = one admitted command + its event + the action-owned identity digests; the command ledger entry is born with its real event id; journal construction is recovery; legacy stranded records fail closed), and with_conferment became the single owner of the conferment increment (register 1 -> conferment 2 -> renewal 3 -> suspension 4, replay-identical, mutation-verified). The round-2 Architect re-review (review 5090543215, 2026-09-02T13:52:55Z) rendered the verdict ACCEPTED on the exact head 827234ec only. The delivery is 19 files, +11246/-0, exactly the WORK-045-CORE-001 scope list with zero spec/ files: the eligibility/ package (16 modules, 61 frozen exports), tools/eligibility_selftest.py (46-case deterministic battery), docs/WORK-045-evidence.md, and one additive CI step. The 46/46 battery passes in the raw-branch, Architect-simulated merge-ref, and base-less clean-clone contexts with two-run and PYTHONHASHSEED determinism (correction-round golden digest stream 6c54627097a093fb032c29b8103b3b03bfc204b14a31973045fea35e85111192); the new failure-injection proofs cover the old command/event boundary, post-write restart/retry, and legacy stranded-record rejection (case 45), and the lifecycle-count discipline proof pins the single increment with restart replay (case 46); the payment-vs-connectivity authorization independence and KYC reference-only negative proofs pass. PR #129 merged at a789d9b403d0e2a6e05276bb3cdc2b7d092c6d88 (2026-09-02T13:53:09Z) after the round-2 re-review; no successful CI run exists on the exact head or the merge commit (the recorded specification-consistency runs 33637532465 and 33638489559 stop at the already-known inherited spec/architect condition — the delivery adds zero new failures, verified byte-identical to the clean main baseline); W040 physical obligations remain independent and open. The acceptance transition supersedes WORK-045-CORE-001 and activates WORK-046-CORE-001 as the sole active implementation authorization; this ledger entry is the durable fact that makes WORK-046's hard dependency WORK-045 satisfied."
   - work_item: WORK-046
     title: "Developer Connectivity API, SDK & Webhook Platform"
     phase: 10
-    branch: null
-    baseline_sha: null
-    pr: null
-    pr_head: null
-    reviewed_sha: null
-    merge_sha: null
-    merged_at: null
+    branch: "work-046-developer-api"
+    baseline_sha: 3db7500d7b79a8cd3e3a651e1461fbb320efd67e
+    pr: 132
+    pr_head: 09960ea24315e5d0ccfd516d3bdca0802b62d8b7
+    reviewed_sha: 09960ea24315e5d0ccfd516d3bdca0802b62d8b7
+    merge_sha: f45be6dd0544a2fd6cbc910805def28bbe0c71eb
+    merged_at: 2026-09-02T19:59:40Z
     ci_run: null
-    review_rounds: null
-    acceptance_decision: null
+    review_rounds: 5
+    acceptance_decision: DEC-0067
     correction_decisions: []
     handoff: null
     handoff_required: false
-    lifecycle: registered
-    note: "registered-only entry added by ACR-011: WORK-046 is formally registered in the frozen registry (Phase 10, canonical commercial phase) with NO delivery yet. Definition source: tracking issue #90 and the canonical commercial dependency model. Dependencies (hard): WORK-051, WORK-052, WORK-053, WORK-044, WORK-045. Authorization: none — registration is representation only, never authorization; the item stays a ready-candidate until its own repository-local authorization issues."
+    lifecycle: accepted-merged
+    note: "delivery accepted by DEC-0067 on exact reviewed head 09960ea24315e5d0ccfd516d3bdca0802b62d8b7 after five Architect review rounds; the final correction established durable webhook observation-admission state with frozen historical audience semantics, closing the P0/P1 admission, crash-recovery, and idempotent-replay defects. PR #132 merged at f45be6dd0544a2fd6cbc910805def28bbe0c71eb. W046 remains SOFTWARE-only; W040 physical obligations remain independent and open. The inherited ARCH-02/ARCH-06 mainline conditions are unchanged and remain separately disclosed. No architecture or protocol semantics changed."
   - work_item: WORK-047
     title: "Connectivity Marketplace Discovery, Proximity & Path Selection"
     phase: 10
-    branch: null
-    baseline_sha: null
-    pr: null
-    pr_head: null
-    reviewed_sha: null
-    merge_sha: null
-    merged_at: null
+    branch: "work-047-marketplace-discovery"
+    baseline_sha: 825f48f814926223665c1761beaba6cbdd2c2640
+    pr: 135
+    pr_head: 348154d063c0e0a12d5635cb2093c67a507a4064
+    reviewed_sha: 348154d063c0e0a12d5635cb2093c67a507a4064
+    merge_sha: 7bc31f2899307c56639887416d602b41b4c16f43
+    merged_at: 2026-09-03T02:51:10Z
     ci_run: null
-    review_rounds: null
-    acceptance_decision: null
+    review_rounds: 4
+    acceptance_decision: DEC-0070
     correction_decisions: []
     handoff: null
     handoff_required: false
-    lifecycle: registered
-    note: "registered-only entry added by ACR-011: WORK-047 is formally registered in the frozen registry (Phase 10, canonical commercial phase) with NO delivery yet. Definition source: tracking issue #91 and the canonical commercial dependency model. Dependencies (hard): WORK-051, WORK-044, WORK-045, WORK-046. Authorization: none — registration is representation only, never authorization; the item stays a ready-candidate until its own repository-local authorization issues."
+    lifecycle: accepted-merged
+    note: "delivery accepted by DEC-0070 on the exact reviewed correction-round head 348154d063c0e0a12d5635cb2093c67a507a4064 after four Architect review rounds: round 1 returned seven blockers at first delivery head fdd7691 (W051 PATH_ACTIVE gating on W041 ACTIVE proof, version-order-independent W044 paid-offer gating, fail-closed explicit distance constraints, enforced location precision, a k-anonymity claim beyond the implementation, and real proposal lifecycle advancement, plus ARCH-08 governance); round 2 returned two new blockers at ed6fae89 (fail-closed max_distance_m without a query-location anchor, and missing proximity evidence represented as distance 0) plus a stale PR-body claim; round 3 at 7d9b999 confirmed blockers 1-6 and 8-9 fixed but found the proximity-ordering contract stronger than the implementation, an internally stale evidence manifest (44 vs 46/46), and an Optional[int] public-type mismatch; the final correction head 348154d resolved those (proximity-absence ranked after evidence-backed candidates, manifest synchronized to 46 cases, proximity_bound_m Optional) and the final exact-SHA re-audit rendered the verdict ACCEPTED. The lifecycle recorded here is the full authorized -> implemented -> verified -> in-review -> accepted-merged chain, with the intermediate states preserved by this note rather than rewritten. The delivery is 14 files, +8572/-0, exactly the DEC-0069-corrected WORK-047-CORE-001 scope (the literal marketplace/ prefix) with zero spec/ files: the marketplace/ package (12 modules), tools/marketplace_selftest.py (46-case deterministic battery), docs/WORK-047-evidence.md, and one additive CI step. The 46/46 battery passes with byte-identical repeat output and PYTHONHASHSEED 0/1/7919/unset determinism. ARCH-08 provenance PASSES at the merge ref under the DEC-0069 literal marketplace/ scope. PR #135 merged at 7bc31f2899307c56639887416d602b41b4c16f43 (2026-09-03T02:51:10Z) after the final re-audit; no successful CI run exists on the exact head or the merge commit (the recorded specification-consistency runs stop at the already-known inherited ARCH-02/ARCH-06 spec/architect condition — the delivery adds zero new failures vs the clean authorized baseline; this is inherited mainline governance state, not a W047 regression, and is not represented as a green CI result). W047 evidence is SOFTWARE-only; W040 physical obligations EVID-007/EVID-008 remain independent, open, and W040-owned. The acceptance transition supersedes WORK-047-CORE-001 (DEC-0070; scope and provenance preserved) and releases the single active execution slot; this ledger entry is the durable fact that makes downstream WORK-049's hard dependency WORK-047 satisfied."
   - work_item: WORK-048
     title: "Provider Connectivity Sharing Runtime, Isolation & Quota Enforcement"
     phase: 10
-    branch: null
-    baseline_sha: null
-    pr: null
-    pr_head: null
-    reviewed_sha: null
-    merge_sha: null
-    merged_at: null
-    ci_run: null
-    review_rounds: null
-    acceptance_decision: null
+    branch: "work-048-provider-sharing-runtime"
+    baseline_sha: bd544dbce0aec345521d340f45ad4562567927cf
+    pr: 139
+    pr_head: e2af4bd20e403c1d4ee9717f7eea8809c16a53cd
+    reviewed_sha: e2af4bd20e403c1d4ee9717f7eea8809c16a53cd
+    merge_sha: ce1ccaea328743a05cf8d6fa87a114e69d9e253c
+    merged_at: 2026-09-03T10:30:47Z
+    ci_run: 33727464067
+    review_rounds: 3
+    acceptance_decision: DEC-0075
     correction_decisions: []
     handoff: null
     handoff_required: false
-    lifecycle: registered
-    note: "registered-only entry added by ACR-011: WORK-048 is formally registered in the frozen registry (Phase 10, canonical commercial phase) with NO delivery yet; the design-only exploration PR #97 (docs/WORK-048-provider-sharing-runtime-design.md) predates registration and is not a delivery. Definition source: tracking issue #92 and the canonical commercial dependency model. Hard dependencies (preserved exactly): WORK-041, WORK-042, WORK-051 (NetworkPath accepted/merged + usage/journal accepted/merged + CommercialCore Lease authority where consumed). WORK-050 is deliberately NOT a hard dependency: its capability/isolation matrix is advisory capability input, not a gate (the W050 -> W048 DAG edge is an advisory edge sanctioned by ACR-011). WORK-040 is advisory only (DEC-0051). Authorization: none — registration is representation only, never authorization; the item stays a ready-candidate until its own repository-local authorization issues."
+    lifecycle: accepted-merged
+    note: "delivery accepted by DEC-0075 on the exact reviewed correction-round head e2af4bd20e403c1d4ee9717f7eea8809c16a53cd after three Architect review rounds: round 1 (PR #139 comments 5521109245/5521136572, disposition CHANGES REQUIRED at first delivery head ba63371ca75ed18376ddac7eb1cdb67b6f819418) returned three material defects (P0-1 semantically weak containment proof validation, P0-2 quota accounting committed before containment admission, P1-3 restored active state reaching admission before fresh recovery/re-proof, plus the exact-head CI evidence requirement); round 2 (review 5098744662 at correction head fc856bb8adcb8ce594b784f53b8ea06fdf179421) found the remaining P0 (the stored primitive-proof digest was not independently content-derived from the preserved observation material, allowing a self-consistent forged proof from a tampered durable snapshot); the final exact-SHA re-audit at e2af4bd (canonical acceptance comment 5524305998, 2026-09-03T10:27:53Z) closed every finding and rendered the verdict ACCEPTED. The lifecycle recorded here is the full authorized -> implemented -> verified -> in-review -> accepted-merged chain, with the intermediate states preserved by this note rather than rewritten. The delivery is 20 files, +12565/-0, exactly the WORK-048-CORE-001 authorized literal scope (the sharing/ and containment/ packages, tools/sharing_selftest.py, docs/WORK-048-evidence.md, and the additive CI wiring) with zero spec/ files. The 46/46 battery passes with byte-identical repeat output, PYTHONHASHSEED 0/1/7919/unset determinism, and a golden digest stream byte-identical across both correction rounds. ARCH-08 provenance PASSES at the merge ref under the authorized scope. Exact-head CI: run 33727464067 is terminal on e2af4bd with the dedicated provider-sharing-runtime/containment battery job SUCCESS while the specification-consistency job keeps the inherited ARCH-02 failure visible and unmasked (inherited mainline governance state, not a W048 regression; the specification-consistency job is not represented as a green CI result). PR #139 merged at ce1ccaea328743a05cf8d6fa87a114e69d9e253c (2026-09-03T10:30:47Z) by pectoraux after the final re-audit. W048 evidence is SOFTWARE-only; the W048 physical containment evidence class remains OPEN and separately governed (no SOFTWARE PASS is upgraded to a PHYSICAL PASS); W040 physical obligations EVID-007/EVID-008 remain independent, open, and W040-owned. The acceptance transition supersedes WORK-048-CORE-001 (DEC-0075; scope and provenance preserved) and releases the single active execution slot; this ledger entry is the durable fact that makes downstream WORK-049's hard dependency WORK-048 satisfied."
   - work_item: WORK-049
     title: "Provider & Buyer Connectivity Client Runtime"
     phase: 10
-    branch: null
-    baseline_sha: null
-    pr: null
-    pr_head: null
-    reviewed_sha: null
-    merge_sha: null
-    merged_at: null
-    ci_run: null
-    review_rounds: null
-    acceptance_decision: null
+    branch: "work-049-provider-buyer-client-runtime"
+    baseline_sha: da56adcef48cd8449c383457949f709f8b5bc9cd
+    pr: 142
+    pr_head: b8cc17ef21f6c38266152552590dc73f80c056ce
+    reviewed_sha: b8cc17ef21f6c38266152552590dc73f80c056ce
+    merge_sha: 89ad6ff3d168c59256c3e805539eb9ca22f6b3bc
+    merged_at: 2026-09-03T17:16:12Z
+    ci_run: 33781878528
+    review_rounds: 3
+    acceptance_decision: DEC-0078
     correction_decisions: []
     handoff: null
     handoff_required: false
-    lifecycle: registered
-    note: "registered-only entry added by ACR-011: WORK-049 is formally registered in the frozen registry (Phase 10, canonical commercial phase) with NO delivery yet. Definition source: tracking issue #98 (the canonical definition; issue #95 is the superseded duplicate, left discoverable per LEDGER-RECON-005 §4.1) and the canonical commercial dependency model. Dependencies (hard): WORK-046, WORK-047, WORK-048. WORK-050 is deliberately NOT a hard dependency: advisory capability input, not a gate (the W050 -> W049 DAG edge is an advisory edge sanctioned by ACR-011). Authorization: none — registration is representation only, never authorization; the item stays a ready-candidate until its own repository-local authorization issues."
+    lifecycle: accepted-merged
+    note: "delivery accepted by DEC-0078 on the exact reviewed correction-round head b8cc17ef21f6c38266152552590dc73f80c056ce after three Architect review rounds: round 1 (PR #142 comment 5526803026, 2026-09-03T13:50:00Z, disposition CHANGES REQUIRED at first delivery head 72b830b519ff16aad71083eb7d1979f74469d5f1) returned two P0 and five P1 findings (P0-1 canonical-read binding fail-open, P0-2 ACTIVE cross-session projection unbound, P1-1 stale canonical-state overwrite in the projection cache, P1-2 caller-supplied economic terms, P1-3 restore without request-id re-derivation, P1-4 replayed local trust, P1-5 mutable audit anchor) plus the exact-head CI evidence requirement; correction cycle 1 delivered head a92c42f4ac8feca6d24664991f3f18de4491610c (correction record comment 5528841031, 2026-09-03T16:31:19Z); round 2 (the exact-SHA re-audit of a92c42f, recorded in comment 5529190381, 2026-09-03T16:59:47Z) confirmed all seven original findings closed and returned one new P1 (restored client-event integrity was not cryptographically revalidated: ClientEvent event_id was derived only when the supplied value was empty and ClientEventJournal.append() did not recompute it, so a forged restored event could alter the evidentiary record), which correction cycle 2 closed at the final head b8cc17e (WORK-049: enforce content-derived event-id integrity on restore; event_id equals SHA256 of the canonical event content enforced unconditionally at construction, independently re-derived at journal append, and validated atomically before journal load on restore; battery case 54). The final acceptance verdict is the Architect merge itself: PR #142 was merged by pectoraux at 89ad6ff3d168c59256c3e805539eb9ca22f6b3bc (2026-09-03T17:16:12Z) after the final exact-SHA re-audit of b8cc17e — GitHub prohibits formal self-approval (the formal-review API on PR #142 is empty) and no separate acceptance comment was posted, so DEC-0078 is the canonical acceptance record and the merge is the durable evidence. The lifecycle recorded here is the full authorized -> implemented -> verified -> in-review -> accepted-merged chain, with the intermediate states preserved by this note rather than rewritten. The delivery is 18 paths, exactly the WORK-049-CORE-001 authorized literal scope (the client/ package, tools/client_selftest.py, docs/WORK-049-evidence.md, docs/WORK-049-handoff.md, and the additive CI wiring) with zero spec/ files. The 54/54 battery (46 original cases, 7 round-1 adversarial vectors, and case 54) passes with byte-identical repeat output, PYTHONHASHSEED 0/1/7919 determinism, a fresh-clone CI-equivalent run, frozen surfaces and authority implementations byte-identical to the authorized baseline da56adc (the only spec/architect delta being the inherited governance-only DEC-0077 ancestry to the branch point df9d125), and a spec_check failure set identical to a92c42f and 72b830b (inherited ARCH-02..ARCH-06 mainline governance defects only, honestly unmasked). Exact-head CI: run 33781878528 is terminal on b8cc17e with the dedicated client-runtime battery job SUCCESS while the specification-consistency job keeps the inherited ARCH-02..ARCH-06 condition visible and unmasked and the provider-sharing-runtime battery job fails as the established cross-work authorized-scope condition (not a W049 regression; no green specification claim is made). W049 evidence is SOFTWARE-only; the W049 physical platform evidence class remains OPEN and separately governed (no SOFTWARE PASS is upgraded to a PHYSICAL PASS); W040 physical obligations EVID-007/EVID-008 remain independent, open, and W040-owned. The acceptance transition supersedes WORK-049-CORE-001 (DEC-0078; scope and provenance preserved) and releases the single active execution slot to WORK-050-CORE-001 (DEC-0078)."
   - work_item: WORK-050
     title: "Platform Connectivity Sharing Capability & Isolation Matrix"
     phase: 10
@@ -961,7 +960,25 @@ work_items:
     handoff: null
     handoff_required: false
     lifecycle: registered
-    note: "registered-only entry added by ACR-011: WORK-050 is formally registered in the frozen registry (Phase 10, canonical commercial phase) with NO delivery yet. Definition source: tracking issue #96 and the canonical commercial dependency model. Dependencies: none. Boundary (LEDGER-RECON-005 §4.2): a capability model consumed BY WORK-048/WORK-049 — NOT an implementation vehicle for WORK-048; the W050 -> W048/W049 edges are advisory capability-input edges, not hard gates. Authorization: none — registration is representation only, never authorization; the item stays a ready-candidate until its own repository-local authorization issues."
+    note: "registered-only entry added by ACR-011: WORK-050 is formally registered in the frozen registry (Phase 10, canonical commercial phase). Definition source: tracking issue #96 (the canonical definition) and the canonical commercial dependency model. Dependencies (hard): none — exactly the frozen spec/work-items.md declaration. Boundary (LEDGER-RECON-005 §4.2): a capability model consumed BY WORK-048/WORK-049 — NOT an implementation vehicle for WORK-048; the W050 -> W048/W049 edges are advisory capability-input edges, not hard gates (W050 never becomes a blocking dependency of W048/W049). WORK-040 is advisory only (DEC-0051). Activation: the repository-local implementation authorization WORK-050-CORE-001 is issued by DEC-0078 as the single active execution authorization after W049 acceptance (DEC-0078; PR #142 exact reviewed head b8cc17ef21f6c38266152552590dc73f80c056ce, merge 89ad6ff3d168c59256c3e805539eb9ca22f6b3bc, 2026-09-03T17:16:12Z — the Architect merge is the durable acceptance evidence and DEC-0078 is the canonical W049 acceptance record), with issuance baseline 89ad6ff3d168c59256c3e805539eb9ca22f6b3bc (the exact current main at issuance: the W049 acceptance merge mainline the governance transition is cut from; per the DEC-0063/DEC-0066/DEC-0068/DEC-0074/DEC-0077 convention, a follow-up baseline-advancement-only reconciliation may advance the baseline to the exact post-transition governance mainline once the governance PR merges — the W050 implementation branch is then cut from the mainline that carries the authorization record; exactly one implementation PR, no self-authorization, no self-merge); baseline advanced to deae34612181b9cd0feb4624d7e713adf2801d39 by the DEC-0079 baseline-advancement-only reconciliation (LEDGER-RECON-023) after PR #143 merged the activation transition at that exact mainline (2026-09-03T18:58:04Z) — the implementation branch is cut from this reconciled authorized mainline, only after the reconciliation merges and the Architect re-reads and confirms the resulting mainline; frozen scope the versioned platform capability registry, provider/buyer role capability declarations, sharing-mode capability classes, isolation primitive declarations, minimum security/isolation properties, metering capability declarations, lease-enforcement capability declarations, lifecycle/platform constraints, deterministic compatibility evaluation, explicit supported/restricted/unsupported/unknown states, versioned auditable historical decisions, deterministic software evidence, and authority/import/source-boundary audits; dependencies exactly none, per the frozen declaration. No new ACR is manufactured for W050: it is defined under the accepted ACR-009 planning (DEC-0050, PR #82) and remains a capability/isolation declaration boundary, not an enforcement authority — it declares capability as versioned advisory input consumed by W048/W049 and does not implement W048/W049 enforcement (the frozen contract is recorded in spec/architect/authorizations/WORK-050.yaml and docs/WORK-050-handoff.md). This registered-only entry stays descriptive only and records NO delivery for WORK-050: the lifecycle advances through a real delivery under the active authorization, and per PA-001/DEC-0045 an in-review entry is never authorization."
+  - work_item: WORK-050
+    title: "Platform Connectivity Sharing Capability & Isolation Matrix"
+    phase: 10
+    branch: null
+    baseline_sha: null
+    pr: null
+    pr_head: null
+    reviewed_sha: null
+    merge_sha: null
+    merged_at: null
+    ci_run: null
+    review_rounds: null
+    acceptance_decision: DEC-0083
+    correction_decisions: []
+    handoff: null
+    handoff_required: false
+    lifecycle: accepted-merged
+    note: "accepted by DEC-0083 from the historical WORK-050-CORE-001 package and exact W050.4 delivery head 815f4febbc64d55d3576386e65adaa6244c4f7cb; permanent 76/76 deterministic verification, provenance, authority/import, replay/restoration, and SOFTWARE/PHYSICAL boundary evidence were re-reviewed by the Architect. Original registration/activation provenance follows: WORK-050 is formally registered in the frozen registry (Phase 10, canonical commercial phase) with NO delivery yet. Definition source: tracking issue #96 and the canonical commercial dependency model. Dependencies: none. Boundary (LEDGER-RECON-005 §4.2): a capability model consumed BY WORK-048/WORK-049 — NOT an implementation vehicle for WORK-048; the W050 -> W048/W049 edges are advisory capability-input edges, not hard gates. Authorization: none — registration is representation only, never authorization; the item stays a ready-candidate until its own repository-local authorization issues."
   - work_item: WORK-051
     title: "CommercialCore: connectivity intent, offers, reservation, lease, and transaction lifecycle"
     phase: 10
@@ -1102,3 +1119,10 @@ reconciliations:
     to_main_sha: 39d40b752f9129ac898fb74da1e485c20c6fbdc6
     reason: "post-PR-#146 governance-mainline baseline reconciliation: main advanced from the LEDGER-RECON-008 snapshot baseline 41b3380 through the W052 handoff documentation-only merge 5eb198b (PR #118, the DEC-0059 branch point, no persistent-state change), the PR #146 review-correction commits (5910196 and 72b728a on the governance branch, plus the created-then-reverted W052 evidence-manifest pair d0857e3/cdf633b), and the PR #146 governance merge itself (39d40b752f9129ac898fb74da1e485c20c6fbdc6 on 2026-09-04T16:44:22Z, parents cdf633b and 72b728a) while the persistent state still referenced 41b3380. The intended baseline-advancement-only reconciliation was then mistakenly attempted directly on main (ten direct-to-main commits 1c6f4dd49a0d7c0f220e3665cd0754a10b170d2f..6b3d0fdcd8431cf49d8252b012bd1f9f65514703 creating an invalid DEC-0060 record whose type/decision enums failed ARCH-02; none of the four persistent files advanced) and was removed by the Architect cleanup commit 9561fe848572615991e678c6e410a98700a11024 (2026-09-04T17:52:24Z; tree byte-identical to the 39d40b7 post-transition state; the accidental commits remain in history as the transparent record of what happened and what was corrected). This reconciliation moves the snapshot baseline to 39d40b7 in lockstep with execution-state.yaml and the active WORK-052-CORE-001 authorization baseline so ARCH-03/ARCH-05 hold; DEC-0059, the W051 acceptance facts, and the WORK-052-CORE-001 scope/criteria/provenance are preserved exactly. The reconciliation is governance-only with zero W052 implementation: the W052 implementation PR remains gated on the Architect post-reconciliation live-state re-read and fresh activation packet."
     history: "No work-item history rewritten: every WORK-001..WORK-051 entry is byte-identical to the pre-reconciliation state (including the WORK-040 entry — in-review, acceptance_decision null, EVID-007/EVID-008 OPEN and W040-owned — and the registered-only WORK-044..WORK-050 and WORK-053 entries; their notes, branch fields, timestamps, and delivery fields are untouched); the WORK-052 entry note appends the DEC-0060/LEDGER-RECON-009 baseline advancement (issuance baseline 41b3380 preserved as provenance; the entry stays lifecycle registered with null delivery fields). No prior reconciliation record is rewritten. No frozen architecture document is modified and no registry file changes: spec/work-items.md, spec/dependency-graph.md, spec/architecture.md, spec/schemas/, spec/acr/, and tools/spec_check.py are byte-identical to the pre-reconciliation state. No implementation code changes: commercial/, platformcaps/, platform/, networkpath/, and all other implementation artifacts are byte-identical to the merged deliveries (governance-only PR; the accepted W050 and W051 batteries run unchanged). The only changes are the new decision record (DEC-0060), the WORK-052.yaml baseline advancement (baseline_sha, baseline_reconciliation_decision, and the baseline note; every other field unchanged), the WORK-052 ledger note append, this LEDGER-RECON-009 record, the snapshot baseline movement, the synchronized execution-state.yaml and current-state.md narrative updates, the decisions README registration, and the spec_check_selftest.py anchor re-pinning to the reconciled state (mutation semantics unchanged, per the DEC-0054/DEC-0055/DEC-0058/DEC-0059 transition precedent). The ten accidental direct-main commits and the cleanup commit 9561fe8 are neither rewritten nor fabricated away — the durable record of the mutation error and its correction is preserved in main history and documented by DEC-0060."
+  - reconciliation_id: LEDGER-RECON-024
+    recorded_by: DEC-0083
+    recorded_at: 2026-09-05T09:07:22Z
+    from_main_sha: 7fb47bb312708d06f3b3c1ba0496104362c7d135
+    to_main_sha: 338af793923e1267ff3523de4310be273d75a2cd
+    reason: "R1 lifecycle normalization: reconcile current W044-W049 registered-only projections to their exact repository-native accepted delivery facts (DEC-0064, DEC-0065, DEC-0067, DEC-0070, DEC-0075, DEC-0078), record W050 retrospective acceptance under DEC-0083, and advance the ledger snapshot to the exact canonical mainline."
+    history: "No historical Git commit or prior reconciliation is rewritten. W044-W049 lifecycle fields are normalized only to already-established accepted delivery facts recovered from durable repository lineage; W050 gains a discrete DEC-0083 acceptance record while retaining its original registration/activation provenance. WORK-001-W043 and WORK-051-W053 remain unchanged. No implementation, architecture, protocol, or physical-evidence state is changed by this reconciliation."
