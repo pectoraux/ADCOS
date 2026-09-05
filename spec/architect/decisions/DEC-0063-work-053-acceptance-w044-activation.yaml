@@ -1,0 +1,46 @@
+# ADCOS Architect decision record.
+# Atomic WORK-053 acceptance -> WORK-044 activation after the actual
+# WORK-053 delivery on current main. The stale DEC-0062 on the obsolete
+# governance branch is historical and is not current authority.
+# schema: spec/architect/decision-record-template.md; verified by tools/spec_check.py (ARCH-04).
+decision_id: DEC-0063
+type: governance
+work_item: WORK-053
+acr: null
+pr: 152
+reviewed_sha: 4a0021c4d464bf1e0e9d9b29ff8a87ed8eb8146a
+decision: ACCEPTED
+status: ACCEPTED
+reviewer: "Architect (pectoraux)"
+timestamp: 2026-09-05T03:27:11Z
+findings:
+  - "WORK-053 is accepted at exact reviewed head 4a0021c4d464bf1e0e9d9b29ff8a87ed8eb8146a; the Architect review found no P0/P1 contract or architectural defect."
+  - "The required EconomicAllocation battery, provenance, replay-integrity, deterministic arithmetic, conservation, immutable-policy, compensation, external-reference, and authority-boundary requirements were satisfied on the exact reviewed head."
+  - "CI run 33931905976 is SUCCESS on the exact reviewed head and includes the dedicated W053 battery and provenance checks."
+  - "PR #152 merged the exact reviewed head as bb29c11c8bba6c9db5b87f85b1d62faad0bf7825 with no implementation changes after Architect acceptance."
+  - "This acceptance is SOFTWARE-only. W040 remains independent, in-review, and unaccepted; EVID-007/EVID-008 remain OPEN and W040-owned."
+  - "The earlier DEC-0062 record was created on the superseded PR #124 lineage and is not used for the current transition."
+blockers: []
+required_corrections: []
+evidence:
+  merge_sha: bb29c11c8bba6c9db5b87f85b1d62faad0bf7825
+  ci_run: 33931905976
+  artifacts:
+    - "docs/WORK-053-evidence.md"
+    - "docs/WORK-053-handoff.md"
+accepted_scope:
+  - "WORK-053 EconomicAllocation as delivered on exact reviewed head 4a0021c4d464bf1e0e9d9b29ff8a87ed8eb8146a and merged as bb29c11c8bba6c9db5b87f85b1d62faad0bf7825."
+  - "The allocation model, validation, journal, lifecycle, digest, evidence boundary, immutable projection semantics, replay integrity, and deterministic battery evidenced by the delivery record."
+  - "SOFTWARE evidence classification only; no physical evidence is accepted or implied."
+rejected_scope:
+  - "Any modification to frozen architecture or protocol semantics."
+  - "Any acceptance or closure of W040 physical evidence obligations EVID-007/EVID-008."
+  - "Any WORK-044 implementation or payment-provider onboarding in this governance transition."
+  - "Any live-money custody or regulated funds movement."
+downstream_effect:
+  - "WORK-053-CORE-001 is superseded; its original authorization record remains durable provenance."
+  - "WORK-044-CORE-001 is created as the sole active implementation authorization from the post-W053-merge mainline."
+  - "The single active execution slot transfers from WORK-053 to WORK-044."
+  - "WORK-044 may implement only the provider-neutral payment/settlement adapter boundary defined by issue #88 and its repository-local authorization."
+  - "W040 remains independent, in-review, and unaccepted; its physical obligations remain OPEN and W040-owned."
+resolved_by: null
