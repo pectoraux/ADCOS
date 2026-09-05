@@ -1,0 +1,6 @@
+{"action": "baseline", "ts": "2026-08-29T04:47:06.938350+00:00", "app_phase": "foreground", "power_state": "charging", "network_kind": "none", "metered": false, "background_restricted": true}
+{"action": "home", "ts": "2026-08-29T04:47:10.667508+00:00", "app_phase": "foreground", "power_state": "charging", "network_kind": "none", "metered": false, "background_restricted": true}
+{"action": "power_toggle", "ts": "2026-08-29T04:47:13.297380+00:00", "app_phase": "foreground", "power_state": "charging", "network_kind": "none", "metered": false, "background_restricted": true}
+{"action": "power_toggle_back", "ts": "2026-08-29T04:47:15.899827+00:00", "app_phase": "foreground", "power_state": "charging", "network_kind": "none", "metered": false, "background_restricted": true}
+{"action": "wifi_disable", "ts": "2026-08-29T04:47:19.517845+00:00", "app_phase": "foreground", "power_state": "charging", "network_kind": "none", "metered": false, "background_restricted": true}
+{"action": "wifi_enable", "ts": "2026-08-29T04:47:23.139462+00:00", "app_phase": "foreground", "power_state": "charging", "network_kind": "none", "metered": false, "background_restricted": true}

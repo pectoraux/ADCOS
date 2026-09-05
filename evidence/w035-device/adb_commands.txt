@@ -1,0 +1,15 @@
+# Exact adb commands used during validation (main-synced authoritative run)
+
+adb version
+adb devices
+
+# Target physical device serial:
+adb -s 12922554B5023086 get-state
+adb -s 12922554B5023086 shell getprop ro.build.version.release
+adb -s 12922554B5023086 shell getprop ro.build.version.sdk
+adb -s 12922554B5023086 shell getprop ro.product.manufacturer
+adb -s 12922554B5023086 shell getprop ro.product.model
+
+# Notes:
+# - Deterministic battery run invoked: python3 tools/mobile_selftest.py
+# - No APK or device-side build available in repo to install or exercise on-device.

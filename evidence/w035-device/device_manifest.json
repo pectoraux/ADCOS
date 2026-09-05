@@ -1,0 +1,10 @@
+{
+  "captured_at": "2026-08-29T03:42:00Z",
+  "adb_target_serial": "12922554B5023086",
+  "adb_connection_state": "device",
+  "android_release": "14",
+  "android_sdk": "34",
+  "manufacturer": "TECNO",
+  "model": "TECNO KL4",
+  "notes": "Synchronized from main; deterministic battery passed (45/45). No Android APK present in repo to install on-device."
+}
