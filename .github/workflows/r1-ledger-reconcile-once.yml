@@ -14,8 +14,6 @@ jobs:
         with:
           fetch-depth: 0
       - name: Reconcile ledger
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           python3 - <<'PY'
           from pathlib import Path
@@ -23,12 +21,8 @@ jobs:
           live = Path('spec/architect/execution-ledger.yaml')
           text = live.read_text()
           accepted = subprocess.check_output([
-              'git','show','origin/refs/heads/governance/w050-baseline-reconciliation:spec/architect/execution-ledger.yaml'
+              'git','show','origin/governance/w050-baseline-reconciliation:spec/architect/execution-ledger.yaml'
           ], text=True)
-          def extract(src, start, end):
-              a = src.index(start)
-              b = src.index(end, a)
-              return src[a:b]
           cur_start = text.index('  - work_item: WORK-044\n')
           cur_end = text.index('reconciliations:\n', cur_start)
           accepted_start = accepted.index('  - work_item: WORK-044\n')
