@@ -1,0 +1,54 @@
+name: R1 ledger reconcile final
+on:
+  push:
+    branches:
+      - governance/r1-ledger-reconcile-final-20260905
+permissions:
+  contents: write
+jobs:
+  reconcile:
+    if: github.ref == 'refs/heads/governance/r1-ledger-reconcile-final-20260905'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Reconcile ledger atomically
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import subprocess, re
+          live = Path('spec/architect/execution-ledger.yaml')
+          current = live.read_text()
+          source = subprocess.check_output([
+              'git', 'show', 'origin/governance/w050-baseline-reconciliation:spec/architect/execution-ledger.yaml'
+          ], text=True)
+          cur_start = current.index('  - work_item: WORK-044\n')
+          cur_end = current.index('reconciliations:\n', cur_start)
+          src_start = source.index('  - work_item: WORK-044\n')
+          src_end = source.index('  - work_item: WORK-051\n', src_start)
+          accepted_044_049 = source[src_start:src_end]
+          w050_start = current.index('  - work_item: WORK-050\n', cur_start)
+          w051_start = current.index('  - work_item: WORK-051\n', w050_start)
+          w050 = current[w050_start:w051_start]
+          w050 = w050.replace('    lifecycle: registered\n', '    lifecycle: accepted-merged\n', 1)
+          w050 = w050.replace('    acceptance_decision: null\n', '    acceptance_decision: DEC-0083\n', 1)
+          w050 = w050.replace(
+              '    note: "registered-only entry added by ACR-011:',
+              '    note: "accepted by DEC-0083 from the historical WORK-050-CORE-001 package and exact W050.4 delivery head 815f4febbc64d55d3576386e65adaa6244c4f7cb; permanent 76/76 deterministic verification, provenance, authority/import, replay/restoration, and SOFTWARE/PHYSICAL boundary evidence were re-reviewed by the Architect. Original registration/activation provenance follows:',
+              1,
+          )
+          current_051_053 = current[w051_start:cur_end]
+          current = current[:cur_start] + accepted_044_049 + w050 + current_051_053 + current[cur_end:]
+          current = re.sub(r'(?m)^main_sha: .*$', 'main_sha: 338af793923e1267ff3523de4310be273d75a2cd', current, count=1)
+          recon = '''\n  - reconciliation_id: LEDGER-RECON-024\n    recorded_by: DEC-0083\n    recorded_at: 2026-09-05T09:07:22Z\n    from_main_sha: 7fb47bb312708d06f3b3c1ba0496104362c7d135\n    to_main_sha: 338af793923e1267ff3523de4310be273d75a2cd\n    reason: "R1 lifecycle normalization: reconcile current W044-W049 registered-only projections to their exact repository-native accepted delivery facts (DEC-0064, DEC-0065, DEC-0067, DEC-0070, DEC-0075, DEC-0078), record W050 retrospective acceptance under DEC-0083, and advance the ledger snapshot to the exact canonical mainline."\n    history: "No historical Git commit or prior reconciliation is rewritten. W044-W049 lifecycle fields are normalized only to already-established accepted delivery facts recovered from durable repository lineage; W050 gains a discrete DEC-0083 acceptance record while retaining its original registration/activation provenance. WORK-001-W043 and WORK-051-W053 remain unchanged. No implementation, architecture, protocol, or physical-evidence state is changed by this reconciliation."\n'''
+          if 'LEDGER-RECON-024' in current:
+              raise SystemExit('reconciliation already present')
+          live.write_text(current.rstrip() + recon)
+          PY
+          git config user.name 'pectoraux'
+          git config user.email 'ekontete@gmail.com'
+          git add spec/architect/execution-ledger.yaml
+          git rm -f .github/workflows/r1-ledger-reconcile-final.yml
+          git commit -m 'governance: reconcile R1 lifecycle ledger and W050 acceptance'
+          git push origin HEAD
